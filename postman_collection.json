@@ -1,0 +1,266 @@
+{
+  "info": {
+    "name": "Booking API - Quick Requests",
+    "_postman_id": "5d3f1b2a-0000-4000-8000-000000000001",
+    "description": "Sample requests for resources, products, pricing, calendars, and booking flow. Replace variables after creation.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "Create ResourceType",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"code\": \"SUNBED\",\n  \"name\": \"Sun Bed\",\n  \"defaultTimeModel\": \"DAY\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/resource-types",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","resource-types"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create LocationNode",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"parent\": null,\n  \"nodeType\": \"SITE\",\n  \"code\": \"BEACH_1\",\n  \"name\": \"Beach Area 1\",\n  \"sortOrder\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/location-nodes",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","location-nodes"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Resource",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"resourceType\": { \"id\": {{resourceTypeId}} },\n  \"kind\": \"EXACT\",\n  \"parentPool\": null,\n  \"location\": { \"id\": {{locationId}} },\n  \"code\": \"SUNBED_001\",\n  \"name\": \"Sunbed 1\",\n  \"status\": \"ACTIVE\",\n  \"unitCount\": 1,\n  \"poolTotalUnits\": null,\n  \"capAdults\": 1,\n  \"capChildren\": 0,\n  \"capInfants\": 0,\n  \"capTotal\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/resources",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","resources"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create BookingCalendar",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"locationNode\": { \"id\": {{locationId}} },\n  \"openTime\": \"09:00\",\n  \"closeTime\": \"19:00\",\n  \"gridMinutes\": 30,\n  \"minDurationMinutes\": 0,\n  \"maxDurationMinutes\": 0,\n  \"zone\": \"Europe/Zagreb\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/booking-calendars",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","booking-calendars"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pricing",
+      "item": [
+        {
+          "name": "Create Product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"name\": \"Deck Duo\",\n  \"resource\": { \"id\": {{resourceId}} },\n  \"defaultUom\": \"DAY\",\n  \"extraUoms\": [\"HOUR\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","products"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create PriceProfile",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"name\": \"Default EUR\",\n  \"currency\": \"EUR\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/price-profiles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","price-profiles"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create PriceProfileDate",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceProfile\": { \"id\": {{priceProfileId}} },\n  \"dateFrom\": \"2026-06-15\",\n  \"dateTo\": \"2026-09-01\",\n  \"description\": \"SEASON\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/price-profile-dates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","price-profile-dates"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create PriceListEntry",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": {{productId}},\n  \"uom\": \"DAY\",\n  \"price\": 75.00,\n  \"priceProfile\": { \"id\": {{priceProfileId}} },\n  \"priceProfileDate\": { \"id\": {{priceProfileDateId}} }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/price-list",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","price-list"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Booking",
+      "item": [
+        {
+          "name": "Get Availability",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/availability?tenantId={{tenantId}}&date={{availabilityDate}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","availability"],
+              "query": [
+                { "key": "tenantId", "value": "{{tenantId}}" },
+                { "key": "date", "value": "{{availabilityDate}}" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Book (Translate + Allocate)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"productId\": {{productId}},\n  \"resourceId\": {{resourceId}},\n  \"uom\": \"DAY\",\n  \"qty\": 1,\n  \"currency\": \"EUR\",\n  \"serviceDate\": \"2026-06-20\",\n  \"startTime\": null,\n  \"adults\": 2,\n  \"children\": 0,\n  \"infants\": 0,\n  \"customerName\": \"John Doe\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations/book",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","reservations","book"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Reservation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"productId\": null,\n  \"requestedResource\": { \"id\": {{resourceId}} },\n  \"startsAt\": \"2026-02-01T14:00:00Z\",\n  \"endsAt\": \"2026-02-01T18:00:00Z\",\n  \"status\": \"REQUESTED\",\n  \"adults\": 1,\n  \"children\": 0,\n  \"infants\": 0,\n  \"customerName\": \"John Doe\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/reservations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","reservations"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Allocation",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"productId\": {{productId}},\n  \"uom\": \"DAY\",\n  \"qty\": 1,\n  \"reservation\": { \"id\": {{reservationId}} },\n  \"requestedResource\": { \"id\": {{resourceId}} },\n  \"allocatedResource\": { \"id\": {{allocatedResourceId}} },\n  \"resourceKind\": \"EXACT\",\n  \"compositResource\": false,\n  \"compositResourceId\": null,\n  \"startsAt\": \"2026-02-01T14:00:00Z\",\n  \"endsAt\": \"2026-02-01T18:00:00Z\",\n  \"status\": \"CONFIRMED\",\n  \"bookedRange\": null\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/allocations",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","allocations"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "tenantId", "value": "1" },
+    { "key": "resourceTypeId", "value": "1" },
+    { "key": "locationId", "value": "10" },
+    { "key": "resourceId", "value": "100" },
+    { "key": "reservationId", "value": "200" },
+    { "key": "allocatedResourceId", "value": "101" },
+    { "key": "productId", "value": "300" },
+    { "key": "priceProfileId", "value": "400" },
+    { "key": "priceProfileDateId", "value": "500" },
+    { "key": "availabilityDate", "value": "2026-06-20" }
+  ]
+}

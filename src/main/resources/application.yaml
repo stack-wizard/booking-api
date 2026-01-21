@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: booking-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/booking_db
+    username: booking_user
+    password: booking_pass
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+logging:
+  level:
+    org.hibernate.SQL: debug
