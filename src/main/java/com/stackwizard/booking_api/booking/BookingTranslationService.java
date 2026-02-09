@@ -15,7 +15,7 @@ public class BookingTranslationService {
 
     public BookingTranslationService(ServiceCalendarService calendarService) { this.calendarService = calendarService; }
 
-    public TranslatedPeriod translate(BookingUom uom,
+    public TranslatedPeriod translate(String uom,
                                       int qty,
                                       Long tenantId,
                                       Long locationNodeId,
@@ -34,13 +34,14 @@ public class BookingTranslationService {
         LocalDateTime start;
         LocalDateTime end;
 
-        if (uom == BookingUom.DAY) {
+        String normalized = BookingUom.normalize(uom);
+        if ("DAY".equals(normalized)) {
             if (qty != 1) {
                 throw new IllegalArgumentException("DAY bookings must have qty = 1");
             }
             start = window.open();
             end = window.close();
-        } else if (uom == BookingUom.HOUR) {
+        } else if ("HOUR".equals(normalized)) {
             if (startTime == null) {
                 throw new IllegalArgumentException("startTime is required for HOUR bookings");
             }
@@ -63,6 +64,34 @@ public class BookingTranslationService {
 
         validateDuration(start, end, calendar);
 
+        return new TranslatedPeriod(start, end);
+    }
+
+    public TranslatedPeriod translateFixedWindow(LocalTime windowStart,
+                                                 LocalTime windowEnd,
+                                                 Long tenantId,
+                                                 Long locationNodeId,
+                                                 LocalDate serviceDate) {
+        if (serviceDate == null) {
+            throw new IllegalArgumentException("serviceDate is required");
+        }
+        if (windowStart == null || windowEnd == null || !windowEnd.isAfter(windowStart)) {
+            throw new IllegalArgumentException("Invalid uom window");
+        }
+
+        BookingCalendar calendar = calendarService.calendarFor(tenantId, locationNodeId);
+        ServiceCalendarService.ServiceWindow window = calendarService.windowFor(calendar, serviceDate);
+
+        LocalDateTime start = LocalDateTime.of(serviceDate, windowStart);
+        LocalDateTime end = LocalDateTime.of(serviceDate, windowEnd);
+
+        if (start.isBefore(window.open())) {
+            throw new IllegalArgumentException("uom window starts before service window");
+        }
+        if (end.isAfter(window.close())) {
+            throw new IllegalArgumentException("uom window ends after service window");
+        }
+        validateDuration(start, end, calendar);
         return new TranslatedPeriod(start, end);
     }
 

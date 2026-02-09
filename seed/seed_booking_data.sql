@@ -375,4 +375,17 @@ where map.tenant_id = 1
   and map.name = 'Beach Area 1 Map'
   and r.code in ('S25','S26','P3')
 on conflict (resource_map_id, resource_id) do nothing;
+
+-- app_user (super admin + regular admin)
+insert into app_user (tenant_id, username, password_hash, role)
+values
+  (null, 'superadmin', '$2a$10$NuxNEz3wT3/dFmnoay1Zwu3Ek27TR72.Og6D4uZPIH4M5rAd5lXE.', 'SUPER_ADMIN'),
+  (1, 'admin1', '$2a$10$tEIqW6jMHt/nglw5VP4RCugx3SSYYoawx4mAQoYJraY4KET3revXK', 'ADMIN')
+on conflict (username) do nothing;
+
+-- api_token (tenant 1)
+-- token: tenant1-nextjs-2026
+insert into api_token (tenant_id, name, token_hash, active)
+values (1, 'nextjs', 'fdd95bfcaac83c228ff1e29040b90794b3d67eee6e998b33377fe29abf3172c7', true)
+on conflict (token_hash) do nothing;
 ```

@@ -1,13 +1,12 @@
 package com.stackwizard.booking_api.booking;
 
-public enum BookingUom {
-    DAY,
-    HOUR;
+public final class BookingUom {
+    private BookingUom() {}
 
-    public static BookingUom from(String value) {
+    public static String normalize(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("uom is required");
         }
-        return BookingUom.valueOf(value.trim().toUpperCase());
+        return value.trim().toUpperCase();
     }
 }

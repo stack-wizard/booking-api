@@ -33,4 +33,21 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
     List<PriceListEntry> findForProductsOnDate(@Param("productIds") List<Long> productIds,
                                                @Param("tenantId") Long tenantId,
                                                @Param("date") LocalDate date);
+
+    @Query("""
+            select p
+            from PriceListEntry p
+            join p.priceProfile prof
+            join p.priceProfileDate pd
+            where p.productId = :productId
+              and upper(p.uom) = upper(:uom)
+              and upper(prof.currency) = upper(:currency)
+              and prof.tenantId = :tenantId
+              and :date between pd.dateFrom and pd.dateTo
+            """)
+    List<PriceListEntry> findForProductUomOnDate(@Param("productId") Long productId,
+                                                 @Param("uom") String uom,
+                                                 @Param("currency") String currency,
+                                                 @Param("tenantId") Long tenantId,
+                                                 @Param("date") LocalDate date);
 }

@@ -5,7 +5,75 @@
     "description": "Sample requests for resources, products, pricing, calendars, and booking flow. Replace variables after creation.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{jwt}}", "type": "string" }
+    ]
+  },
   "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","auth","login"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json && json.token) {",
+                  "  pm.collectionVariables.set(\"jwt\", json.token);",
+                  "}",
+                  "if (json && json.tokenType) {",
+                  "  pm.collectionVariables.set(\"tokenType\", json.tokenType);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Signup",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": 1,\n  \"username\": \"newstaff\",\n  \"password\": \"staff123\",\n  \"role\": \"STAFF\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/signup",
+              "host": ["{{baseUrl}}"],
+              "path": ["api","auth","signup"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
     {
       "name": "Setup",
       "item": [
@@ -261,6 +329,12 @@
     { "key": "productId", "value": "300" },
     { "key": "priceProfileId", "value": "400" },
     { "key": "priceProfileDateId", "value": "500" },
-    { "key": "availabilityDate", "value": "2026-06-20" }
+    { "key": "availabilityDate", "value": "2026-06-20" },
+    { "key": "jwt", "value": "" },
+    { "key": "tokenType", "value": "Bearer" },
+    { "key": "adminUsername", "value": "admin1" },
+    { "key": "adminPassword", "value": "admin123" },
+    { "key": "superadminUsername", "value": "superadmin" },
+    { "key": "superadminPassword", "value": "superadmin123" }
   ]
 }

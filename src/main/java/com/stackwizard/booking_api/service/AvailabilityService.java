@@ -14,6 +14,7 @@ import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.model.ResourceMapResource;
+import com.stackwizard.booking_api.model.Uom;
 import com.stackwizard.booking_api.repository.AllocationRepository;
 import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
@@ -21,6 +22,7 @@ import com.stackwizard.booking_api.repository.ResourceCompositionRepository;
 import com.stackwizard.booking_api.repository.ResourceMapRepository;
 import com.stackwizard.booking_api.repository.ResourceMapResourceRepository;
 import com.stackwizard.booking_api.repository.ResourceRepository;
+import com.stackwizard.booking_api.repository.UomRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,6 +46,7 @@ public class AvailabilityService {
     private final ResourceCompositionRepository compositionRepo;
     private final AllocationRepository allocationRepo;
     private final ProductRepository productRepo;
+    private final UomRepository uomRepo;
     private final PriceListEntryRepository priceListRepo;
     private final ServiceCalendarService calendarService;
     private final ResourceMapRepository mapRepo;
@@ -56,7 +59,8 @@ public class AvailabilityService {
                                PriceListEntryRepository priceListRepo,
                                ServiceCalendarService calendarService,
                                ResourceMapRepository mapRepo,
-                               ResourceMapResourceRepository mapResourceRepo) {
+                               ResourceMapResourceRepository mapResourceRepo,
+                               UomRepository uomRepo) {
         this.resourceRepo = resourceRepo;
         this.compositionRepo = compositionRepo;
         this.allocationRepo = allocationRepo;
@@ -65,6 +69,7 @@ public class AvailabilityService {
         this.calendarService = calendarService;
         this.mapRepo = mapRepo;
         this.mapResourceRepo = mapResourceRepo;
+        this.uomRepo = uomRepo;
     }
 
     @Transactional(readOnly = true)
@@ -105,9 +110,19 @@ public class AvailabilityService {
 
         Map<Long, List<Product>> productsByResourceId = new HashMap<>();
         List<Product> products = productRepo.findByTenantId(tenantId);
+        Map<Long, String> productNameById = new HashMap<>();
         for (Product product : products) {
             if (product.getResource() != null && product.getResource().getId() != null) {
                 productsByResourceId.computeIfAbsent(product.getResource().getId(), ignored -> new ArrayList<>()).add(product);
+            }
+            productNameById.put(product.getId(), product.getName());
+        }
+
+        Map<String, String> uomNameByCode = new HashMap<>();
+        List<Uom> uoms = uomRepo.findByActiveTrue();
+        for (Uom uom : uoms) {
+            if (uom.getCode() != null) {
+                uomNameByCode.put(uom.getCode().toUpperCase(), uom.getName());
             }
         }
 
@@ -161,7 +176,7 @@ public class AvailabilityService {
             List<Long> ids = entry.getValue().stream().map(Resource::getId).toList();
             if (!ids.isEmpty()) {
                 List<Allocation> allocations = allocationRepo
-                        .findByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan(ids, window.close(), window.open());
+                        .findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan(ids, window.close(), window.open());
                 for (Allocation allocation : allocations) {
                     allocationsByResourceId.computeIfAbsent(
                             allocation.getAllocatedResource().getId(),
@@ -227,7 +242,7 @@ public class AvailabilityService {
                     gridMinutesByResourceId.get(resource.getId())
             );
 
-            List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId);
+            List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId, productNameById, uomNameByCode);
 
             AvailabilityMapPositionDto mapPosition = null;
             ResourceMapResource mapResource = mapByResourceId.get(resource.getId());
@@ -288,7 +303,9 @@ public class AvailabilityService {
 
     private List<AvailabilityPriceDto> buildPrices(Resource resource,
                                                    Map<Long, List<Product>> productsByResourceId,
-                                                   Map<Long, List<PriceListEntry>> pricesByProductId) {
+                                                   Map<Long, List<PriceListEntry>> pricesByProductId,
+                                                   Map<Long, String> productNameById,
+                                                   Map<String, String> uomNameByCode) {
         List<Product> products;
         if (resource.getProduct() != null && resource.getProduct().getId() != null) {
             products = List.of(resource.getProduct());
@@ -305,7 +322,11 @@ public class AvailabilityService {
                 prices.add(AvailabilityPriceDto.builder()
                         .tenantId(product.getTenantId())
                         .productId(product.getId())
+                        .productName(productNameById.get(product.getId()))
                         .uom(entry.getUom())
+                        .uomName(entry.getUom() != null ? uomNameByCode.get(entry.getUom().toUpperCase()) : null)
+                        .startTime(entry.getStartTime())
+                        .endTime(entry.getEndTime())
                         .amount(entry.getPrice())
                         .currency(entry.getPriceProfile().getCurrency())
                         .priceProfileId(entry.getPriceProfile().getId())

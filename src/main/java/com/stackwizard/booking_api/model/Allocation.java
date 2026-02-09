@@ -62,6 +62,9 @@ public class Allocation {
     @Column(nullable = false)
     private String status;
 
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
+
     @Column(name = "booked_range", columnDefinition = "tsrange", insertable = false, updatable = false)
     private String bookedRange;
 

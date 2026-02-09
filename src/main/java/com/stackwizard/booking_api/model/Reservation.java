@@ -27,6 +27,14 @@ public class Reservation {
     private Long productId;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "request_id")
+    private ReservationRequest request;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "request_type", nullable = false)
+    private ReservationRequest.Type requestType;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "requested_resource_id", nullable = false)
     private Resource requestedResource;
 
@@ -51,6 +59,8 @@ public class Reservation {
     @Column(name = "customer_name")
     private String customerName;
 
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
 
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)

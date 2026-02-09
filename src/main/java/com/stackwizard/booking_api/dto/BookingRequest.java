@@ -10,6 +10,8 @@ public class BookingRequest {
     private Long tenantId;
     private Long productId;
     private Long resourceId;
+    private Long requestId;
+    private String requestType;
     private String uom;
     private Integer qty;
     private String currency;
