@@ -6,7 +6,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 WORKDIR /app
 COPY pom.xml mvnw mvnw.cmd ./
 COPY .mvn .mvn
-RUN ./mvnw -q -DskipTests dependency:go-offline
+RUN chmod +x mvnw && ./mvnw -q -DskipTests dependency:go-offline
 COPY src src
 RUN ./mvnw -q -DskipTests package
 
@@ -16,7 +16,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
 WORKDIR /app
 
-ARG SPRING_PROFILES_ACTIVE=dev
+ARG SPRING_PROFILES_ACTIVE=prod
 ENV SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE}
 
 ARG _JAVA_OPTIONS=""
