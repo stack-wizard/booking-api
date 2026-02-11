@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/booking_db
+    username: booking_user
+    password: booking_pass
+    driver-class-name: org.postgresql.Driver
+
+security:
+  jwt:
+    secret: "change_this_secret_key_please_32_chars_min"

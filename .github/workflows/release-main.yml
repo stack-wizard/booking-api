@@ -1,0 +1,75 @@
+name: release-main
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    strategy:
+      matrix:
+        os: [ ubuntu-22.04 ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: forotel-prod-booking-api
+        run: |
+          echo $(aws ssm get-parameter --name /configs/forotel-prod/booking-api/SPRING_APPLICATION_JSON | jq -r .Parameter.Value) > params.json
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Create change set on AWS stack
+        run: |
+          STACK_NAME=$(aws cloudformation describe-stacks | jq '.Stacks' | jq '.[] | select(.StackName|test("forotel-prod-BookingApiService"))' | jq -r '.StackName')
+
+          STACK_STATUS=$(aws cloudformation describe-stacks | jq '.Stacks' | jq '.[] | select(.StackName|test("forotel-prod-BookingApiService"))' | jq -r '.StackStatus')
+
+          if [ "${STACK_STATUS}" != "CREATE_COMPLETE" ] && [ "${STACK_STATUS}" != "UPDATE_ROLLBACK_COMPLETE" ] && [ "${STACK_STATUS}" != "UPDATE_COMPLETE" ]; then
+              echo "Stack is not ready for update, perhaps another changeset is executing"
+              exit 1
+          fi
+
+          aws cloudformation describe-stacks \
+          | jq '.Stacks' \
+          | jq '.[] | select(.StackName|test("forotel-prod-BookingApiService"))' \
+          | jq -r '.Parameters' \
+          | jq '[.[] | .["UsePreviousValue"] = true | del(.ParameterValue)]' \
+          | jq --arg GITHUB_SHA $GITHUB_SHA '[.[] | if .ParameterKey=="ImageTag" then .["ParameterValue"] = $GITHUB_SHA | del(.UsePreviousValue) else . end]' \
+          > parameters.json
+
+          CHANGE_SET_ARN=$(aws cloudformation create-change-set \
+          --stack-name ${STACK_NAME} \
+          --change-set-name booking-api-github-actions-${GITHUB_SHA} \
+          --template-url https://forotel-prod-cluster-stacks.s3.eu-central-1.amazonaws.com/services/booking-api-service.yaml \
+          --parameters $(jq -c . parameters.json) \
+          --capabilities CAPABILITY_NAMED_IAM \
+          | jq -r '.Id')
+
+          start=$EPOCHSECONDS
+          while [ "$(aws cloudformation describe-change-set --change-set-name ${CHANGE_SET_ARN} | jq -r .Status)" != "CREATE_COMPLETE" ]; do
+            sleep 1
+            if (( EPOCHSECONDS-start > 10 )); then
+              echo "Failed to create change set in designated timeout of 10 seconds"
+              exit 1
+            fi
+          done
+
+          aws cloudformation execute-change-set \
+          --change-set-name ${CHANGE_SET_ARN}

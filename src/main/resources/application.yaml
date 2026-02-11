@@ -1,11 +1,6 @@
 spring:
   application:
     name: booking-api
-  datasource:
-    url: jdbc:postgresql://localhost:5432/booking_db
-    username: booking_user
-    password: booking_pass
-    driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
@@ -26,8 +21,12 @@ logging:
   level:
     org.hibernate.SQL: debug
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
 security:
   jwt:
-    # Change this in production. Must be at least 32 chars for HS256.
-    secret: "change_this_secret_key_please_32_chars_min"
     expiration-seconds: 3600
