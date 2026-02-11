@@ -28,7 +28,7 @@ jobs:
       - name: Build, tag, and push image to Amazon ECR
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: forotel-prod-booking-api
+          ECR_REPOSITORY: forotel-prod-booking-api-service
         run: |
           echo $(aws ssm get-parameter --name /configs/forotel-prod/booking-api/SPRING_APPLICATION_JSON | jq -r .Parameter.Value) > params.json
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
