@@ -199,11 +199,12 @@ public class AvailabilityService {
             freeSlotsByResourceId.put(resource.getId(), freeSlots);
         }
 
-        Map<Long, List<Interval>> effectiveSlotsByResourceId = new HashMap<>();
+        Map<Long, List<Interval>> effectiveSlotsByResourceId = computeEffectiveSlots(
+                resources, freeSlotsByResourceId, membersByParent, parentsByMember);
         List<AvailabilityResourceDto> resourceDtos = new ArrayList<>();
         for (Resource resource : resources) {
             ServiceCalendarService.ServiceWindow window = windowByResourceId.get(resource.getId());
-            List<Interval> freeSlots = computeEffectiveSlots(resource, freeSlotsByResourceId, membersByParent, effectiveSlotsByResourceId);
+            List<Interval> freeSlots = effectiveSlotsByResourceId.getOrDefault(resource.getId(), List.of());
 
             String status = statusFromFreeSlots(window, freeSlots);
 
@@ -337,11 +338,6 @@ public class AvailabilityService {
         return prices;
     }
 
-    private boolean isComposition(Resource resource) {
-        return resource.getResourceType() != null
-                && "COMPOSITION".equalsIgnoreCase(resource.getResourceType().getCode());
-    }
-
     private List<Interval> computeFreeSlots(ServiceCalendarService.ServiceWindow window, List<Allocation> allocations) {
         if (window == null) {
             return List.of();
@@ -387,40 +383,73 @@ public class AvailabilityService {
         return free;
     }
 
-    private List<Interval> computeEffectiveSlots(Resource resource,
-                                                 Map<Long, List<Interval>> freeSlotsByResourceId,
-                                                 Map<Long, List<Resource>> membersByParent,
-                                                 Map<Long, List<Interval>> cache) {
-        if (cache.containsKey(resource.getId())) {
-            return cache.get(resource.getId());
-        }
-        List<Interval> baseSlots = freeSlotsByResourceId.getOrDefault(resource.getId(), List.of());
-        if (!isComposition(resource)) {
-            cache.put(resource.getId(), baseSlots);
-            return baseSlots;
+    private Map<Long, List<Interval>> computeEffectiveSlots(List<Resource> resources,
+                                                            Map<Long, List<Interval>> freeSlotsByResourceId,
+                                                            Map<Long, List<Resource>> membersByParent,
+                                                            Map<Long, List<Resource>> parentsByMember) {
+        Map<Long, List<Interval>> effective = new HashMap<>();
+        for (Resource resource : resources) {
+            effective.put(resource.getId(), freeSlotsByResourceId.getOrDefault(resource.getId(), List.of()));
         }
 
-        List<Resource> members = membersByParent.getOrDefault(resource.getId(), List.of());
-        if (members.isEmpty()) {
-            cache.put(resource.getId(), List.of());
-            return List.of();
-        }
+        boolean changed;
+        do {
+            changed = false;
+            for (Resource resource : resources) {
+                Long id = resource.getId();
+                List<Interval> current = effective.getOrDefault(id, List.of());
+                List<Interval> next = current;
 
-        List<Interval> intersection = null;
-        for (Resource member : members) {
-            List<Interval> memberSlots = computeEffectiveSlots(member, freeSlotsByResourceId, membersByParent, cache);
-            if (intersection == null) {
-                intersection = new ArrayList<>(memberSlots);
-            } else {
-                intersection = intersectIntervals(intersection, memberSlots);
+                List<Resource> members = membersByParent.getOrDefault(id, List.of());
+                if (!members.isEmpty()) {
+                    List<Interval> memberIntersection = null;
+                    for (Resource member : members) {
+                        List<Interval> memberSlots = effective.getOrDefault(member.getId(), List.of());
+                        if (memberIntersection == null) {
+                            memberIntersection = new ArrayList<>(memberSlots);
+                        } else {
+                            memberIntersection = intersectIntervals(memberIntersection, memberSlots);
+                        }
+                        if (memberIntersection.isEmpty()) {
+                            break;
+                        }
+                    }
+                    if (memberIntersection != null) {
+                        next = intersectIntervals(next, memberIntersection);
+                    }
+                }
+
+                List<Resource> parents = parentsByMember.getOrDefault(id, List.of());
+                if (!parents.isEmpty()) {
+                    List<Interval> parentUnion = new ArrayList<>();
+                    for (Resource parent : parents) {
+                        parentUnion = unionIntervals(parentUnion, effective.getOrDefault(parent.getId(), List.of()));
+                    }
+                    next = intersectIntervals(next, parentUnion);
+                }
+
+                if (!sameIntervals(current, next)) {
+                    effective.put(id, next);
+                    changed = true;
+                }
             }
-            if (intersection.isEmpty()) {
-                break;
+        } while (changed);
+
+        return effective;
+    }
+
+    private boolean sameIntervals(List<Interval> left, List<Interval> right) {
+        if (left.size() != right.size()) {
+            return false;
+        }
+        for (int i = 0; i < left.size(); i++) {
+            Interval a = left.get(i);
+            Interval b = right.get(i);
+            if (!Objects.equals(a.start, b.start) || !Objects.equals(a.end, b.end)) {
+                return false;
             }
         }
-        List<Interval> result = intersection == null ? List.of() : intersection;
-        cache.put(resource.getId(), result);
-        return result;
+        return true;
     }
 
     private List<Interval> intersectIntervals(List<Interval> left, List<Interval> right) {
@@ -444,6 +473,33 @@ public class AvailabilityService {
             }
         }
         return result;
+    }
+
+    private List<Interval> unionIntervals(List<Interval> left, List<Interval> right) {
+        if (left.isEmpty()) {
+            return new ArrayList<>(right);
+        }
+        if (right.isEmpty()) {
+            return new ArrayList<>(left);
+        }
+        List<Interval> all = new ArrayList<>(left.size() + right.size());
+        all.addAll(left);
+        all.addAll(right);
+        all.sort(Comparator.comparing(a -> a.start));
+
+        List<Interval> merged = new ArrayList<>();
+        Interval current = all.get(0);
+        for (int i = 1; i < all.size(); i++) {
+            Interval next = all.get(i);
+            if (!next.start.isAfter(current.end)) {
+                current = new Interval(current.start, max(current.end, next.end));
+            } else {
+                merged.add(current);
+                current = next;
+            }
+        }
+        merged.add(current);
+        return merged;
     }
 
     private String statusFromFreeSlots(ServiceCalendarService.ServiceWindow window, List<Interval> freeSlots) {

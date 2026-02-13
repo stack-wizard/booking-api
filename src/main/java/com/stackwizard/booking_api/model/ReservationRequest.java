@@ -40,6 +40,9 @@ public class ReservationRequest {
     @Column(name = "expires_at")
     private OffsetDateTime expiresAt;
 
+    @Column(name = "extension_count", nullable = false)
+    private Integer extensionCount;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 

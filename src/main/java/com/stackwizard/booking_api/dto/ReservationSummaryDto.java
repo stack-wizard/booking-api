@@ -12,6 +12,7 @@ public class ReservationSummaryDto {
     private Long id;
     private Long tenantId;
     private Long productId;
+    private String productName;
     private Long requestId;
     private String requestType;
     private Long requestedResourceId;

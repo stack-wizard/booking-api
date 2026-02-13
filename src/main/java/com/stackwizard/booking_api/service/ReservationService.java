@@ -29,6 +29,8 @@ import java.util.Optional;
 
 @Service
 public class ReservationService {
+    private static final int MAX_REQUEST_EXTENSIONS = 3;
+
     private final ReservationRepository repo;
     private final AllocationRepository allocationRepo;
     private final ResourceRepository resourceRepo;
@@ -82,12 +84,9 @@ public class ReservationService {
         if (r.getExpiresAt() == null) {
             OffsetDateTime expiresAt = null;
             if (r.getRequest() != null && r.getRequest().getId() != null) {
-                ReservationRequest request = requestRepo.findById(r.getRequest().getId())
-                        .orElseThrow(() -> new IllegalArgumentException("request.id not found"));
-                if (isExpired(request.getExpiresAt())) {
-                    throw new IllegalStateException("Reservation request expired");
-                }
+                ReservationRequest request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
                 expiresAt = request.getExpiresAt();
+                r.setRequest(request);
             }
             if (expiresAt == null) {
                 expiresAt = expiresAtForTenant(r.getTenantId());
@@ -288,15 +287,7 @@ public class ReservationService {
 
     private ReservationRequest resolveOrCreateRequest(BookingRequest request, Long tenantId) {
         if (request.getRequestId() != null) {
-            ReservationRequest existing = requestRepo.findById(request.getRequestId())
-                    .orElseThrow(() -> new IllegalArgumentException("requestId not found"));
-            if (!tenantId.equals(existing.getTenantId())) {
-                throw new IllegalArgumentException("requestId does not match tenant");
-            }
-            if (isExpired(existing.getExpiresAt())) {
-                throw new IllegalStateException("Reservation request expired");
-            }
-            return existing;
+            return resolveRequestForHold(request.getRequestId(), tenantId);
         }
         ReservationRequest.Type type = ReservationRequest.Type.EXTERNAL;
         if (request.getRequestType() != null && !request.getRequestType().isBlank()) {
@@ -307,6 +298,7 @@ public class ReservationService {
                 .type(type)
                 .status(ReservationRequest.Status.DRAFT)
                 .expiresAt(expiresAtForTenant(tenantId))
+                .extensionCount(0)
                 .build();
         return requestRepo.save(newRequest);
     }
@@ -368,6 +360,56 @@ public class ReservationService {
             }
             allocationRepo.saveAll(allocations);
         }
+    }
+
+    @Transactional
+    public ReservationRequest extendRequestTtl(Long requestId, Integer minutes) {
+        ReservationRequest request = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (request.getStatus() != ReservationRequest.Status.DRAFT) {
+            throw new IllegalStateException("Only DRAFT requests can be extended");
+        }
+        if (extensionCount(request) >= MAX_REQUEST_EXTENSIONS) {
+            throw new IllegalStateException("Reservation request can be extended at most 3 times");
+        }
+
+        int extensionMinutes = minutes != null ? minutes : tenantConfigService.holdTtlMinutes(request.getTenantId());
+        if (extensionMinutes <= 0) {
+            throw new IllegalArgumentException("minutes must be greater than 0");
+        }
+
+        OffsetDateTime now = OffsetDateTime.now();
+        OffsetDateTime base = request.getExpiresAt() != null && request.getExpiresAt().isAfter(now)
+                ? request.getExpiresAt()
+                : now;
+        OffsetDateTime newExpiresAt = base.plusMinutes(extensionMinutes);
+
+        request.setExpiresAt(newExpiresAt);
+        request.setExtensionCount(extensionCount(request) + 1);
+        ReservationRequest savedRequest = requestRepo.save(request);
+
+        List<Reservation> reservations = repo.findByRequestId(requestId);
+        for (Reservation reservation : reservations) {
+            if (!"CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                reservation.setExpiresAt(newExpiresAt);
+            }
+        }
+        repo.saveAll(reservations);
+
+        List<Long> reservationIds = reservations.stream().map(Reservation::getId).toList();
+        if (!reservationIds.isEmpty()) {
+            List<Allocation> allocations = allocationRepo.findByReservationIdIn(reservationIds);
+            for (Allocation allocation : allocations) {
+                Reservation reservation = allocation.getReservation();
+                if (reservation != null && "CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                    continue;
+                }
+                allocation.setExpiresAt(newExpiresAt);
+            }
+            allocationRepo.saveAll(allocations);
+        }
+
+        return savedRequest;
     }
 
     private Allocation buildAllocation(Reservation reservation,
@@ -459,6 +501,33 @@ public class ReservationService {
     private OffsetDateTime expiresAtForTenant(Long tenantId) {
         int minutes = tenantConfigService.holdTtlMinutes(tenantId);
         return OffsetDateTime.now().plusMinutes(minutes);
+    }
+
+    private ReservationRequest resolveRequestForHold(Long requestId, Long tenantId) {
+        ReservationRequest existing = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("requestId not found"));
+        if (!tenantId.equals(existing.getTenantId())) {
+            throw new IllegalArgumentException("requestId does not match tenant");
+        }
+        if (existing.getStatus() != ReservationRequest.Status.DRAFT) {
+            throw new IllegalStateException("Reservation request is not in DRAFT status");
+        }
+        if (isExpired(existing.getExpiresAt())) {
+            if (extensionCount(existing) >= MAX_REQUEST_EXTENSIONS) {
+                throw new IllegalStateException("Reservation request can be extended at most 3 times");
+            }
+            if (repo.existsByRequestId(existing.getId())) {
+                throw new IllegalStateException("Reservation request expired");
+            }
+            existing.setExpiresAt(expiresAtForTenant(tenantId));
+            existing.setExtensionCount(extensionCount(existing) + 1);
+            return requestRepo.save(existing);
+        }
+        return existing;
+    }
+
+    private int extensionCount(ReservationRequest request) {
+        return request.getExtensionCount() != null ? request.getExtensionCount() : 0;
     }
 
     private boolean isExpired(OffsetDateTime expiresAt) {
