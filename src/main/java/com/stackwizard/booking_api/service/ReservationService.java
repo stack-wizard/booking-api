@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +41,7 @@ public class ReservationService {
     private final BookingTranslationService translationService;
     private final ReservationRequestRepository requestRepo;
     private final TenantConfigService tenantConfigService;
+    private final InvoiceService invoiceService;
 
     public ReservationService(ReservationRepository repo,
                               AllocationRepository allocationRepo,
@@ -49,7 +51,8 @@ public class ReservationService {
                               ResourceCompositionRepository compositionRepo,
                               BookingTranslationService translationService,
                               ReservationRequestRepository requestRepo,
-                              TenantConfigService tenantConfigService) {
+                              TenantConfigService tenantConfigService,
+                              InvoiceService invoiceService) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
         this.resourceRepo = resourceRepo;
@@ -59,6 +62,7 @@ public class ReservationService {
         this.translationService = translationService;
         this.requestRepo = requestRepo;
         this.tenantConfigService = tenantConfigService;
+        this.invoiceService = invoiceService;
     }
 
     public List<Reservation> findAll() { return repo.findAll(); }
@@ -243,6 +247,10 @@ public class ReservationService {
         }
 
         ReservationRequest reservationRequest = resolveOrCreateRequest(request, tenantId);
+        PriceListEntry selectedPrice = priceEntries.get(0);
+        int resolvedQty = qty != null ? qty : 1;
+        BigDecimal unitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
+        BigDecimal grossAmount = unitPrice.multiply(BigDecimal.valueOf(resolvedQty));
 
         Reservation reservation = Reservation.builder()
                 .tenantId(tenantId)
@@ -258,6 +266,12 @@ public class ReservationService {
                 .children(request.getChildren() != null ? request.getChildren() : 0)
                 .infants(request.getInfants() != null ? request.getInfants() : 0)
                 .customerName(request.getCustomerName())
+                .customerEmail(request.getCustomerEmail())
+                .customerPhone(request.getCustomerPhone())
+                .currency(request.getCurrency())
+                .qty(resolvedQty)
+                .unitPrice(unitPrice)
+                .grossAmount(grossAmount)
                 .build();
 
         Reservation saved = repo.save(reservation);
@@ -287,7 +301,21 @@ public class ReservationService {
 
     private ReservationRequest resolveOrCreateRequest(BookingRequest request, Long tenantId) {
         if (request.getRequestId() != null) {
-            return resolveRequestForHold(request.getRequestId(), tenantId);
+            ReservationRequest existing = resolveRequestForHold(request.getRequestId(), tenantId);
+            boolean changed = false;
+            if (isBlank(existing.getCustomerName()) && !isBlank(request.getCustomerName())) {
+                existing.setCustomerName(request.getCustomerName());
+                changed = true;
+            }
+            if (isBlank(existing.getCustomerEmail()) && !isBlank(request.getCustomerEmail())) {
+                existing.setCustomerEmail(request.getCustomerEmail());
+                changed = true;
+            }
+            if (isBlank(existing.getCustomerPhone()) && !isBlank(request.getCustomerPhone())) {
+                existing.setCustomerPhone(request.getCustomerPhone());
+                changed = true;
+            }
+            return changed ? requestRepo.save(existing) : existing;
         }
         ReservationRequest.Type type = ReservationRequest.Type.EXTERNAL;
         if (request.getRequestType() != null && !request.getRequestType().isBlank()) {
@@ -298,6 +326,9 @@ public class ReservationService {
                 .type(type)
                 .status(ReservationRequest.Status.DRAFT)
                 .expiresAt(expiresAtForTenant(tenantId))
+                .customerName(request.getCustomerName())
+                .customerEmail(request.getCustomerEmail())
+                .customerPhone(request.getCustomerPhone())
                 .extensionCount(0)
                 .build();
         return requestRepo.save(newRequest);
@@ -360,6 +391,8 @@ public class ReservationService {
             }
             allocationRepo.saveAll(allocations);
         }
+
+        invoiceService.createDraftForFinalizedRequest(requestId);
     }
 
     @Transactional
@@ -532,5 +565,9 @@ public class ReservationService {
 
     private boolean isExpired(OffsetDateTime expiresAt) {
         return expiresAt != null && expiresAt.isBefore(OffsetDateTime.now());
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

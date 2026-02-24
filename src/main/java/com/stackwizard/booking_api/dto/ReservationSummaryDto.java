@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 
@@ -24,4 +25,10 @@ public class ReservationSummaryDto {
     private Integer children;
     private Integer infants;
     private String customerName;
+    private String customerEmail;
+    private String customerPhone;
+    private String currency;
+    private Integer qty;
+    private BigDecimal unitPrice;
+    private BigDecimal grossAmount;
 }

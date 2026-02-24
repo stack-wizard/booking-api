@@ -15,6 +15,9 @@ public class ReservationRequestDto {
     private String status;
     private OffsetDateTime createdAt;
     private OffsetDateTime expiresAt;
+    private String customerName;
+    private String customerEmail;
+    private String customerPhone;
     private Integer extensionCount;
     private List<ReservationSummaryDto> reservations;
 }

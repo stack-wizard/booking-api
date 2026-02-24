@@ -4,6 +4,7 @@ import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -15,6 +16,14 @@ public class ProductService {
 
     public List<Product> findAll() { return repo.findAll(); }
     public Optional<Product> findById(Long id) { return repo.findById(id); }
-    public Product save(Product product) { return repo.save(product); }
+    public Product save(Product product) {
+        if (product.getTax1Percent() == null) {
+            product.setTax1Percent(BigDecimal.ZERO);
+        }
+        if (product.getTax2Percent() == null) {
+            product.setTax2Percent(BigDecimal.ZERO);
+        }
+        return repo.save(product);
+    }
     public void deleteById(Long id) { repo.deleteById(id); }
 }

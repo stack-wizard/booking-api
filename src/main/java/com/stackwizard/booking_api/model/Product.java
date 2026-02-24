@@ -17,6 +17,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.Set;
@@ -50,6 +51,12 @@ public class Product {
     @CollectionTable(name = "product_extra_uom", joinColumns = @JoinColumn(name = "product_id"))
     @Column(name = "uom", nullable = false)
     private Set<String> extraUoms = new HashSet<>();
+
+    @Column(name = "tax1_percent", nullable = false)
+    private BigDecimal tax1Percent;
+
+    @Column(name = "tax2_percent", nullable = false)
+    private BigDecimal tax2Percent;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

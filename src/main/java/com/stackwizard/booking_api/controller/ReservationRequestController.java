@@ -117,6 +117,12 @@ public class ReservationRequestController {
                         .children(reservation.getChildren())
                         .infants(reservation.getInfants())
                         .customerName(reservation.getCustomerName())
+                        .customerEmail(reservation.getCustomerEmail())
+                        .customerPhone(reservation.getCustomerPhone())
+                        .currency(reservation.getCurrency())
+                        .qty(reservation.getQty())
+                        .unitPrice(reservation.getUnitPrice())
+                        .grossAmount(reservation.getGrossAmount())
                         .build())
                 .toList();
 
@@ -127,6 +133,9 @@ public class ReservationRequestController {
                 .status(request.getStatus() != null ? request.getStatus().name() : null)
                 .createdAt(request.getCreatedAt())
                 .expiresAt(request.getExpiresAt())
+                .customerName(request.getCustomerName())
+                .customerEmail(request.getCustomerEmail())
+                .customerPhone(request.getCustomerPhone())
                 .extensionCount(request.getExtensionCount())
                 .reservations(reservationDtos)
                 .build();

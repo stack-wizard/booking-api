@@ -23,4 +23,6 @@ public class BookingRequest {
     private Integer children;
     private Integer infants;
     private String customerName;
+    private String customerEmail;
+    private String customerPhone;
 }
