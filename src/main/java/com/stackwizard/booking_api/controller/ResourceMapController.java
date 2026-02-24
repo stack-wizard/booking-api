@@ -2,27 +2,26 @@ package com.stackwizard.booking_api.controller;
 
 import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.security.TenantResolver;
+import com.stackwizard.booking_api.service.MediaStorageService;
 import com.stackwizard.booking_api.service.ResourceMapService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/resource-maps")
 public class ResourceMapController {
-    private static final Path MAP_DIR = Paths.get("data", "maps");
-
     private final ResourceMapService service;
+    private final MediaStorageService mediaStorageService;
 
-    public ResourceMapController(ResourceMapService service) { this.service = service; }
+    public ResourceMapController(ResourceMapService service, MediaStorageService mediaStorageService) {
+        this.service = service;
+        this.mediaStorageService = mediaStorageService;
+    }
 
     @GetMapping
     public List<ResourceMap> all(@RequestParam(required = false) Long tenantId) {
@@ -58,19 +57,16 @@ public class ResourceMapController {
 
     @PostMapping(path = "/{id}/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ResourceMap> uploadImage(@PathVariable Long id,
-                                                   @RequestParam("file") MultipartFile file) throws IOException {
+                                                   @RequestParam("file") MultipartFile file) {
         ResourceMap map = service.findById(id).orElseThrow(() -> new IllegalArgumentException("Map not found"));
         if (file.isEmpty()) {
             throw new IllegalArgumentException("File is required");
         }
 
-        Files.createDirectories(MAP_DIR);
-        String ext = extensionOrDefault(file.getOriginalFilename(), "png");
-        String filename = "map-" + id + "." + ext;
-        Path target = MAP_DIR.resolve(filename);
-        Files.write(target, file.getBytes());
+        Long tenantId = TenantResolver.requireTenantId(map.getTenantId());
+        String imageUrl = mediaStorageService.uploadPublic("maps", tenantId, "map-" + id, file);
 
-        map.setImageUrl("/maps/" + filename);
+        map.setImageUrl(imageUrl);
         ResourceMap saved = service.save(map);
         return ResponseEntity.ok(saved);
     }
@@ -81,15 +77,4 @@ public class ResourceMapController {
         return ResponseEntity.noContent().build();
     }
 
-    private String extensionOrDefault(String name, String defaultExt) {
-        if (name == null) {
-            return defaultExt;
-        }
-        int idx = name.lastIndexOf('.');
-        if (idx < 0 || idx == name.length() - 1) {
-            return defaultExt;
-        }
-        String ext = name.substring(idx + 1).toLowerCase();
-        return ext.isBlank() ? defaultExt : ext;
-    }
 }

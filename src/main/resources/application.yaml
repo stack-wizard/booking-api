@@ -27,6 +27,17 @@ management:
       exposure:
         include: health,info
 
+media:
+  s3:
+    bucket: ${MEDIA_S3_BUCKET:booking-cms-media}
+    app-alias: ${MEDIA_S3_APP_ALIAS:booking-api}
+    public-prefix: ${MEDIA_S3_PUBLIC_PREFIX:public}
+    region: ${MEDIA_S3_REGION:eu-central-1}
+    endpoint: ${MEDIA_S3_ENDPOINT:}
+    access-key: ${MEDIA_S3_ACCESS_KEY:}
+    secret-key: ${MEDIA_S3_SECRET_KEY:}
+    path-style-access: ${MEDIA_S3_PATH_STYLE_ACCESS:false}
+
 security:
   jwt:
     expiration-seconds: 3600

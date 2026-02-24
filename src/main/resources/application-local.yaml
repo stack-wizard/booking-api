@@ -8,3 +8,12 @@ spring:
 security:
   jwt:
     secret: "change_this_secret_key_please_32_chars_min"
+
+media:
+  s3:
+    app-alias: ${MEDIA_S3_APP_ALIAS:booking-api}
+    endpoint: ${MEDIA_S3_ENDPOINT:http://localhost:9000}
+    access-key: ${MEDIA_S3_ACCESS_KEY:minioadmin}
+    secret-key: ${MEDIA_S3_SECRET_KEY:minioadmin}
+    path-style-access: ${MEDIA_S3_PATH_STYLE_ACCESS:true}
+    public-prefix: ${MEDIA_S3_PUBLIC_PREFIX:public}
