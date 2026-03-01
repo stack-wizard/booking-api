@@ -135,7 +135,7 @@ public class AvailabilityService {
             }
         }
 
-        List<ResourceMap> maps = mapRepo.findByTenantId(tenantId);
+        List<ResourceMap> maps = selectRootMapsForAvailability(tenantId, date, locationId);
         List<Long> mapIds = maps.stream().map(ResourceMap::getId).toList();
         Map<Long, ResourceMapResource> mapByResourceId = new HashMap<>();
         if (!mapIds.isEmpty()) {
@@ -300,6 +300,37 @@ public class AvailabilityService {
                 .maps(mapDtos)
                 .resources(resourceDtos)
                 .build();
+    }
+
+    private List<ResourceMap> selectRootMapsForAvailability(Long tenantId, LocalDate date, Long locationId) {
+        List<ResourceMap> tenantMaps = mapRepo.findByTenantId(tenantId);
+        List<ResourceMap> activeRoots = tenantMaps.stream()
+                .filter(map -> map.getParentMap() == null)
+                .filter(map -> locationId == null || (map.getLocationNode() != null && Objects.equals(locationId, map.getLocationNode().getId())))
+                .filter(map -> isMapActiveOnDate(map, date))
+                .toList();
+
+        if (activeRoots.isEmpty()) {
+            return List.of();
+        }
+
+        ResourceMap selected = activeRoots.stream()
+                .sorted(Comparator
+                        .comparing(ResourceMap::getValidFrom, Comparator.nullsLast(Comparator.naturalOrder())).reversed()
+                        .thenComparing(ResourceMap::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())).reversed())
+                .findFirst()
+                .orElse(null);
+        return selected != null ? List.of(selected) : List.of();
+    }
+
+    private boolean isMapActiveOnDate(ResourceMap map, LocalDate date) {
+        if (map.getValidFrom() != null && date.isBefore(map.getValidFrom())) {
+            return false;
+        }
+        if (map.getValidTo() != null && date.isAfter(map.getValidTo())) {
+            return false;
+        }
+        return true;
     }
 
     private List<AvailabilityPriceDto> buildPrices(Resource resource,

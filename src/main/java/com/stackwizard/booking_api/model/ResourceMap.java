@@ -15,6 +15,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "resource_map")
@@ -42,6 +43,16 @@ public class ResourceMap {
 
     @Column(name = "svg_overlay")
     private String svgOverlay;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_map_id")
+    private ResourceMap parentMap;
+
+    @Column(name = "valid_from")
+    private LocalDate validFrom;
+
+    @Column(name = "valid_to")
+    private LocalDate validTo;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
