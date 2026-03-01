@@ -1,11 +1,16 @@
 package com.stackwizard.booking_api.controller;
 
+import com.stackwizard.booking_api.dto.InvoicePaymentAllocationRequest;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceItem;
+import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.service.InvoiceService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -44,11 +49,31 @@ public class InvoiceController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @PostMapping("/{invoiceId}/allocations")
+    public ResponseEntity<InvoicePaymentAllocation> allocatePayment(@PathVariable Long invoiceId,
+                                                                    @RequestBody InvoicePaymentAllocationRequest request) {
+        if (request == null || request.getPaymentIntentId() == null) {
+            throw new IllegalArgumentException("paymentIntentId is required");
+        }
+        InvoicePaymentAllocation allocation = invoiceService.allocatePaymentToInvoice(
+                invoiceId, request.getPaymentIntentId(), request.getAmount());
+        return ResponseEntity.ok(allocation);
+    }
+
+    @DeleteMapping("/{invoiceId}/allocations/{paymentIntentId}")
+    public ResponseEntity<Void> removeAllocation(@PathVariable Long invoiceId,
+                                                 @PathVariable Long paymentIntentId) {
+        invoiceService.removePaymentAllocation(invoiceId, paymentIntentId);
+        return ResponseEntity.noContent().build();
+    }
+
     private ResponseEntity<Map<String, Object>> toResponse(Invoice invoice) {
         List<InvoiceItem> items = invoiceService.findItems(invoice.getId());
+        List<InvoicePaymentAllocation> allocations = invoiceService.findAllocations(invoice.getId());
         return ResponseEntity.ok(Map.of(
                 "invoice", invoice,
-                "items", items
+                "items", items,
+                "allocations", allocations
         ));
     }
 }

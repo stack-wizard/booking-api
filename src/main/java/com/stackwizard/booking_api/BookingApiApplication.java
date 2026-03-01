@@ -5,10 +5,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 import com.stackwizard.booking_api.config.MediaS3Properties;
+import com.stackwizard.booking_api.config.PaymentsProperties;
 import com.stackwizard.booking_api.security.JwtProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({JwtProperties.class, MediaS3Properties.class})
+@EnableConfigurationProperties({JwtProperties.class, MediaS3Properties.class, PaymentsProperties.class})
 public class BookingApiApplication {
 
 	public static void main(String[] args) {

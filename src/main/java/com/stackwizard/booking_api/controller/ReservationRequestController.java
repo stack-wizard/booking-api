@@ -8,6 +8,7 @@ import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantResolver;
+import com.stackwizard.booking_api.service.PaymentService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.TenantConfigService;
@@ -28,15 +29,18 @@ public class ReservationRequestController {
     private final ReservationService reservationService;
     private final TenantConfigService tenantConfigService;
     private final ProductRepository productRepository;
+    private final PaymentService paymentService;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
                                         TenantConfigService tenantConfigService,
-                                        ProductRepository productRepository) {
+                                        ProductRepository productRepository,
+                                        PaymentService paymentService) {
         this.service = service;
         this.reservationService = reservationService;
         this.tenantConfigService = tenantConfigService;
         this.productRepository = productRepository;
+        this.paymentService = paymentService;
     }
 
     @GetMapping
@@ -125,6 +129,8 @@ public class ReservationRequestController {
                         .grossAmount(reservation.getGrossAmount())
                         .build())
                 .toList();
+        PaymentService.RequestPaymentSummary paymentSummary =
+                paymentService.summarizeReservationRequest(request.getId(), request.getTenantId(), reservations);
 
         return ReservationRequestDto.builder()
                 .id(request.getId())
@@ -137,6 +143,11 @@ public class ReservationRequestController {
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
                 .extensionCount(request.getExtensionCount())
+                .paymentTotalAmount(paymentSummary.totalAmount())
+                .paymentDueNowAmount(paymentSummary.dueNowAmount())
+                .paymentPaidAmount(paymentSummary.paidAmount())
+                .paymentRemainingAmount(paymentSummary.remainingAmount())
+                .paymentStatus(paymentSummary.paymentStatus())
                 .reservations(reservationDtos)
                 .build();
     }
