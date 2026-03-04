@@ -41,3 +41,6 @@ media:
 security:
   jwt:
     expiration-seconds: 3600
+
+payments:
+  intent-expiry-scan-ms: ${PAYMENTS_INTENT_EXPIRY_SCAN_MS:60000}

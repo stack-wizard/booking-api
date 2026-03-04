@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stackwizard.booking_api.dto.PaymentInitiateRequest;
 import com.stackwizard.booking_api.dto.PaymentInitiateResponse;
 import com.stackwizard.booking_api.model.DepositPolicy;
@@ -17,6 +18,7 @@ import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderInitResult;
 import com.stackwizard.booking_api.service.payment.PaymentProviderWebhookResult;
 import com.stackwizard.booking_api.service.payment.MonriTenantConfigResolver;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -35,6 +37,25 @@ import java.util.stream.Collectors;
 
 @Service
 public class PaymentService {
+    private static final String STATUS_CREATED = "CREATED";
+    private static final String STATUS_PENDING_CUSTOMER = "PENDING_CUSTOMER";
+    private static final String STATUS_PROCESSING = "PROCESSING";
+    private static final String STATUS_PAID = "PAID";
+    private static final String STATUS_FAILED = "FAILED";
+    private static final String STATUS_CANCELED = "CANCELED";
+    private static final String STATUS_EXPIRED = "EXPIRED";
+    private static final String STATUS_SUPERSEDED = "SUPERSEDED";
+    private static final int DEFAULT_INTENT_TTL_MINUTES = 15;
+    private static final List<String> ACTIVE_INTENT_STATUSES = List.of(
+            STATUS_CREATED, STATUS_PENDING_CUSTOMER, STATUS_PROCESSING
+    );
+    private static final List<String> EXPIRABLE_INTENT_STATUSES = List.of(
+            STATUS_PENDING_CUSTOMER
+    );
+    private static final List<String> REUSABLE_INTENT_STATUSES = List.of(
+            STATUS_PENDING_CUSTOMER, STATUS_PROCESSING
+    );
+
     private final PaymentIntentRepository paymentIntentRepo;
     private final PaymentEventRepository paymentEventRepo;
     private final ReservationRequestRepository requestRepo;
@@ -44,6 +65,7 @@ public class PaymentService {
     private final InvoiceService invoiceService;
     private final MonriTenantConfigResolver monriTenantConfigResolver;
     private final Map<String, PaymentProviderClient> providerClients;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PaymentService(PaymentIntentRepository paymentIntentRepo,
                           PaymentEventRepository paymentEventRepo,
@@ -91,7 +113,7 @@ public class PaymentService {
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal dueNow = calculateDueNow(tenantId, reservations).setScale(2, RoundingMode.HALF_UP);
         BigDecimal paidAmount = paymentIntentRepo.findByReservationRequestId(reservationRequestId).stream()
-                .filter(i -> "PAID".equalsIgnoreCase(i.getStatus()))
+                .filter(i -> STATUS_PAID.equalsIgnoreCase(i.getStatus()))
                 .map(PaymentIntent::getAmount)
                 .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -137,25 +159,30 @@ public class PaymentService {
             throw new IllegalStateException("Computed due amount must be greater than zero");
         }
 
-        String idempotencyKey = "reservation-request:" + reservationRequestId + ":" + provider;
-        Optional<PaymentIntent> existing = paymentIntentRepo.findByIdempotencyKey(idempotencyKey)
-                .filter(intent -> "PENDING_CUSTOMER".equalsIgnoreCase(intent.getStatus())
-                        || "CREATED".equalsIgnoreCase(intent.getStatus()));
-        if (existing.isPresent()) {
-            PaymentIntent intent = existing.get();
-            return toInitiateResponse(intent);
+        OffsetDateTime now = OffsetDateTime.now();
+        List<PaymentIntent> activeIntents = expireStaleActiveIntents(reservationRequestId, now);
+        Optional<PaymentIntent> reusable = activeIntents.stream()
+                .filter(intent -> REUSABLE_INTENT_STATUSES.contains(normalizeIntentStatus(intent.getStatus())))
+                .filter(intent -> provider.equalsIgnoreCase(intent.getProvider()))
+                .filter(intent -> sameAmount(intent.getAmount(), dueNowAmount))
+                .filter(intent -> Objects.equals(intent.getCurrency(), currency))
+                .findFirst();
+        if (reusable.isPresent()) {
+            return toInitiateResponse(reusable.get());
         }
+        supersedeActiveIntents(activeIntents, now);
 
         PaymentIntent paymentIntent = PaymentIntent.builder()
                 .tenantId(reservationRequest.getTenantId())
                 .reservationRequestId(reservationRequestId)
                 .provider(provider)
                 .providerOrderNumber(buildProviderOrderNumber(reservationRequestId))
-                .idempotencyKey(idempotencyKey)
+                .idempotencyKey(buildIdempotencyKey(reservationRequestId, provider))
                 .currency(currency)
                 .amount(dueNowAmount)
-                .status("CREATED")
-                .updatedAt(OffsetDateTime.now())
+                .status(STATUS_CREATED)
+                .expiresAt(now.plusMinutes(DEFAULT_INTENT_TTL_MINUTES))
+                .updatedAt(now)
                 .build();
         paymentIntent = paymentIntentRepo.save(paymentIntent);
 
@@ -163,8 +190,9 @@ public class PaymentService {
         try {
             initResult = providerClient.initiate(paymentIntent, request == null ? new PaymentInitiateRequest() : request);
         } catch (Exception ex) {
-            paymentIntent.setStatus("FAILED");
+            paymentIntent.setStatus(STATUS_FAILED);
             paymentIntent.setErrorMessage(ex.getMessage());
+            paymentIntent.setCompletedAt(OffsetDateTime.now());
             paymentIntent.setUpdatedAt(OffsetDateTime.now());
             paymentIntentRepo.save(paymentIntent);
             throw ex;
@@ -172,7 +200,7 @@ public class PaymentService {
 
         paymentIntent.setProviderPaymentId(initResult.providerPaymentId());
         paymentIntent.setClientSecret(initResult.clientSecret());
-        paymentIntent.setStatus("PENDING_CUSTOMER");
+        paymentIntent.setStatus(STATUS_PENDING_CUSTOMER);
         paymentIntent.setUpdatedAt(OffsetDateTime.now());
         paymentIntentRepo.save(paymentIntent);
 
@@ -185,11 +213,12 @@ public class PaymentService {
     }
 
     @Transactional
-    public void processMonriWebhook(Long tenantId, JsonNode payload, String callbackToken) {
+    public void processMonriWebhook(Long tenantId, String payload, String callbackToken) {
         PaymentProviderClient providerClient = providerClients.get("MONRI");
         if (providerClient == null) {
             throw new IllegalStateException("Monri provider is not configured");
         }
+        JsonNode payloadNode = parsePayloadNode(payload);
         PaymentProviderWebhookResult webhook = providerClient.parseWebhook(payload);
 
         if (StringUtils.hasText(webhook.eventId())) {
@@ -215,7 +244,7 @@ public class PaymentService {
                 .provider("MONRI")
                 .eventType(StringUtils.hasText(webhook.eventType()) ? webhook.eventType() : "unknown")
                 .providerEventId(webhook.eventId())
-                .payload(payload.toString())
+                .payload(payloadNode)
                 .build());
 
         if (StringUtils.hasText(webhook.providerPaymentId()) && !StringUtils.hasText(paymentIntent.getProviderPaymentId())) {
@@ -223,27 +252,106 @@ public class PaymentService {
         }
 
         String normalized = normalizeProviderStatus(webhook.paymentStatus());
-        if ("PAID".equals(normalized)) {
-            if (!"PAID".equalsIgnoreCase(paymentIntent.getStatus())) {
-                paymentIntent.setStatus("PAID");
-                paymentIntent.setCompletedAt(OffsetDateTime.now());
-                paymentIntent.setUpdatedAt(OffsetDateTime.now());
+        String previousStatus = normalizeIntentStatus(paymentIntent.getStatus());
+        OffsetDateTime now = OffsetDateTime.now();
+        if (STATUS_PAID.equals(normalized)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_PAID);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
                 paymentIntentRepo.save(paymentIntent);
-                reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
-                invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+
+                // Payment for superseded/expired/canceled intents is stored, but finalized manually.
+                if (!STATUS_SUPERSEDED.equals(previousStatus)
+                        && !STATUS_EXPIRED.equals(previousStatus)
+                        && !STATUS_CANCELED.equals(previousStatus)) {
+                    reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
+                    invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+                }
             }
             return;
         }
-        if ("FAILED".equals(normalized)) {
-            paymentIntent.setStatus("FAILED");
-            paymentIntent.setUpdatedAt(OffsetDateTime.now());
-            paymentIntentRepo.save(paymentIntent);
+        if (STATUS_FAILED.equals(normalized)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_FAILED);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
+                paymentIntentRepo.save(paymentIntent);
+            }
+            return;
+        }
+        if (STATUS_CANCELED.equals(normalized)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_CANCELED);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
+                paymentIntentRepo.save(paymentIntent);
+            }
             return;
         }
 
-        paymentIntent.setStatus("PENDING_CUSTOMER");
-        paymentIntent.setUpdatedAt(OffsetDateTime.now());
-        paymentIntentRepo.save(paymentIntent);
+        if (!isTerminalStatus(previousStatus)) {
+            paymentIntent.setStatus(STATUS_PROCESSING);
+            paymentIntent.setUpdatedAt(now);
+            paymentIntentRepo.save(paymentIntent);
+        }
+    }
+
+    private JsonNode parsePayloadNode(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            throw new IllegalArgumentException("Webhook payload is empty");
+        }
+        try {
+            return objectMapper.readTree(payload);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Webhook payload is not valid JSON");
+        }
+    }
+
+    @Transactional
+    public PaymentIntent markIntentProcessing(Long paymentIntentId) {
+        PaymentIntent intent = paymentIntentRepo.findById(paymentIntentId)
+                .orElseThrow(() -> new IllegalArgumentException("Payment intent not found"));
+        String status = normalizeIntentStatus(intent.getStatus());
+        if (isTerminalStatus(status)) {
+            return intent;
+        }
+        if (!STATUS_PENDING_CUSTOMER.equals(status)) {
+            throw new IllegalStateException("Only PENDING_CUSTOMER intent can transition to PROCESSING");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        if (isExpired(intent, now)) {
+            intent.setStatus(STATUS_EXPIRED);
+            intent.setCompletedAt(now);
+            intent.setUpdatedAt(now);
+            if (!StringUtils.hasText(intent.getErrorMessage())) {
+                intent.setErrorMessage("Payment intent expired");
+            }
+            paymentIntentRepo.save(intent);
+            throw new IllegalStateException("Payment intent is expired");
+        }
+        intent.setStatus(STATUS_PROCESSING);
+        intent.setUpdatedAt(now);
+        return paymentIntentRepo.save(intent);
+    }
+
+    @Scheduled(fixedDelayString = "${payments.intent-expiry-scan-ms:60000}")
+    @Transactional
+    public void expireStalePaymentIntents() {
+        OffsetDateTime now = OffsetDateTime.now();
+        List<PaymentIntent> stale = paymentIntentRepo.findByStatusInAndExpiresAtBefore(EXPIRABLE_INTENT_STATUSES, now);
+        if (stale.isEmpty()) {
+            return;
+        }
+        for (PaymentIntent intent : stale) {
+            intent.setStatus(STATUS_EXPIRED);
+            intent.setCompletedAt(now);
+            intent.setUpdatedAt(now);
+            if (!StringUtils.hasText(intent.getErrorMessage())) {
+                intent.setErrorMessage("Payment intent expired");
+            }
+        }
+        paymentIntentRepo.saveAll(stale);
     }
 
     private Optional<PaymentIntent> resolveIntentForWebhook(PaymentProviderWebhookResult webhook) {
@@ -257,6 +365,74 @@ public class PaymentService {
             return paymentIntentRepo.findByProviderAndProviderPaymentId("MONRI", webhook.providerPaymentId());
         }
         return Optional.empty();
+    }
+
+    private List<PaymentIntent> expireStaleActiveIntents(Long reservationRequestId, OffsetDateTime now) {
+        List<PaymentIntent> active = paymentIntentRepo.findByReservationRequestIdAndStatusInOrderByCreatedAtDesc(
+                reservationRequestId,
+                ACTIVE_INTENT_STATUSES
+        );
+        boolean changed = false;
+        for (PaymentIntent intent : active) {
+            if (STATUS_PENDING_CUSTOMER.equals(normalizeIntentStatus(intent.getStatus())) && isExpired(intent, now)) {
+                intent.setStatus(STATUS_EXPIRED);
+                intent.setCompletedAt(now);
+                intent.setUpdatedAt(now);
+                if (!StringUtils.hasText(intent.getErrorMessage())) {
+                    intent.setErrorMessage("Payment intent expired");
+                }
+                changed = true;
+            }
+        }
+        if (changed) {
+            paymentIntentRepo.saveAll(active);
+        }
+        return active.stream()
+                .filter(intent -> ACTIVE_INTENT_STATUSES.contains(normalizeIntentStatus(intent.getStatus())))
+                .toList();
+    }
+
+    private void supersedeActiveIntents(List<PaymentIntent> activeIntents, OffsetDateTime now) {
+        if (activeIntents.isEmpty()) {
+            return;
+        }
+        for (PaymentIntent intent : activeIntents) {
+            intent.setStatus(STATUS_SUPERSEDED);
+            intent.setCompletedAt(now);
+            intent.setUpdatedAt(now);
+            if (!StringUtils.hasText(intent.getErrorMessage())) {
+                intent.setErrorMessage("Superseded by a newer payment intent");
+            }
+        }
+        paymentIntentRepo.saveAll(activeIntents);
+    }
+
+    private boolean isExpired(PaymentIntent intent, OffsetDateTime now) {
+        return intent.getExpiresAt() != null && !intent.getExpiresAt().isAfter(now);
+    }
+
+    private boolean sameAmount(BigDecimal left, BigDecimal right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.compareTo(right) == 0;
+    }
+
+    private String buildIdempotencyKey(Long reservationRequestId, String provider) {
+        return "reservation-request:" + reservationRequestId + ":" + provider + ":" + UUID.randomUUID();
+    }
+
+    private String normalizeIntentStatus(String status) {
+        return StringUtils.hasText(status) ? status.trim().toUpperCase(Locale.ROOT) : "";
+    }
+
+    private boolean isTerminalStatus(String status) {
+        String normalized = normalizeIntentStatus(status);
+        return STATUS_PAID.equals(normalized)
+                || STATUS_FAILED.equals(normalized)
+                || STATUS_CANCELED.equals(normalized)
+                || STATUS_EXPIRED.equals(normalized)
+                || STATUS_SUPERSEDED.equals(normalized);
     }
 
     private String normalizeProvider(String provider) {
@@ -375,10 +551,13 @@ public class PaymentService {
         }
         String normalized = status.trim().toUpperCase(Locale.ROOT);
         if (normalized.contains("APPROV") || normalized.contains("CAPTUR") || normalized.contains("SUCCESS")) {
-            return "PAID";
+            return STATUS_PAID;
         }
-        if (normalized.contains("DECLIN") || normalized.contains("FAIL") || normalized.contains("CANCEL") || normalized.contains("ERROR")) {
-            return "FAILED";
+        if (normalized.contains("CANCEL")) {
+            return STATUS_CANCELED;
+        }
+        if (normalized.contains("DECLIN") || normalized.contains("FAIL") || normalized.contains("ERROR")) {
+            return STATUS_FAILED;
         }
         return "PENDING";
     }
@@ -393,6 +572,7 @@ public class PaymentService {
                 .clientSecret(intent.getClientSecret())
                 .amount(intent.getAmount())
                 .currency(intent.getCurrency())
+                .expiresAt(intent.getExpiresAt())
                 .build();
     }
 

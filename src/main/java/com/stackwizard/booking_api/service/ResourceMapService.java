@@ -1,10 +1,14 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.ResourceMapPeriodDto;
+import com.stackwizard.booking_api.dto.ResourceMapPeriodsResponse;
 import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.repository.ResourceMapRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,6 +26,56 @@ public class ResourceMapService {
         return repo.save(map);
     }
     public void deleteById(Long id) { repo.deleteById(id); }
+
+    @Transactional(readOnly = true)
+    public ResourceMapPeriodsResponse getMapPeriods(Long tenantId, Long locationId, LocalDate fromDate) {
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenantId is required");
+        }
+        if (fromDate == null) {
+            throw new IllegalArgumentException("fromDate is required");
+        }
+
+        List<ResourceMap> rootMaps = repo.findByTenantId(tenantId).stream()
+                .filter(map -> map.getParentMap() == null)
+                .filter(map -> locationId == null || (map.getLocationNode() != null && locationId.equals(map.getLocationNode().getId())))
+                .filter(map -> map.getValidTo() == null || !map.getValidTo().isBefore(fromDate))
+                .sorted(Comparator
+                        .comparing((ResourceMap map) -> effectiveStart(map, fromDate))
+                        .thenComparing(ResourceMap::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+
+        List<ResourceMapPeriodDto> periods = rootMaps.stream()
+                .map(map -> ResourceMapPeriodDto.builder()
+                        .mapId(map.getId())
+                        .locationNodeId(map.getLocationNode() != null ? map.getLocationNode().getId() : null)
+                        .mapName(map.getName())
+                        .validFrom(map.getValidFrom())
+                        .validTo(map.getValidTo())
+                        .build())
+                .toList();
+
+        LocalDate firstDate = rootMaps.stream()
+                .map(map -> effectiveStart(map, fromDate))
+                .min(LocalDate::compareTo)
+                .orElse(null);
+
+        LocalDate lastDate = rootMaps.stream().anyMatch(map -> map.getValidTo() == null)
+                ? null
+                : rootMaps.stream()
+                .map(ResourceMap::getValidTo)
+                .max(LocalDate::compareTo)
+                .orElse(null);
+
+        return ResourceMapPeriodsResponse.builder()
+                .tenantId(tenantId)
+                .locationId(locationId)
+                .fromDate(fromDate)
+                .firstDate(firstDate)
+                .lastDate(lastDate)
+                .periods(periods)
+                .build();
+    }
 
     private void validate(ResourceMap map) {
         if (map.getTenantId() == null) {
@@ -55,5 +109,12 @@ public class ResourceMapService {
 
     private String toDateLiteral(LocalDate value) {
         return value != null ? value.toString() : null;
+    }
+
+    private LocalDate effectiveStart(ResourceMap map, LocalDate fromDate) {
+        if (map.getValidFrom() == null || map.getValidFrom().isBefore(fromDate)) {
+            return fromDate;
+        }
+        return map.getValidFrom();
     }
 }

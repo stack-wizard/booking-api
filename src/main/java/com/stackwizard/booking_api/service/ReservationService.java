@@ -27,6 +27,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class ReservationService {
@@ -42,6 +43,7 @@ public class ReservationService {
     private final ReservationRequestRepository requestRepo;
     private final TenantConfigService tenantConfigService;
     private final InvoiceService invoiceService;
+    private final ReservationRequestAccessTokenService accessTokenService;
 
     public ReservationService(ReservationRepository repo,
                               AllocationRepository allocationRepo,
@@ -52,7 +54,8 @@ public class ReservationService {
                               BookingTranslationService translationService,
                               ReservationRequestRepository requestRepo,
                               TenantConfigService tenantConfigService,
-                              InvoiceService invoiceService) {
+                              InvoiceService invoiceService,
+                              ReservationRequestAccessTokenService accessTokenService) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
         this.resourceRepo = resourceRepo;
@@ -63,6 +66,7 @@ public class ReservationService {
         this.requestRepo = requestRepo;
         this.tenantConfigService = tenantConfigService;
         this.invoiceService = invoiceService;
+        this.accessTokenService = accessTokenService;
     }
 
     public List<Reservation> findAll() { return repo.findAll(); }
@@ -362,14 +366,21 @@ public class ReservationService {
         if (isExpired(request.getExpiresAt())) {
             throw new IllegalStateException("Reservation request expired");
         }
+        List<Reservation> reservations = repo.findByRequestId(requestId);
+
         if (request.getStatus() == ReservationRequest.Status.FINALIZED) {
+            boolean changed = ensureConfirmationData(request);
+            if (changed) {
+                requestRepo.save(request);
+            }
+            accessTokenService.ensureActiveTokenForFinalizedRequest(request, reservations);
             return;
         }
         request.setStatus(ReservationRequest.Status.FINALIZED);
         request.setExpiresAt(null);
+        ensureConfirmationData(request);
         requestRepo.save(request);
 
-        List<Reservation> reservations = repo.findByRequestId(requestId);
         for (Reservation reservation : reservations) {
             if (!"CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
                 reservation.setStatus("CONFIRMED");
@@ -393,6 +404,7 @@ public class ReservationService {
         }
 
         invoiceService.createDraftForFinalizedRequest(requestId);
+        accessTokenService.ensureActiveTokenForFinalizedRequest(request, reservations);
     }
 
     @Transactional
@@ -569,5 +581,18 @@ public class ReservationService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    private boolean ensureConfirmationData(ReservationRequest request) {
+        boolean changed = false;
+        if (isBlank(request.getConfirmationCode())) {
+            request.setConfirmationCode(UUID.randomUUID().toString());
+            changed = true;
+        }
+        if (request.getConfirmedAt() == null) {
+            request.setConfirmedAt(OffsetDateTime.now());
+            changed = true;
+        }
+        return changed;
     }
 }

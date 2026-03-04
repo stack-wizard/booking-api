@@ -58,6 +58,9 @@ public class PaymentIntent {
     @Column(name = "error_message")
     private String errorMessage;
 
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
+
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
 

@@ -1,14 +1,11 @@
 package com.stackwizard.booking_api.model;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,31 +14,33 @@ import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "payment_event")
+@Table(name = "reservation_request_access_token")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PaymentEvent {
+public class ReservationRequestAccessToken {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "payment_intent_id")
-    private Long paymentIntentId;
+    @Column(name = "tenant_id", nullable = false)
+    private Long tenantId;
+
+    @Column(name = "reservation_request_id", nullable = false)
+    private Long reservationRequestId;
 
     @Column(nullable = false)
-    private String provider;
+    private String token;
 
-    @Column(name = "event_type", nullable = false)
-    private String eventType;
+    @Column(name = "expires_at", nullable = false)
+    private OffsetDateTime expiresAt;
 
-    @Column(name = "provider_event_id")
-    private String providerEventId;
+    @Column(name = "revoked_at")
+    private OffsetDateTime revokedAt;
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(nullable = false, columnDefinition = "jsonb")
-    private JsonNode payload;
+    @Column(name = "last_used_at")
+    private OffsetDateTime lastUsedAt;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

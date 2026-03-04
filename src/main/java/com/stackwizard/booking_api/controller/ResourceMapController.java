@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.controller;
 
+import com.stackwizard.booking_api.dto.ResourceMapPeriodsResponse;
 import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.MediaStorageService;
@@ -10,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -30,6 +32,15 @@ public class ResourceMapController {
         }
         Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
         return service.findByTenantId(resolvedTenantId);
+    }
+
+    @GetMapping("/periods")
+    public ResourceMapPeriodsResponse periods(@RequestParam Long tenantId,
+                                              @RequestParam(required = false) Long locationId,
+                                              @RequestParam(required = false) LocalDate fromDate) {
+        Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
+        LocalDate effectiveFromDate = fromDate != null ? fromDate : LocalDate.now();
+        return service.getMapPeriods(resolvedTenantId, locationId, effectiveFromDate);
     }
 
     @GetMapping("/{id}")

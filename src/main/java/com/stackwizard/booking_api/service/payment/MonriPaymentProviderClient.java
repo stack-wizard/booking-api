@@ -54,12 +54,13 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
     }
 
     @Override
-    public PaymentProviderWebhookResult parseWebhook(JsonNode payload) {
-        String eventId = firstText(payload, "event_id", "id");
-        String eventType = firstText(payload, "event_type", "type", "status");
-        String providerPaymentId = firstText(payload, "id", "payment_id", "transaction_uuid");
-        String orderNumber = firstText(payload, "order_number", "order_info.order_number");
-        String status = firstText(payload, "status", "payment_status", "transaction_status");
+    public PaymentProviderWebhookResult parseWebhook(String payload) {
+        JsonNode json = parseJson(payload, "Monri webhook");
+        String eventId = firstText(json, "event_id", "id");
+        String eventType = firstText(json, "event_type", "type", "status");
+        String providerPaymentId = firstText(json, "id", "payment_id", "transaction_uuid");
+        String orderNumber = firstText(json, "order_number", "order_info.order_number");
+        String status = firstText(json, "status", "payment_status", "transaction_status");
         return new PaymentProviderWebhookResult(eventId, eventType, orderNumber, providerPaymentId, status);
     }
 

@@ -1,14 +1,11 @@
 package com.stackwizard.booking_api.controller;
 
+import com.stackwizard.booking_api.dto.ReservationRequestCustomerPatchRequest;
 import com.stackwizard.booking_api.dto.ReservationRequestDto;
-import com.stackwizard.booking_api.dto.ReservationSummaryDto;
 import com.stackwizard.booking_api.dto.ReservationTtlExtendRequest;
-import com.stackwizard.booking_api.model.Product;
-import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
-import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantResolver;
-import com.stackwizard.booking_api.service.PaymentService;
+import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.TenantConfigService;
@@ -18,9 +15,6 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/reservation-requests")
@@ -28,19 +22,16 @@ public class ReservationRequestController {
     private final ReservationRequestService service;
     private final ReservationService reservationService;
     private final TenantConfigService tenantConfigService;
-    private final ProductRepository productRepository;
-    private final PaymentService paymentService;
+    private final ReservationRequestDtoMapper dtoMapper;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
                                         TenantConfigService tenantConfigService,
-                                        ProductRepository productRepository,
-                                        PaymentService paymentService) {
+                                        ReservationRequestDtoMapper dtoMapper) {
         this.service = service;
         this.reservationService = reservationService;
         this.tenantConfigService = tenantConfigService;
-        this.productRepository = productRepository;
-        this.paymentService = paymentService;
+        this.dtoMapper = dtoMapper;
     }
 
     @GetMapping
@@ -49,7 +40,7 @@ public class ReservationRequestController {
     @GetMapping("/{id}")
     public ResponseEntity<ReservationRequestDto> get(@PathVariable Long id) {
         return service.findById(id)
-                .map(request -> ResponseEntity.ok(toDto(request, reservationService.findByRequestId(id))))
+                .map(request -> ResponseEntity.ok(dtoMapper.toDto(request)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
@@ -79,7 +70,7 @@ public class ReservationRequestController {
                                                                @RequestBody(required = false) ReservationTtlExtendRequest body) {
         Integer minutes = body != null ? body.getMinutes() : null;
         ReservationRequest updated = reservationService.extendRequestTtl(id, minutes);
-        return ResponseEntity.ok(toDto(updated, reservationService.findByRequestId(id)));
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
     }
 
     @PostMapping("/{id}/finalize")
@@ -88,67 +79,27 @@ public class ReservationRequestController {
         return ResponseEntity.noContent().build();
     }
 
+    @PatchMapping("/{id}/customer")
+    public ResponseEntity<ReservationRequestDto> patchCustomer(@PathVariable Long id,
+                                                               @RequestBody ReservationRequestCustomerPatchRequest request) {
+        ReservationRequest updated = service.updateCustomerData(
+                id,
+                request != null ? request.getCustomerName() : null,
+                request != null ? request.getCustomerEmail() : null,
+                request != null ? request.getCustomerPhone() : null
+        );
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
+    @PostMapping("/{id}/cancel-payment")
+    public ResponseEntity<ReservationRequestDto> cancelPayment(@PathVariable Long id) {
+        ReservationRequest updated = service.cancelPaymentForRequest(id);
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         service.deleteDraftRequest(id);
         return ResponseEntity.noContent().build();
-    }
-
-    private ReservationRequestDto toDto(ReservationRequest request, List<Reservation> reservations) {
-        Map<Long, String> productNames = productRepository.findAllById(
-                        reservations.stream()
-                                .map(Reservation::getProductId)
-                                .filter(Objects::nonNull)
-                                .distinct()
-                                .toList())
-                .stream()
-                .collect(Collectors.toMap(Product::getId, Product::getName));
-
-        List<ReservationSummaryDto> reservationDtos = reservations.stream()
-                .map(reservation -> ReservationSummaryDto.builder()
-                        .id(reservation.getId())
-                        .tenantId(reservation.getTenantId())
-                        .productId(reservation.getProductId())
-                        .productName(productNames.get(reservation.getProductId()))
-                        .requestId(reservation.getRequest() != null ? reservation.getRequest().getId() : null)
-                        .requestType(reservation.getRequestType() != null ? reservation.getRequestType().name() : null)
-                        .requestedResourceId(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getId() : null)
-                        .startsAt(reservation.getStartsAt())
-                        .endsAt(reservation.getEndsAt())
-                        .status(reservation.getStatus())
-                        .expiresAt(reservation.getExpiresAt())
-                        .adults(reservation.getAdults())
-                        .children(reservation.getChildren())
-                        .infants(reservation.getInfants())
-                        .customerName(reservation.getCustomerName())
-                        .customerEmail(reservation.getCustomerEmail())
-                        .customerPhone(reservation.getCustomerPhone())
-                        .currency(reservation.getCurrency())
-                        .qty(reservation.getQty())
-                        .unitPrice(reservation.getUnitPrice())
-                        .grossAmount(reservation.getGrossAmount())
-                        .build())
-                .toList();
-        PaymentService.RequestPaymentSummary paymentSummary =
-                paymentService.summarizeReservationRequest(request.getId(), request.getTenantId(), reservations);
-
-        return ReservationRequestDto.builder()
-                .id(request.getId())
-                .tenantId(request.getTenantId())
-                .type(request.getType() != null ? request.getType().name() : null)
-                .status(request.getStatus() != null ? request.getStatus().name() : null)
-                .createdAt(request.getCreatedAt())
-                .expiresAt(request.getExpiresAt())
-                .customerName(request.getCustomerName())
-                .customerEmail(request.getCustomerEmail())
-                .customerPhone(request.getCustomerPhone())
-                .extensionCount(request.getExtensionCount())
-                .paymentTotalAmount(paymentSummary.totalAmount())
-                .paymentDueNowAmount(paymentSummary.dueNowAmount())
-                .paymentPaidAmount(paymentSummary.paidAmount())
-                .paymentRemainingAmount(paymentSummary.remainingAmount())
-                .paymentStatus(paymentSummary.paymentStatus())
-                .reservations(reservationDtos)
-                .build();
     }
 }

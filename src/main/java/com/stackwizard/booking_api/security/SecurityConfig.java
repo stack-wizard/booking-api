@@ -42,6 +42,7 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/auth/**",
                     "/api/payments/providers/monri/webhook/**",
+                    "/api/public/reservation-requests/**",
                     "/actuator/health",
                     "/actuator/info",
                     "/v3/api-docs/**",

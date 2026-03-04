@@ -49,6 +49,12 @@ public class ReservationRequest {
     @Column(name = "customer_phone")
     private String customerPhone;
 
+    @Column(name = "confirmation_code")
+    private String confirmationCode;
+
+    @Column(name = "confirmed_at")
+    private OffsetDateTime confirmedAt;
+
     @Column(name = "extension_count", nullable = false)
     private Integer extensionCount;
 

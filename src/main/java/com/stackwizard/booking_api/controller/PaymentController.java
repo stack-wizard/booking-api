@@ -1,6 +1,5 @@
 package com.stackwizard.booking_api.controller;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.stackwizard.booking_api.dto.PaymentInitiateRequest;
 import com.stackwizard.booking_api.dto.PaymentInitiateResponse;
 import com.stackwizard.booking_api.model.PaymentEvent;
@@ -41,10 +40,15 @@ public class PaymentController {
         return paymentService.findEventsByPaymentIntentId(paymentIntentId);
     }
 
+    @PostMapping("/intents/{paymentIntentId}/processing")
+    public ResponseEntity<PaymentIntent> markProcessing(@PathVariable Long paymentIntentId) {
+        return ResponseEntity.ok(paymentService.markIntentProcessing(paymentIntentId));
+    }
+
     @PostMapping("/providers/monri/webhook/{tenantId}")
     public ResponseEntity<Void> monriWebhook(@PathVariable Long tenantId,
                                              @RequestHeader(value = "X-Callback-Token", required = false) String callbackToken,
-                                             @RequestBody JsonNode payload) {
+                                             @RequestBody String payload) {
         paymentService.processMonriWebhook(tenantId, payload, callbackToken);
         return ResponseEntity.noContent().build();
     }
