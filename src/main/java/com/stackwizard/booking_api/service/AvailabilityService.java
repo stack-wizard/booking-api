@@ -268,6 +268,7 @@ public class AvailabilityService {
                     .canBookAlone(resource.getCanBookAlone())
                     .colorHex(resource.getColorHex())
                     .displayOrder(resource.getDisplayOrder())
+                    .capTotal(resource.getCapTotal())
                     .serviceWindowStart(window != null ? window.open().toLocalTime() : null)
                     .serviceWindowEnd(window != null ? window.close().toLocalTime() : null)
                     .availableSlots(slotDtos)

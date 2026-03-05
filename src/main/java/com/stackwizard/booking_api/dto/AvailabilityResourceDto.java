@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,6 +20,8 @@ public class AvailabilityResourceDto {
     private Boolean canBookAlone;
     private String colorHex;
     private Integer displayOrder;
+    @JsonProperty("cap_total")
+    private Integer capTotal;
     private LocalTime serviceWindowStart;
     private LocalTime serviceWindowEnd;
     private List<AvailabilitySlotDto> availableSlots;
