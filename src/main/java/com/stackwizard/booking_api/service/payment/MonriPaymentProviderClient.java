@@ -56,12 +56,49 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
     @Override
     public PaymentProviderWebhookResult parseWebhook(String payload) {
         JsonNode json = parseJson(payload, "Monri webhook");
-        String eventId = firstText(json, "event_id", "id");
-        String eventType = firstText(json, "event_type", "type", "status");
-        String providerPaymentId = firstText(json, "id", "payment_id", "transaction_uuid");
-        String orderNumber = firstText(json, "order_number", "order_info.order_number");
-        String status = firstText(json, "status", "payment_status", "transaction_status");
+        JsonNode payloadNode = json.path("payload");
+        JsonNode data = payloadNode.isObject() ? payloadNode : json;
+
+        String eventType = firstText(json, "event", "event_type", "type", "status");
+        if (!StringUtils.hasText(eventType)) {
+            eventType = firstText(data, "event", "event_type", "type", "status");
+        }
+
+        String providerPaymentId = firstText(
+                data,
+                "id",
+                "payment_id",
+                "transaction_uuid",
+                "uuid"
+        );
+        String orderNumber = firstText(
+                data,
+                "order_number",
+                "order_info.order_number",
+                "order_info"
+        );
+        String status = firstText(data, "status", "payment_status", "transaction_status");
+        if (!StringUtils.hasText(status)) {
+            // Monri webhook event strings often contain terminal state (approved/declined).
+            status = eventType;
+        }
+        String eventId = firstText(json, "event_id", "id", "webhook_id");
+        if (!StringUtils.hasText(eventId)) {
+            eventId = buildSyntheticEventId(eventType, providerPaymentId, orderNumber);
+        }
         return new PaymentProviderWebhookResult(eventId, eventType, orderNumber, providerPaymentId, status);
+    }
+
+    private String buildSyntheticEventId(String eventType, String providerPaymentId, String orderNumber) {
+        if (!StringUtils.hasText(eventType) && !StringUtils.hasText(providerPaymentId) && !StringUtils.hasText(orderNumber)) {
+            return null;
+        }
+        return String.format(
+                "%s|%s|%s",
+                defaultIfBlank(eventType, "unknown-event"),
+                defaultIfBlank(providerPaymentId, "unknown-payment"),
+                defaultIfBlank(orderNumber, "unknown-order")
+        );
     }
 
     private String getAccessToken(Long tenantId, MonriTenantConfigResolver.MonriResolvedConfig monri) {

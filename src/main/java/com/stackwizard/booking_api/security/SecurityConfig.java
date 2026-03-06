@@ -22,6 +22,7 @@ import java.util.List;
 @Configuration
 public class SecurityConfig {
     private static final String MONRI_WEBHOOK_PATH = "/api/payments/providers/monri/webhook/**";
+    private static final String MONRI_WEBHOOK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/webhook/**";
 
     private final ApiTokenAuthenticationFilter apiTokenFilter;
     private final JwtAuthenticationFilter jwtFilter;
@@ -44,14 +45,23 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, MONRI_WEBHOOK_PATH).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_WEBHOOK_PATH).permitAll()
+                .requestMatchers(HttpMethod.POST, MONRI_WEBHOOK_PATH_PREFIXED).permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, MONRI_WEBHOOK_PATH_PREFIXED).permitAll()
                 .requestMatchers(
                     "/api/auth/**",
+                    "/booking-api/api/auth/**",
                     "/api/public/reservation-requests/**",
+                    "/booking-api/api/public/reservation-requests/**",
                     "/actuator/health",
+                    "/booking-api/actuator/health",
                     "/actuator/info",
+                    "/booking-api/actuator/info",
                     "/v3/api-docs/**",
+                    "/booking-api/v3/api-docs/**",
                     "/swagger-ui/**",
-                    "/swagger-ui.html"
+                    "/booking-api/swagger-ui/**",
+                    "/swagger-ui.html",
+                    "/booking-api/swagger-ui.html"
                 ).permitAll()
                 .anyRequest().authenticated()
             )
