@@ -12,6 +12,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.http.HttpMethod;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -20,6 +21,8 @@ import java.util.List;
 
 @Configuration
 public class SecurityConfig {
+    private static final String MONRI_WEBHOOK_PATH = "/api/payments/providers/monri/webhook/**";
+
     private final ApiTokenAuthenticationFilter apiTokenFilter;
     private final JwtAuthenticationFilter jwtFilter;
     private final UserDetailsServiceImpl userDetailsService;
@@ -39,9 +42,10 @@ public class SecurityConfig {
             .cors(cors -> {})
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(HttpMethod.POST, MONRI_WEBHOOK_PATH).permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, MONRI_WEBHOOK_PATH).permitAll()
                 .requestMatchers(
                     "/api/auth/**",
-                    "/api/payments/providers/monri/webhook/**",
                     "/api/public/reservation-requests/**",
                     "/actuator/health",
                     "/actuator/info",
@@ -80,7 +84,7 @@ public class SecurityConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

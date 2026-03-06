@@ -1,3 +1,7 @@
+server:
+  servlet:
+    context-path: /booking-api
+
 spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL}
