@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/public/reservation-requests")
+@RequestMapping({"/api/public/reservation-requests", "/booking-api/api/public/reservation-requests"})
 public class PublicReservationRequestController {
     private final ReservationRequestService reservationRequestService;
     private final ReservationRequestDtoMapper dtoMapper;
