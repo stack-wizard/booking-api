@@ -4,6 +4,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -30,5 +31,7 @@ public class ReservationRequestDto {
     private BigDecimal paymentPaidAmount;
     private BigDecimal paymentRemainingAmount;
     private String paymentStatus;
+    private LocalDateTime reservationStartsAt;
+    private LocalDateTime reservationEndsAt;
     private List<ReservationSummaryDto> reservations;
 }

@@ -18,6 +18,8 @@ import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderInitResult;
 import com.stackwizard.booking_api.service.payment.PaymentProviderWebhookResult;
 import com.stackwizard.booking_api.service.payment.MonriTenantConfigResolver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +27,9 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -33,10 +38,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
 public class PaymentService {
+    private static final Logger log = LoggerFactory.getLogger(PaymentService.class);
     private static final String STATUS_CREATED = "CREATED";
     private static final String STATUS_PENDING_CUSTOMER = "PENDING_CUSTOMER";
     private static final String STATUS_PROCESSING = "PROCESSING";
@@ -55,6 +62,8 @@ public class PaymentService {
     private static final List<String> REUSABLE_INTENT_STATUSES = List.of(
             STATUS_PENDING_CUSTOMER, STATUS_PROCESSING
     );
+    private static final String MONRI_CALLBACK_SCHEME = "WP3-callback";
+    private static final Pattern HEX_512_PATTERN = Pattern.compile("^[0-9a-fA-F]{128}$");
 
     private final PaymentIntentRepository paymentIntentRepo;
     private final PaymentEventRepository paymentEventRepo;
@@ -252,48 +261,133 @@ public class PaymentService {
         }
 
         String normalized = normalizeProviderStatus(webhook.paymentStatus());
-        String previousStatus = normalizeIntentStatus(paymentIntent.getStatus());
-        OffsetDateTime now = OffsetDateTime.now();
-        if (STATUS_PAID.equals(normalized)) {
-            if (!STATUS_PAID.equals(previousStatus)) {
-                paymentIntent.setStatus(STATUS_PAID);
-                paymentIntent.setCompletedAt(now);
-                paymentIntent.setUpdatedAt(now);
-                paymentIntentRepo.save(paymentIntent);
+        applyMonriStatusTransition(paymentIntent, normalized);
+    }
 
-                // Payment for superseded/expired/canceled intents is stored, but finalized manually.
-                if (!STATUS_SUPERSEDED.equals(previousStatus)
-                        && !STATUS_EXPIRED.equals(previousStatus)
-                        && !STATUS_CANCELED.equals(previousStatus)) {
-                    reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
-                    invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
-                }
-            }
-            return;
-        }
-        if (STATUS_FAILED.equals(normalized)) {
-            if (!STATUS_PAID.equals(previousStatus)) {
-                paymentIntent.setStatus(STATUS_FAILED);
-                paymentIntent.setCompletedAt(now);
-                paymentIntent.setUpdatedAt(now);
-                paymentIntentRepo.save(paymentIntent);
-            }
-            return;
-        }
-        if (STATUS_CANCELED.equals(normalized)) {
-            if (!STATUS_PAID.equals(previousStatus)) {
-                paymentIntent.setStatus(STATUS_CANCELED);
-                paymentIntent.setCompletedAt(now);
-                paymentIntent.setUpdatedAt(now);
-                paymentIntentRepo.save(paymentIntent);
-            }
-            return;
+    @Transactional
+    public void processMonriCallback(Long tenantId,
+                                     String payload,
+                                     String callbackToken,
+                                     String authorization,
+                                     String httpAuthorization) {
+        MonriTenantConfigResolver.MonriResolvedConfig monriConfig = monriTenantConfigResolver.resolve(tenantId);
+        verifyMonriCallbackDigest(
+                tenantId,
+                monriConfig.callbackAuthToken(),
+                monriConfig.clientSecret(),
+                payload,
+                authorization,
+                httpAuthorization
+        );
+        JsonNode payloadNode = parsePayloadNode(payload);
+        JsonNode data = payloadNode.path("payload").isObject() ? payloadNode.path("payload") : payloadNode;
+
+        String orderNumber = firstText(data, "order_number", "order_info.order_number", "order_info");
+        String providerPaymentId = firstText(data, "id", "payment_id", "transaction_uuid", "uuid");
+        PaymentIntent paymentIntent = resolveIntentForMonri(orderNumber, providerPaymentId)
+                .orElseThrow(() -> new IllegalArgumentException("Payment intent not found for callback payload"));
+        if (!Objects.equals(paymentIntent.getTenantId(), tenantId)) {
+            throw new IllegalArgumentException("Callback tenant does not match payment intent tenant");
         }
 
-        if (!isTerminalStatus(previousStatus)) {
-            paymentIntent.setStatus(STATUS_PROCESSING);
-            paymentIntent.setUpdatedAt(now);
-            paymentIntentRepo.save(paymentIntent);
+        String configuredToken = monriConfig.callbackAuthToken();
+        if (StringUtils.hasText(configuredToken) && !Objects.equals(configuredToken, callbackToken)) {
+            throw new IllegalArgumentException("Invalid Monri callback token");
+        }
+
+        String providerEventId = buildMonriCallbackEventId(orderNumber, providerPaymentId);
+        if (StringUtils.hasText(providerEventId)) {
+            Optional<PaymentEvent> existing = paymentEventRepo.findByProviderAndProviderEventId("MONRI", providerEventId);
+            if (existing.isPresent()) {
+                return;
+            }
+        }
+
+        paymentEventRepo.save(PaymentEvent.builder()
+                .paymentIntentId(paymentIntent.getId())
+                .provider("MONRI")
+                .eventType("callback:approved")
+                .providerEventId(providerEventId)
+                .payload(payloadNode)
+                .build());
+
+        if (StringUtils.hasText(providerPaymentId) && !StringUtils.hasText(paymentIntent.getProviderPaymentId())) {
+            paymentIntent.setProviderPaymentId(providerPaymentId);
+        }
+
+        applyMonriStatusTransition(paymentIntent, STATUS_PAID);
+    }
+
+    private void verifyMonriCallbackDigest(Long tenantId,
+                                           String callbackAuthToken,
+                                           String clientId,
+                                           String payload,
+                                           String authorization,
+                                           String httpAuthorization) {
+        String callbackKey = normalizeSecret(callbackAuthToken);
+        String clientKey = normalizeSecret(clientId);
+        if (!StringUtils.hasText(callbackKey) && !StringUtils.hasText(clientKey)) {
+            throw new IllegalArgumentException("Monri digest key is missing for callback verification");
+        }
+        String authorizationHeader = StringUtils.hasText(authorization) ? authorization : httpAuthorization;
+        if (!StringUtils.hasText(authorizationHeader)) {
+            throw new IllegalArgumentException("Missing Monri authorization header");
+        }
+
+        String providedDigest = extractMonriDigest(authorizationHeader);
+        String normalizedProvidedDigest = providedDigest.toLowerCase(Locale.ROOT);
+        if (StringUtils.hasText(callbackKey) && digestMatches(normalizedProvidedDigest, sha512Hex(callbackKey + payload))) {
+            return;
+        }
+        if (StringUtils.hasText(clientKey) && digestMatches(normalizedProvidedDigest, sha512Hex(clientKey + payload))) {
+            return;
+        }
+        log.warn("Monri callback digest mismatch for tenant {}. payloadLength={}, hasCallbackKey={}, hasClientId={}",
+                tenantId, payload.length(), StringUtils.hasText(callbackKey), StringUtils.hasText(clientKey));
+        throw new IllegalArgumentException("Invalid Monri callback digest");
+    }
+
+    private boolean digestMatches(String providedDigest, String expectedDigest) {
+        byte[] expectedBytes = expectedDigest.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
+        byte[] providedBytes = providedDigest.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8);
+        return MessageDigest.isEqual(expectedBytes, providedBytes);
+    }
+
+    private String normalizeSecret(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String extractMonriDigest(String authorizationHeader) {
+        String trimmed = authorizationHeader.trim();
+        int separatorIndex = trimmed.indexOf(' ');
+        if (separatorIndex <= 0) {
+            throw new IllegalArgumentException("Invalid Monri authorization header format");
+        }
+        String scheme = trimmed.substring(0, separatorIndex).trim();
+        String digest = trimmed.substring(separatorIndex + 1).trim();
+        if (!MONRI_CALLBACK_SCHEME.equalsIgnoreCase(scheme)) {
+            throw new IllegalArgumentException("Invalid Monri authorization scheme");
+        }
+        if (!HEX_512_PATTERN.matcher(digest).matches()) {
+            throw new IllegalArgumentException("Invalid Monri digest format");
+        }
+        return digest;
+    }
+
+    private String sha512Hex(String content) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-512")
+                    .digest(content.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-512 algorithm is not available", ex);
         }
     }
 
@@ -355,16 +449,97 @@ public class PaymentService {
     }
 
     private Optional<PaymentIntent> resolveIntentForWebhook(PaymentProviderWebhookResult webhook) {
-        if (StringUtils.hasText(webhook.orderNumber())) {
-            Optional<PaymentIntent> byOrder = paymentIntentRepo.findByProviderAndProviderOrderNumber("MONRI", webhook.orderNumber());
+        return resolveIntentForMonri(webhook.orderNumber(), webhook.providerPaymentId());
+    }
+
+    private Optional<PaymentIntent> resolveIntentForMonri(String orderNumber, String providerPaymentId) {
+        if (StringUtils.hasText(orderNumber)) {
+            Optional<PaymentIntent> byOrder = paymentIntentRepo.findByProviderAndProviderOrderNumber("MONRI", orderNumber);
             if (byOrder.isPresent()) {
                 return byOrder;
             }
         }
-        if (StringUtils.hasText(webhook.providerPaymentId())) {
-            return paymentIntentRepo.findByProviderAndProviderPaymentId("MONRI", webhook.providerPaymentId());
+        if (StringUtils.hasText(providerPaymentId)) {
+            return paymentIntentRepo.findByProviderAndProviderPaymentId("MONRI", providerPaymentId);
         }
         return Optional.empty();
+    }
+
+    private void applyMonriStatusTransition(PaymentIntent paymentIntent, String normalizedStatus) {
+        String previousStatus = normalizeIntentStatus(paymentIntent.getStatus());
+        OffsetDateTime now = OffsetDateTime.now();
+        if (STATUS_PAID.equals(normalizedStatus)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_PAID);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
+                paymentIntentRepo.save(paymentIntent);
+
+                // Payment for superseded/expired/canceled intents is stored, but finalized manually.
+                if (!STATUS_SUPERSEDED.equals(previousStatus)
+                        && !STATUS_EXPIRED.equals(previousStatus)
+                        && !STATUS_CANCELED.equals(previousStatus)) {
+                    reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
+                    invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+                }
+            }
+            return;
+        }
+        if (STATUS_FAILED.equals(normalizedStatus)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_FAILED);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
+                paymentIntentRepo.save(paymentIntent);
+            }
+            return;
+        }
+        if (STATUS_CANCELED.equals(normalizedStatus)) {
+            if (!STATUS_PAID.equals(previousStatus)) {
+                paymentIntent.setStatus(STATUS_CANCELED);
+                paymentIntent.setCompletedAt(now);
+                paymentIntent.setUpdatedAt(now);
+                paymentIntentRepo.save(paymentIntent);
+            }
+            return;
+        }
+
+        if (!isTerminalStatus(previousStatus)) {
+            paymentIntent.setStatus(STATUS_PROCESSING);
+            paymentIntent.setUpdatedAt(now);
+            paymentIntentRepo.save(paymentIntent);
+        }
+    }
+
+    private String buildMonriCallbackEventId(String orderNumber, String providerPaymentId) {
+        if (!StringUtils.hasText(orderNumber) && !StringUtils.hasText(providerPaymentId)) {
+            return null;
+        }
+        String order = StringUtils.hasText(orderNumber) ? orderNumber.trim() : "unknown-order";
+        String payment = StringUtils.hasText(providerPaymentId) ? providerPaymentId.trim() : "unknown-payment";
+        return "callback|" + order + "|" + payment;
+    }
+
+    private String firstText(JsonNode root, String... paths) {
+        if (root == null) {
+            return null;
+        }
+        for (String path : paths) {
+            JsonNode current = root;
+            for (String part : path.split("\\.")) {
+                if (current == null) {
+                    break;
+                }
+                current = current.path(part);
+            }
+            if (current != null && !current.isMissingNode() && !current.isNull()) {
+                String value = current.asText();
+                if (StringUtils.hasText(value)) {
+                    return value;
+                }
+            }
+        }
+        return null;
     }
 
     private List<PaymentIntent> expireStaleActiveIntents(Long reservationRequestId, OffsetDateTime now) {

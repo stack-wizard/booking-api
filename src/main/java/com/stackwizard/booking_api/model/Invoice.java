@@ -62,6 +62,12 @@ public class Invoice {
     @Column(name = "reference_id", nullable = false)
     private Long referenceId;
 
+    @Column(name = "reservation_request_id")
+    private Long reservationRequestId;
+
+    @Column(name = "storno_id")
+    private Long stornoId;
+
     @Column(nullable = false)
     private String currency;
 

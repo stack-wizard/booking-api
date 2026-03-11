@@ -23,6 +23,8 @@ import java.util.List;
 public class SecurityConfig {
     private static final String MONRI_WEBHOOK_PATH = "/api/payments/providers/monri/webhook/**";
     private static final String MONRI_WEBHOOK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/webhook/**";
+    private static final String MONRI_CALLBACK_PATH = "/api/payments/providers/monri/callback/**";
+    private static final String MONRI_CALLBACK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/callback/**";
 
     private final ApiTokenAuthenticationFilter apiTokenFilter;
     private final JwtAuthenticationFilter jwtFilter;
@@ -47,6 +49,10 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_WEBHOOK_PATH).permitAll()
                 .requestMatchers(HttpMethod.POST, MONRI_WEBHOOK_PATH_PREFIXED).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_WEBHOOK_PATH_PREFIXED).permitAll()
+                .requestMatchers(HttpMethod.POST, MONRI_CALLBACK_PATH).permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH).permitAll()
+                .requestMatchers(HttpMethod.POST, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
                 .requestMatchers(
                     "/api/auth/**",
                     "/booking-api/api/auth/**",

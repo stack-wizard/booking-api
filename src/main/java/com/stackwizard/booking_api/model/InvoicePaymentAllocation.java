@@ -38,12 +38,12 @@ public class InvoicePaymentAllocation {
     private Long invoiceId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "payment_intent_id", nullable = false)
+    @JoinColumn(name = "payment_transaction_id", nullable = false)
     @JsonIgnore
-    private PaymentIntent paymentIntent;
+    private PaymentTransaction paymentTransaction;
 
-    @Column(name = "payment_intent_id", nullable = false, insertable = false, updatable = false)
-    private Long paymentIntentId;
+    @Column(name = "payment_transaction_id", nullable = false, insertable = false, updatable = false)
+    private Long paymentTransactionId;
 
     @Column(name = "allocated_amount", nullable = false)
     private BigDecimal allocatedAmount;

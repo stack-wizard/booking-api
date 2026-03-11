@@ -47,6 +47,9 @@ public class Product {
     @Column(name = "default_uom", nullable = false)
     private String defaultUom;
 
+    @Column(name = "product_type", nullable = false)
+    private String productType;
+
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(name = "product_extra_uom", joinColumns = @JoinColumn(name = "product_id"))
     @Column(name = "uom", nullable = false)

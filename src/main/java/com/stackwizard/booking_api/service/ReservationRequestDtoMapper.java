@@ -9,6 +9,7 @@ import com.stackwizard.booking_api.model.ReservationRequestAccessToken;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +34,17 @@ public class ReservationRequestDtoMapper {
 
     public ReservationRequestDto toDto(ReservationRequest request) {
         List<Reservation> reservations = reservationService.findByRequestId(request.getId());
+        LocalDateTime reservationStartsAt = reservations.stream()
+                .map(Reservation::getStartsAt)
+                .filter(Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(null);
+        LocalDateTime reservationEndsAt = reservations.stream()
+                .map(Reservation::getEndsAt)
+                .filter(Objects::nonNull)
+                .max(LocalDateTime::compareTo)
+                .orElse(null);
+
         Map<Long, String> productNames = productRepository.findAllById(
                         reservations.stream()
                                 .map(Reservation::getProductId)
@@ -97,6 +109,8 @@ public class ReservationRequestDtoMapper {
                 .paymentPaidAmount(paymentSummary.paidAmount())
                 .paymentRemainingAmount(paymentSummary.remainingAmount())
                 .paymentStatus(paymentSummary.paymentStatus())
+                .reservationStartsAt(reservationStartsAt)
+                .reservationEndsAt(reservationEndsAt)
                 .reservations(reservationDtos)
                 .build();
     }

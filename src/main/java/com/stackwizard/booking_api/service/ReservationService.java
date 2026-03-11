@@ -42,7 +42,6 @@ public class ReservationService {
     private final BookingTranslationService translationService;
     private final ReservationRequestRepository requestRepo;
     private final TenantConfigService tenantConfigService;
-    private final InvoiceService invoiceService;
     private final ReservationRequestAccessTokenService accessTokenService;
 
     public ReservationService(ReservationRepository repo,
@@ -54,7 +53,6 @@ public class ReservationService {
                               BookingTranslationService translationService,
                               ReservationRequestRepository requestRepo,
                               TenantConfigService tenantConfigService,
-                              InvoiceService invoiceService,
                               ReservationRequestAccessTokenService accessTokenService) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
@@ -65,7 +63,6 @@ public class ReservationService {
         this.translationService = translationService;
         this.requestRepo = requestRepo;
         this.tenantConfigService = tenantConfigService;
-        this.invoiceService = invoiceService;
         this.accessTokenService = accessTokenService;
     }
 
@@ -403,7 +400,6 @@ public class ReservationService {
             allocationRepo.saveAll(allocations);
         }
 
-        invoiceService.createDraftForFinalizedRequest(requestId);
         accessTokenService.ensureActiveTokenForFinalizedRequest(request, reservations);
     }
 

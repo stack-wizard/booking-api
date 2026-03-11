@@ -6,6 +6,6 @@ import java.math.BigDecimal;
 
 @Data
 public class InvoicePaymentAllocationRequest {
-    private Long paymentIntentId;
+    private Long paymentTransactionId;
     private BigDecimal amount;
 }
