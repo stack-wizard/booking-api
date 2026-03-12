@@ -1,16 +1,7 @@
 do $$
 begin
-  if exists (
-      select 1
-      from information_schema.tables
-      where table_schema = 'public'
-        and table_name = 'tenant_payment_provider_config'
-  ) and not exists (
-      select 1
-      from information_schema.tables
-      where table_schema = 'public'
-        and table_name = 'tenant_integration_config'
-  ) then
+  if to_regclass('tenant_payment_provider_config') is not null
+     and to_regclass('tenant_integration_config') is null then
     alter table tenant_payment_provider_config
       rename to tenant_integration_config;
   end if;
