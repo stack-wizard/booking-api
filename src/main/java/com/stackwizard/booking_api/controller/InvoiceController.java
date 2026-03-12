@@ -1,20 +1,31 @@
 package com.stackwizard.booking_api.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.dto.InvoiceSearchCriteria;
+import com.stackwizard.booking_api.dto.InvoiceIssueRequest;
+import com.stackwizard.booking_api.dto.InvoiceFiscalizeRequest;
 import com.stackwizard.booking_api.dto.InvoicePaymentAllocationRequest;
 import com.stackwizard.booking_api.model.Invoice;
+import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoiceItem;
 import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
+import com.stackwizard.booking_api.model.IssuedByMode;
+import com.stackwizard.booking_api.service.InvoicePdfService;
 import com.stackwizard.booking_api.service.InvoiceService;
+import com.stackwizard.booking_api.service.fiscal.InvoiceFiscalizationService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,9 +41,15 @@ public class InvoiceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final InvoiceService invoiceService;
+    private final InvoicePdfService invoicePdfService;
+    private final InvoiceFiscalizationService invoiceFiscalizationService;
 
-    public InvoiceController(InvoiceService invoiceService) {
+    public InvoiceController(InvoiceService invoiceService,
+                             InvoicePdfService invoicePdfService,
+                             InvoiceFiscalizationService invoiceFiscalizationService) {
         this.invoiceService = invoiceService;
+        this.invoicePdfService = invoicePdfService;
+        this.invoiceFiscalizationService = invoiceFiscalizationService;
     }
 
     @GetMapping("/{id}")
@@ -79,6 +96,30 @@ public class InvoiceController {
         return ResponseEntity.ok(result);
     }
 
+    @PostMapping
+    public ResponseEntity<Map<String, Object>> createInvoice(@RequestBody InvoiceCreateRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        Long reservationRequestId = request.getReservationRequestId() != null
+                ? request.getReservationRequestId()
+                : request.getRequestId();
+        Invoice invoice = reservationRequestId != null
+                ? invoiceService.createDraftForFinalizedRequest(reservationRequestId)
+                : invoiceService.createManualDraft(request);
+        return toResponse(invoice);
+    }
+
+    @PutMapping("/{invoiceId}")
+    public ResponseEntity<Map<String, Object>> updateDraftInvoice(@PathVariable Long invoiceId,
+                                                                  @RequestBody InvoiceCreateRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        Invoice invoice = invoiceService.updateDraft(invoiceId, request);
+        return toResponse(invoice);
+    }
+
     @PostMapping("/{invoiceId}/allocations")
     public ResponseEntity<InvoicePaymentAllocation> allocatePayment(@PathVariable Long invoiceId,
                                                                     @RequestBody InvoicePaymentAllocationRequest request) {
@@ -94,6 +135,66 @@ public class InvoiceController {
     public ResponseEntity<Map<String, Object>> createStorno(@PathVariable Long invoiceId) {
         Invoice storno = invoiceService.createStornoInvoice(invoiceId);
         return toResponse(storno);
+    }
+
+    @PostMapping("/{invoiceId}/issue")
+    public ResponseEntity<Map<String, Object>> issueInvoice(@PathVariable Long invoiceId,
+                                                            @RequestBody InvoiceIssueRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        Invoice issued = invoiceService.issueInvoice(invoiceId, request);
+        if (issued.getFiscalizationStatus() == InvoiceFiscalizationStatus.REQUIRED) {
+            InvoiceFiscalizeRequest fiscalizeRequest = new InvoiceFiscalizeRequest();
+            fiscalizeRequest.setIssuedByMode(request.getIssuedByMode());
+            fiscalizeRequest.setIssuedByUserId(request.getIssuedByUserId());
+            fiscalizeRequest.setBusinessPremiseId(request.getBusinessPremiseId());
+            fiscalizeRequest.setCashRegisterId(request.getCashRegisterId());
+            Invoice fiscalized = invoiceFiscalizationService.fiscalizeInvoice(invoiceId, fiscalizeRequest);
+            return toResponse(fiscalized);
+        }
+        return toResponse(issued);
+    }
+
+    @PostMapping("/{invoiceId}/fiscalize")
+    public ResponseEntity<Map<String, Object>> fiscalizeInvoice(@PathVariable Long invoiceId,
+                                                                @RequestBody InvoiceFiscalizeRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        Invoice fiscalized = invoiceFiscalizationService.fiscalizeInvoice(invoiceId, request);
+        return toResponse(fiscalized);
+    }
+
+    @PostMapping("/{invoiceId}/fiscalize/ofis-event")
+    public ResponseEntity<Map<String, Object>> fiscalizeInvoiceWithOfisEvent(
+            @PathVariable Long invoiceId,
+            @RequestBody JsonNode ofisPayload,
+            @RequestParam(required = false) IssuedByMode issuedByMode,
+            @RequestParam(required = false) Long issuedByUserId,
+            @RequestParam(required = false) Long businessPremiseId,
+            @RequestParam(required = false) Long cashRegisterId) {
+        if (ofisPayload == null || ofisPayload.isNull()) {
+            throw new IllegalArgumentException("request body is required");
+        }
+        InvoiceFiscalizeRequest request = new InvoiceFiscalizeRequest();
+        request.setOfisPayload(ofisPayload);
+        request.setIssuedByMode(issuedByMode);
+        request.setIssuedByUserId(issuedByUserId);
+        request.setBusinessPremiseId(businessPremiseId);
+        request.setCashRegisterId(cashRegisterId);
+
+        Invoice fiscalized = invoiceFiscalizationService.fiscalizeInvoice(invoiceId, request);
+        return toResponse(fiscalized);
+    }
+
+    @GetMapping(value = "/{invoiceId}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
+    public ResponseEntity<byte[]> downloadInvoicePdf(@PathVariable Long invoiceId) {
+        InvoicePdfService.InvoicePdfDocument document = invoicePdfService.generateInvoicePdf(invoiceId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + document.fileName() + "\"")
+                .body(document.content());
     }
 
     @DeleteMapping("/{invoiceId}/allocations/{paymentTransactionId}")

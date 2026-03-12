@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Invoice</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 18mm;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #1f2937;
+            background: #ffffff;
+        }
+
+        .invoice {
+            width: 100%;
+        }
+
+        .muted {
+            color: #6b7280;
+        }
+
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .small {
+            font-size: 10px;
+        }
+
+        .mb-8 {
+            margin-bottom: 8px;
+        }
+
+        .mb-12 {
+            margin-bottom: 12px;
+        }
+
+        .mb-16 {
+            margin-bottom: 16px;
+        }
+
+        .mb-20 {
+            margin-bottom: 20px;
+        }
+
+        .mb-24 {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            margin: 0 0 8px 0;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #6b7280;
+        }
+
+        .topbar {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 28px;
+        }
+
+        .topbar td {
+            vertical-align: top;
+        }
+
+        .brand-name {
+            font-size: 28px;
+            font-weight: bold;
+            letter-spacing: 0.04em;
+            color: #111827;
+            margin: 0 0 6px 0;
+        }
+
+        .brand-details {
+            font-size: 10px;
+            color: #6b7280;
+            line-height: 1.5;
+        }
+
+        .invoice-title-wrap {
+            text-align: right;
+        }
+
+        .invoice-title {
+            margin: 0;
+            font-size: 30px;
+            font-weight: bold;
+            letter-spacing: 0.06em;
+            color: #111827;
+        }
+
+        .invoice-number {
+            margin-top: 6px;
+            font-size: 13px;
+            font-weight: bold;
+            color: #2563eb;
+        }
+
+        .status-line {
+            margin-top: 10px;
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .status-line span {
+            margin-left: 12px;
+        }
+
+        .party-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 18px;
+        }
+
+        .party-table td {
+            width: 50%;
+            vertical-align: top;
+            padding: 0 12px 0 0;
+        }
+
+        .party-card {
+            border: 1px solid #e5e7eb;
+            padding: 14px 14px 12px 14px;
+            min-height: 120px;
+        }
+
+        .party-name {
+            font-size: 14px;
+            font-weight: bold;
+            color: #111827;
+            margin: 0 0 8px 0;
+        }
+
+        .party-lines div {
+            margin-bottom: 3px;
+        }
+
+        .meta-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+        }
+
+        .meta-table td {
+            border: 1px solid #e5e7eb;
+            padding: 9px 10px;
+            vertical-align: top;
+        }
+
+        .meta-label {
+            width: 18%;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #6b7280;
+            background: #f9fafb;
+        }
+
+        .meta-value {
+            width: 32%;
+            color: #111827;
+        }
+
+        .reservation-row {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 22px;
+        }
+
+        .reservation-row td {
+            border: 1px solid #dbeafe;
+            background: #f8fbff;
+            padding: 10px 12px;
+        }
+
+        .reservation-label {
+            width: 18%;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #1d4ed8;
+        }
+
+        .reservation-value {
+            color: #1f2937;
+        }
+
+        .items-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .items-table thead th {
+            padding: 10px 8px;
+            border-top: 2px solid #111827;
+            border-bottom: 1px solid #d1d5db;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            text-align: left;
+            color: #374151;
+            background: #f9fafb;
+        }
+
+        .items-table tbody td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: top;
+        }
+
+        .items-table .num {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .items-table .center {
+            text-align: center;
+        }
+
+        .items-table .desc {
+            color: #111827;
+        }
+
+        .items-table .desc .sub {
+            display: block;
+            margin-top: 3px;
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+
+        .summary-table td {
+            vertical-align: top;
+        }
+
+        .summary-left {
+            width: 58%;
+            padding-right: 18px;
+        }
+
+        .summary-right {
+            width: 42%;
+        }
+
+        .notes-box {
+            border: 1px solid #e5e7eb;
+            padding: 12px 14px;
+            min-height: 110px;
+        }
+
+        .totals-box {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #d1d5db;
+        }
+
+        .totals-box td {
+            padding: 9px 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .totals-box tr:last-child td {
+            border-bottom: none;
+        }
+
+        .totals-box .label {
+            color: #4b5563;
+        }
+
+        .totals-box .value {
+            text-align: right;
+            white-space: nowrap;
+            font-weight: bold;
+            color: #111827;
+        }
+
+        .totals-box .grand td {
+            background: #111827;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .totals-box .paid td {
+            background: #f9fafb;
+        }
+
+        .tax-table,
+        .payments-table,
+        .fiscal-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        .tax-table th,
+        .payments-table th,
+        .fiscal-table th {
+            text-align: left;
+            padding: 9px 8px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #374151;
+            background: #f9fafb;
+            border-top: 1px solid #d1d5db;
+            border-bottom: 1px solid #d1d5db;
+        }
+
+        .tax-table td,
+        .payments-table td,
+        .fiscal-table td {
+            padding: 9px 8px;
+            border-bottom: 1px solid #e5e7eb;
+            vertical-align: top;
+        }
+
+        .tax-table .num,
+        .payments-table .num {
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .footer {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #d1d5db;
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        .footer-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .footer-table td {
+            vertical-align: top;
+            width: 50%;
+            padding-right: 12px;
+        }
+
+        .nowrap {
+            white-space: nowrap;
+        }
+    </style>
+</head>
+<body>
+<div class="invoice">
+
+    <!-- HEADER -->
+    <table class="topbar">
+        <tr>
+            <td style="width: 56%;">
+                <div class="brand-name">[[SELLER_NAME]]</div>
+                <div class="brand-details">
+                    [[SELLER_ADDRESS_LINE_1]]<br/>
+                    [[SELLER_ADDRESS_LINE_2]]<br/>
+                    Tax ID: [[SELLER_TAX_ID]]<br/>
+                    Email: [[SELLER_EMAIL]]<br/>
+                    Web: [[SELLER_WEBSITE]]
+                </div>
+            </td>
+            <td style="width: 44%;" class="invoice-title-wrap">
+                <h1 class="invoice-title">INVOICE</h1>
+                <div class="invoice-number">[[INVOICE_NUMBER]]</div>
+                <div class="status-line">
+                    <span>Type: [[INVOICE_TYPE]]</span>
+                    <span>Status: [[INVOICE_STATUS]]</span>
+                </div>
+                <div class="status-line">
+                    <span>Payment: [[PAYMENT_STATUS]]</span>
+                    <span>Fiscal: [[FISCALIZATION_STATUS]]</span>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- SELLER / CUSTOMER -->
+    <table class="party-table">
+        <tr>
+            <td>
+                <div class="section-title">Bill From</div>
+                <div class="party-card">
+                    <div class="party-name">[[SELLER_NAME]]</div>
+                    <div class="party-lines">
+                        <div>[[SELLER_OWNER]]</div>
+                        <div>[[SELLER_ADDRESS_LINE_1]]</div>
+                        <div>[[SELLER_ADDRESS_LINE_2]]</div>
+                        <div>[[SELLER_COUNTRY]]</div>
+                        <div>Tax ID: [[SELLER_TAX_ID]]</div>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <div class="section-title">Bill To</div>
+                <div class="party-card">
+                    <div class="party-name">[[CUSTOMER_NAME]]</div>
+                    <div class="party-lines">
+                        <div>[[CUSTOMER_ADDRESS_LINE_1]]</div>
+                        <div>[[CUSTOMER_ADDRESS_LINE_2]]</div>
+                        <div>[[CUSTOMER_COUNTRY]]</div>
+                        <div>Email: [[CUSTOMER_EMAIL]]</div>
+                        <div>Phone: [[CUSTOMER_PHONE]]</div>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- META -->
+    <table class="meta-table">
+        <tr>
+            <td class="meta-label">Invoice Date</td>
+            <td class="meta-value">[[INVOICE_DATE]]</td>
+            <td class="meta-label">Issued At</td>
+            <td class="meta-value">[[ISSUED_AT]]</td>
+        </tr>
+        <tr>
+            <td class="meta-label">Issued By</td>
+            <td class="meta-value">[[ISSUED_BY_MODE]]</td>
+            <td class="meta-label">Currency</td>
+            <td class="meta-value">[[CURRENCY]]</td>
+        </tr>
+        <tr>
+            <td class="meta-label">Reference</td>
+            <td class="meta-value">[[REFERENCE_TABLE]] / [[REFERENCE_ID]]</td>
+            <td class="meta-label">Request ID</td>
+            <td class="meta-value">[[RESERVATION_REQUEST_ID]]</td>
+        </tr>
+    </table>
+
+    <!-- OPTIONAL RESERVATION DETAILS -->
+    <table class="reservation-row">
+        <tr>
+            <td class="reservation-label">Reservation Details</td>
+            <td class="reservation-value">[[RESERVATION_DETAILS]]</td>
+        </tr>
+    </table>
+
+    <!-- ITEMS -->
+    <div class="section-title">Items</div>
+    <table class="items-table">
+        <thead>
+        <tr>
+            <th style="width: 6%;">#</th>
+            <th style="width: 34%;">Description</th>
+            <th style="width: 10%;" class="center">Qty</th>
+            <th style="width: 12%;" class="num">Unit Net</th>
+            <th style="width: 10%;" class="num">Tax %</th>
+            <th style="width: 12%;" class="num">Tax</th>
+            <th style="width: 16%;" class="num">Amount</th>
+        </tr>
+        </thead>
+        <tbody>
+        [[ITEM_ROWS]]
+        </tbody>
+    </table>
+
+    <!-- SUMMARY -->
+    <table class="summary-table">
+        <tr>
+            <td class="summary-left">
+                <div class="section-title">Notes</div>
+                <div class="notes-box">
+                    [[NOTES]]
+                </div>
+            </td>
+            <td class="summary-right">
+                <div class="section-title">Summary</div>
+                <table class="totals-box">
+                    <tr>
+                        <td class="label">Subtotal Net</td>
+                        <td class="value">[[SUBTOTAL_NET]] [[CURRENCY]]</td>
+                    </tr>
+                    <tr>
+                        <td class="label">Discount</td>
+                        <td class="value">[[DISCOUNT_TOTAL]] [[CURRENCY]]</td>
+                    </tr>
+                    <tr>
+                        <td class="label">Tax Total</td>
+                        <td class="value">[[TAX_TOTAL]] [[CURRENCY]]</td>
+                    </tr>
+                    <tr class="paid">
+                        <td class="label">Paid Amount</td>
+                        <td class="value">[[PAID_AMOUNT]] [[CURRENCY]]</td>
+                    </tr>
+                    <tr class="grand">
+                        <td>Total Due</td>
+                        <td class="value">[[BALANCE_DUE]] [[CURRENCY]]</td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!-- TAX BREAKDOWN -->
+    <div class="section-title">Tax Breakdown</div>
+    <table class="tax-table">
+        <thead>
+        <tr>
+            <th style="width: 20%;">Tax</th>
+            <th style="width: 16%;">Rate</th>
+            <th style="width: 22%;">Base</th>
+            <th style="width: 22%;">Tax Amount</th>
+            <th style="width: 20%;">Gross</th>
+        </tr>
+        </thead>
+        <tbody>
+        [[TAX_ROWS]]
+        </tbody>
+    </table>
+
+    <!-- PAYMENTS -->
+    <div class="section-title">Payments / Allocations</div>
+    <table class="payments-table">
+        <thead>
+        <tr>
+            <th style="width: 18%;">Allocation ID</th>
+            <th style="width: 22%;">Payment Transaction</th>
+            <th style="width: 24%;">Created At</th>
+            <th style="width: 18%;">Amount</th>
+            <th style="width: 18%;">Status</th>
+        </tr>
+        </thead>
+        <tbody>
+        [[PAYMENT_ROWS]]
+        </tbody>
+    </table>
+
+    <!-- FISCAL -->
+    <div class="section-title">Fiscal Information</div>
+    <table class="fiscal-table">
+        <thead>
+        <tr>
+            <th style="width: 24%;">Field</th>
+            <th style="width: 76%;">Value</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>Fiscalized At</td>
+            <td>[[FISCALIZED_AT]]</td>
+        </tr>
+        <tr>
+            <td>Fiscal Folio No</td>
+            <td>[[FISCAL_FOLIO_NO]]</td>
+        </tr>
+        <tr>
+            <td>Document No 1</td>
+            <td>[[FISCAL_DOCUMENT_NO_1]]</td>
+        </tr>
+        <tr>
+            <td>Document No 2</td>
+            <td>[[FISCAL_DOCUMENT_NO_2]]</td>
+        </tr>
+        <tr>
+            <td>Special ID</td>
+            <td>[[FISCAL_SPECIAL_ID]]</td>
+        </tr>
+        <tr>
+            <td>Business Premise / Cash Register</td>
+            <td>[[BUSINESS_PREMISE_CODE]] / [[CASH_REGISTER_CODE]]</td>
+        </tr>
+        <tr>
+            <td>QR Link</td>
+            <td>[[FISCAL_QR_LINK]]</td>
+        </tr>
+        <tr>
+            <td>Fiscal Message</td>
+            <td>[[FISCAL_ERROR]]</td>
+        </tr>
+        </tbody>
+    </table>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        <table class="footer-table">
+            <tr>
+                <td>
+                    <strong>Payment information</strong><br/>
+                    Bank: [[SELLER_BANK_NAME]]<br/>
+                    IBAN: [[SELLER_IBAN]]<br/>
+                    SWIFT: [[SELLER_SWIFT]]
+                </td>
+                <td>
+                    <strong>Additional information</strong><br/>
+                    Created at: [[CREATED_AT]]<br/>
+                    Invoice ID: [[INVOICE_ID]]<br/>
+                    This document was generated electronically.
+                </td>
+            </tr>
+        </table>
+    </div>
+
+</div>
+</body>
+</html>

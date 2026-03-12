@@ -177,7 +177,7 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
         log.info("Monri payment/new request: order={}, tenant={}, url={}, callbackUrl={}, successUrl={}, cancelUrl={}, amountMinor={}, currency={}, authenticityToken={}",
                 paymentIntent.getProviderOrderNumber(),
                 paymentIntent.getTenantId(),
-                normalizeUrl(monri.baseUrl(), monri.paymentNewPath()),
+                normalizeUrl(monri.baseUrl(), monri.requestPath()),
                 defaultIfBlank(request.getCallbackUrl(), ""),
                 defaultIfBlank(request.getSuccessUrl(), ""),
                 defaultIfBlank(request.getCancelUrl(), ""),
@@ -187,7 +187,7 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
 
         try {
             String raw = restClient.post()
-                    .uri(normalizeUrl(monri.baseUrl(), monri.paymentNewPath()))
+                    .uri(normalizeUrl(monri.baseUrl(), monri.requestPath()))
                     .contentType(MediaType.APPLICATION_JSON)
                     .header("Authorization", "Bearer " + accessToken)
                     .body(body)

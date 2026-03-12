@@ -270,11 +270,21 @@ public class PaymentTransactionService {
     }
 
     private String normalizeStatus(String status) {
-        String normalized = StringUtils.hasText(status)
+        String raw = StringUtils.hasText(status)
                 ? status.trim().toUpperCase(Locale.ROOT)
                 : STATUS_POSTED;
+
+        // Frontend flows can send invoice/payment lifecycle statuses; map them to payment transaction statuses.
+        String normalized = switch (raw) {
+            case "VOID", "CANCELLED", "CANCELED" -> "VOIDED";
+            case "DRAFT", "ISSUED", "UNPAID", "PARTIALLY_PAID", "PAID",
+                    "PENDING", "PENDING_PAYMENT", "PROCESSING",
+                    "SUCCESS", "SUCCEEDED", "COMPLETED", "AUTHORIZED", "AUTHORISED" -> STATUS_POSTED;
+            default -> raw;
+        };
+
         if (!SUPPORTED_STATUSES.contains(normalized)) {
-            throw new IllegalArgumentException("status must be POSTED or VOIDED");
+            throw new IllegalArgumentException("status must be POSTED or VOIDED (received: " + raw + ")");
         }
         return normalized;
     }

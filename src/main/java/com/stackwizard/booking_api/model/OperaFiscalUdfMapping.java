@@ -14,12 +14,12 @@ import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "tenant_payment_provider_config")
+@Table(name = "opera_fiscal_udf_mapping")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class TenantPaymentProviderConfig {
+public class OperaFiscalUdfMapping {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -27,32 +27,17 @@ public class TenantPaymentProviderConfig {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(nullable = false)
-    private String provider;
+    @Column(name = "udf_name", nullable = false)
+    private String udfName;
+
+    @Column(name = "udf_value")
+    private String udfValue;
 
     @Column(nullable = false)
     private Boolean active;
 
-    @Column(name = "base_url")
-    private String baseUrl;
-
-    @Column(name = "oauth_path")
-    private String oauthPath;
-
-    @Column(name = "payment_new_path")
-    private String paymentNewPath;
-
-    @Column(name = "client_id")
-    private String clientId;
-
-    @Column(name = "client_secret")
-    private String clientSecret;
-
-    @Column(name = "authenticity_token")
-    private String authenticityToken;
-
-    @Column(name = "callback_auth_token")
-    private String callbackAuthToken;
+    @Column(name = "sort_order", nullable = false)
+    private Integer sortOrder;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

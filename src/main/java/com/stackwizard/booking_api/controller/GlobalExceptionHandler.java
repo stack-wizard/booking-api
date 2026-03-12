@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 
 import java.time.OffsetDateTime;
 
@@ -31,6 +32,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleDataIntegrity(DataIntegrityViolationException ex, HttpServletRequest request) {
         String message = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
         return buildError(HttpStatus.BAD_REQUEST, message, request.getRequestURI());
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex,
+                                                             HttpServletRequest request) {
+        String message = StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : "HTTP method not supported";
+        return buildError(HttpStatus.METHOD_NOT_ALLOWED, message, request.getRequestURI());
     }
 
     @ExceptionHandler(Exception.class)

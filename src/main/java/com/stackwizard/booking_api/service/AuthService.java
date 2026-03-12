@@ -51,6 +51,7 @@ public class AuthService {
                 .tenantId(request.getTenantId())
                 .username(request.getUsername())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .employeeNumber(normalizeNullable(request.getEmployeeNumber()))
                 .role(role)
                 .build();
 
@@ -62,6 +63,7 @@ public class AuthService {
                 .tokenType("Bearer")
                 .userId(saved.getId())
                 .username(saved.getUsername())
+                .employeeNumber(saved.getEmployeeNumber())
                 .role(saved.getRole().name())
                 .tenantId(saved.getTenantId())
                 .build();
@@ -88,8 +90,17 @@ public class AuthService {
                 .tokenType("Bearer")
                 .userId(user.getId())
                 .username(user.getUsername())
+                .employeeNumber(user.getEmployeeNumber())
                 .role(user.getRole().name())
                 .tenantId(user.getTenantId())
                 .build();
+    }
+
+    private String normalizeNullable(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 }
