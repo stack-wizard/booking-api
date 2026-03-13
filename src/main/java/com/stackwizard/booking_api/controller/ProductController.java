@@ -5,8 +5,10 @@ import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.ProductService;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.net.URI;
 import java.time.LocalDate;
@@ -48,6 +50,7 @@ public class ProductController {
 
     @PostMapping
     public ResponseEntity<Product> create(@RequestBody Product product) {
+        product.setTenantId(TenantResolver.requireTenantId(product.getTenantId()));
         Product saved = service.save(product);
         return ResponseEntity.created(URI.create("/api/products/" + saved.getId())).body(saved);
     }
@@ -55,7 +58,32 @@ public class ProductController {
     @PutMapping("/{id}")
     public ResponseEntity<Product> update(@PathVariable Long id, @RequestBody Product product) {
         product.setId(id);
+        if (product.getTenantId() != null) {
+            product.setTenantId(TenantResolver.requireTenantId(product.getTenantId()));
+        }
         return ResponseEntity.ok(service.save(product));
+    }
+
+    @PostMapping(path = "/{id}/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Product> uploadImage(@PathVariable Long id,
+                                               @RequestParam("file") MultipartFile file,
+                                               @RequestParam(defaultValue = "false") boolean defaultImage,
+                                               @RequestParam(required = false) Integer position) {
+        return ResponseEntity.ok(service.uploadImage(id, file, defaultImage, position));
+    }
+
+    @PutMapping("/{productId}/images/{imageId}/default")
+    public ResponseEntity<Product> setDefaultImage(@PathVariable Long productId,
+                                                  @PathVariable Long imageId,
+                                                  @RequestParam(defaultValue = "true") boolean value) {
+        return ResponseEntity.ok(service.setDefaultImage(productId, imageId, value));
+    }
+
+    @DeleteMapping("/{productId}/images/{imageId}")
+    public ResponseEntity<Void> deleteImage(@PathVariable Long productId,
+                                            @PathVariable Long imageId) {
+        service.deleteImage(productId, imageId);
+        return ResponseEntity.noContent().build();
     }
 
     @DeleteMapping("/{id}")

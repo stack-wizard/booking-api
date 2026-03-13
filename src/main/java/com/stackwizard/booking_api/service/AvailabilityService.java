@@ -3,13 +3,16 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.AvailabilityMapDto;
 import com.stackwizard.booking_api.dto.AvailabilityMapPositionDto;
 import com.stackwizard.booking_api.dto.AvailabilityPriceDto;
+import com.stackwizard.booking_api.dto.AvailabilityProductDto;
 import com.stackwizard.booking_api.dto.AvailabilityResourceDto;
 import com.stackwizard.booking_api.dto.AvailabilityResourceRefDto;
 import com.stackwizard.booking_api.dto.AvailabilityResponse;
 import com.stackwizard.booking_api.dto.AvailabilitySlotDto;
+import com.stackwizard.booking_api.dto.ProductGalleryImageDto;
 import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.PriceListEntry;
 import com.stackwizard.booking_api.model.Product;
+import com.stackwizard.booking_api.model.ProductImage;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.model.ResourceMap;
@@ -110,12 +113,12 @@ public class AvailabilityService {
 
         Map<Long, List<Product>> productsByResourceId = new HashMap<>();
         List<Product> products = productRepo.findByTenantId(tenantId);
-        Map<Long, String> productNameById = new HashMap<>();
+        Map<Long, Product> productById = new HashMap<>();
         for (Product product : products) {
             if (product.getResource() != null && product.getResource().getId() != null) {
                 productsByResourceId.computeIfAbsent(product.getResource().getId(), ignored -> new ArrayList<>()).add(product);
             }
-            productNameById.put(product.getId(), product.getName());
+            productById.put(product.getId(), product);
         }
 
         Map<String, String> uomNameByCode = new HashMap<>();
@@ -243,7 +246,9 @@ public class AvailabilityService {
                     gridMinutesByResourceId.get(resource.getId())
             );
 
-            List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId, productNameById, uomNameByCode);
+            Product resolvedProduct = resolveProduct(resource, productsByResourceId, productById);
+            AvailabilityProductDto productDto = toAvailabilityProductDto(resolvedProduct);
+            List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId, productById, uomNameByCode);
 
             AvailabilityMapPositionDto mapPosition = null;
             ResourceMapResource mapResource = mapByResourceId.get(resource.getId());
@@ -273,6 +278,7 @@ public class AvailabilityService {
                     .serviceWindowEnd(window != null ? window.close().toLocalTime() : null)
                     .availableSlots(slotDtos)
                     .gridSlots(gridSlots)
+                    .product(productDto)
                     .prices(priceDtos)
                     .parents(parents)
                     .components(components)
@@ -337,11 +343,12 @@ public class AvailabilityService {
     private List<AvailabilityPriceDto> buildPrices(Resource resource,
                                                    Map<Long, List<Product>> productsByResourceId,
                                                    Map<Long, List<PriceListEntry>> pricesByProductId,
-                                                   Map<Long, String> productNameById,
+                                                   Map<Long, Product> productById,
                                                    Map<String, String> uomNameByCode) {
         List<Product> products;
         if (resource.getProduct() != null && resource.getProduct().getId() != null) {
-            products = List.of(resource.getProduct());
+            Product resolvedProduct = productById.get(resource.getProduct().getId());
+            products = resolvedProduct != null ? List.of(resolvedProduct) : List.of(resource.getProduct());
         } else {
             products = productsByResourceId.getOrDefault(resource.getId(), List.of());
         }
@@ -355,7 +362,7 @@ public class AvailabilityService {
                 prices.add(AvailabilityPriceDto.builder()
                         .tenantId(product.getTenantId())
                         .productId(product.getId())
-                        .productName(productNameById.get(product.getId()))
+                        .productName(product.getName())
                         .uom(entry.getUom())
                         .uomName(entry.getUom() != null ? uomNameByCode.get(entry.getUom().toUpperCase()) : null)
                         .startTime(entry.getStartTime())
@@ -368,6 +375,64 @@ public class AvailabilityService {
             }
         }
         return prices;
+    }
+
+    private Product resolveProduct(Resource resource,
+                                   Map<Long, List<Product>> productsByResourceId,
+                                   Map<Long, Product> productById) {
+        if (resource.getProduct() != null && resource.getProduct().getId() != null) {
+            Product resolvedProduct = productById.get(resource.getProduct().getId());
+            return resolvedProduct != null ? resolvedProduct : resource.getProduct();
+        }
+        List<Product> products = productsByResourceId.getOrDefault(resource.getId(), List.of());
+        return products.isEmpty() ? null : products.get(0);
+    }
+
+    private AvailabilityProductDto toAvailabilityProductDto(Product product) {
+        if (product == null) {
+            return null;
+        }
+        return AvailabilityProductDto.builder()
+                .tenantId(product.getTenantId())
+                .productId(product.getId())
+                .productName(product.getName())
+                .description(firstNonBlank(product.getDescription(), product.getName()))
+                .defaultImageUrl(resolveDefaultImageUrl(product.getImages()))
+                .galleryImages(toGalleryImageDtos(product.getImages()))
+                .build();
+    }
+
+    private List<ProductGalleryImageDto> toGalleryImageDtos(List<ProductImage> images) {
+        if (images == null || images.isEmpty()) {
+            return List.of();
+        }
+        return images.stream()
+                .map(image -> ProductGalleryImageDto.builder()
+                        .id(image.getId())
+                        .imageUrl(image.getImageUrl())
+                        .defaultImage(Boolean.TRUE.equals(image.getDefaultImage()))
+                        .sortOrder(image.getSortOrder())
+                        .build())
+                .toList();
+    }
+
+    private String resolveDefaultImageUrl(List<ProductImage> images) {
+        if (images == null || images.isEmpty()) {
+            return null;
+        }
+        return images.stream()
+                .filter(image -> Boolean.TRUE.equals(image.getDefaultImage()))
+                .findFirst()
+                .or(() -> images.stream().findFirst())
+                .map(ProductImage::getImageUrl)
+                .orElse(null);
+    }
+
+    private String firstNonBlank(String first, String fallback) {
+        if (first != null && !first.isBlank()) {
+            return first.trim();
+        }
+        return fallback;
     }
 
     private List<Interval> computeFreeSlots(ServiceCalendarService.ServiceWindow window, List<Allocation> allocations) {

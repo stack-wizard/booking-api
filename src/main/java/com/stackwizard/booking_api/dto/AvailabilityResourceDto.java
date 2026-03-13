@@ -26,6 +26,7 @@ public class AvailabilityResourceDto {
     private LocalTime serviceWindowEnd;
     private List<AvailabilitySlotDto> availableSlots;
     private List<AvailabilitySlotDto> gridSlots;
+    private AvailabilityProductDto product;
     private List<AvailabilityPriceDto> prices;
     private List<AvailabilityResourceRefDto> parents;
     private List<AvailabilityResourceRefDto> components;
