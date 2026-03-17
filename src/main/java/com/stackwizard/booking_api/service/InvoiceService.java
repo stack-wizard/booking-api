@@ -52,6 +52,7 @@ import java.util.Optional;
 
 @Service
 public class InvoiceService {
+    private static final String ONLINE_SYSTEM_USERNAME_PREFIX = "online-system-tenant-";
     private static final String PRODUCT_TYPE_DEPOSIT = "DEPOSIT";
     private static final String REFERENCE_TABLE_RESERVATION_REQUEST = "reservation_request";
     private static final String REFERENCE_TABLE_PAYMENT_INTENT = "payment_intent";
@@ -1013,6 +1014,16 @@ public class InvoiceService {
             return requestedIssuer.getId();
         }
 
+        if (issuedByMode == IssuedByMode.ONLINE_SYSTEM) {
+            Optional<AppUser> onlineSystemUser = appUserRepo.findByTenantIdAndUsername(
+                    tenantId,
+                    onlineSystemUsername(tenantId)
+            );
+            if (onlineSystemUser.isPresent()) {
+                return onlineSystemUser.get().getId();
+            }
+        }
+
         if (currentUser.isPresent()) {
             AppUser issuer = currentUser.get();
             if (tenantId.equals(issuer.getTenantId())) {
@@ -1020,6 +1031,10 @@ public class InvoiceService {
             }
         }
         return null;
+    }
+
+    private String onlineSystemUsername(Long tenantId) {
+        return ONLINE_SYSTEM_USERNAME_PREFIX + tenantId;
     }
 
     private Optional<AppUser> resolveAuthenticatedAppUser() {

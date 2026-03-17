@@ -307,7 +307,7 @@ public class InvoiceFiscalizationService {
         String fiscalTimeout = firstNonBlank(normalizeNullable(request.getFiscalTimeoutPeriod()), DEFAULT_OFIS_TIMEOUT);
         String window = firstNonBlank(normalizeNullable(request.getWindow()), "1");
         String cashierNumber = firstNonBlank(normalizeNullable(request.getCashierNumber()), "1");
-        String cashierId = normalizeNullable(request.getCashierId());
+        String requestedCashierId = normalizeNullable(request.getCashierId());
         String fiscalFolioStatus = firstNonBlank(normalizeNullable(request.getFiscalFolioStatus()), "OK");
         String requestDefaultChargeTrxCode = firstNonBlank(normalizeNullable(request.getDefaultChargeTrxCode()), DEFAULT_OFIS_CHARGE_TRX_CODE);
         String operaFiscalBillNo = firstNonBlank(normalizeNullable(request.getOperaFiscalBillNo()), invoice.getInvoiceNumber());
@@ -512,12 +512,19 @@ public class InvoiceFiscalizationService {
 
         List<Map<String, Object>> revenueBuckets = buildRevenueBuckets(bucketSummaryByKey, billNo, grossAmountTotal, postings);
 
-        AppUser currentUser = resolveAuthenticatedAppUser().orElse(null);
-        String fiscalAppUser = firstNonBlank(normalizeNullable(request.getAppUser()), currentUser != null ? currentUser.getUsername() : "SYSTEM");
-        String fiscalAppUserId = firstNonBlank(normalizeNullable(request.getAppUserId()), currentUser != null && currentUser.getId() != null ? currentUser.getId().toString() : "0");
+        AppUser issuerUser = resolveInvoiceIssuerAppUser(invoice)
+                .or(() -> resolveAuthenticatedAppUser())
+                .orElse(null);
+        String fiscalAppUser = firstNonBlank(normalizeNullable(request.getAppUser()), issuerUser != null ? issuerUser.getUsername() : "SYSTEM");
+        String fiscalAppUserId = firstNonBlank(normalizeNullable(request.getAppUserId()), issuerUser != null && issuerUser.getId() != null ? issuerUser.getId().toString() : "0");
         String employeeNumber = firstNonBlank(
                 normalizeNullable(request.getEmployeeNumber()),
-                currentUser != null ? normalizeNullable(currentUser.getEmployeeNumber()) : null,
+                issuerUser != null ? normalizeNullable(issuerUser.getEmployeeNumber()) : null,
+                null
+        );
+        String cashierId = firstNonBlank(
+                requestedCashierId,
+                issuerUser != null ? normalizeNullable(issuerUser.getEmployeeNumber()) : null,
                 null
         );
 
@@ -1004,6 +1011,13 @@ public class InvoiceFiscalizationService {
             return Optional.empty();
         }
         return appUserRepo.findByUsername(username);
+    }
+
+    private Optional<AppUser> resolveInvoiceIssuerAppUser(Invoice invoice) {
+        if (invoice == null || invoice.getIssuedByUserId() == null) {
+            return Optional.empty();
+        }
+        return appUserRepo.findByIdAndTenantId(invoice.getIssuedByUserId(), invoice.getTenantId());
     }
 
     private String normalizeNullable(String value) {
