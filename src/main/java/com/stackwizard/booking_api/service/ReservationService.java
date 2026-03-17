@@ -91,16 +91,12 @@ public class ReservationService {
             r.setInfants(0);
         }
         if (r.getExpiresAt() == null) {
-            OffsetDateTime expiresAt = null;
+            ReservationRequest request = null;
             if (r.getRequest() != null && r.getRequest().getId() != null) {
-                ReservationRequest request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
-                expiresAt = request.getExpiresAt();
+                request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
                 r.setRequest(request);
             }
-            if (expiresAt == null) {
-                expiresAt = expiresAtForTenant(r.getTenantId());
-            }
-            r.setExpiresAt(expiresAt);
+            r.setExpiresAt(expiresAtForReservationHold(request, r.getTenantId()));
         }
         return repo.save(r);
     }
@@ -330,7 +326,7 @@ public class ReservationService {
                 .tenantId(tenantId)
                 .type(type)
                 .status(ReservationRequest.Status.DRAFT)
-                .expiresAt(expiresAtForTenant(tenantId))
+                .expiresAt(initialExpiresAtForRequest(type, tenantId))
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
@@ -415,6 +411,9 @@ public class ReservationService {
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
         if (request.getStatus() != ReservationRequest.Status.DRAFT) {
             throw new IllegalStateException("Only DRAFT requests can be extended");
+        }
+        if (isOpenEndedDraftRequest(request)) {
+            return ensureOpenEndedDraftRequest(request);
         }
         if (extensionCount(request) >= MAX_REQUEST_EXTENSIONS) {
             throw new IllegalStateException("Reservation request can be extended at most 3 times");
@@ -550,6 +549,20 @@ public class ReservationService {
         return OffsetDateTime.now().plusMinutes(minutes);
     }
 
+    private OffsetDateTime initialExpiresAtForRequest(ReservationRequest.Type type, Long tenantId) {
+        return type == ReservationRequest.Type.INTERNAL ? null : expiresAtForTenant(tenantId);
+    }
+
+    private OffsetDateTime expiresAtForReservationHold(ReservationRequest request, Long tenantId) {
+        if (request == null) {
+            return expiresAtForTenant(tenantId);
+        }
+        if (isOpenEndedDraftRequest(request)) {
+            return null;
+        }
+        return request.getExpiresAt() != null ? request.getExpiresAt() : expiresAtForTenant(tenantId);
+    }
+
     private ReservationRequest resolveRequestForHold(Long requestId, Long tenantId) {
         ReservationRequest existing = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("requestId not found"));
@@ -558,6 +571,9 @@ public class ReservationService {
         }
         if (existing.getStatus() != ReservationRequest.Status.DRAFT) {
             throw new IllegalStateException("Reservation request is not in DRAFT status");
+        }
+        if (isOpenEndedDraftRequest(existing)) {
+            return ensureOpenEndedDraftRequest(existing);
         }
         if (isExpired(existing.getExpiresAt())) {
             if (extensionCount(existing) >= MAX_REQUEST_EXTENSIONS) {
@@ -573,8 +589,55 @@ public class ReservationService {
         return existing;
     }
 
+    private ReservationRequest ensureOpenEndedDraftRequest(ReservationRequest request) {
+        boolean requestChanged = false;
+        if (request.getExpiresAt() != null) {
+            request.setExpiresAt(null);
+            requestChanged = true;
+        }
+
+        List<Reservation> reservations = repo.findByRequestId(request.getId());
+        boolean reservationsChanged = false;
+        List<Long> activeReservationIds = new ArrayList<>();
+        for (Reservation reservation : reservations) {
+            if ("CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                continue;
+            }
+            activeReservationIds.add(reservation.getId());
+            if (reservation.getExpiresAt() != null) {
+                reservation.setExpiresAt(null);
+                reservationsChanged = true;
+            }
+        }
+        if (reservationsChanged) {
+            repo.saveAll(reservations);
+        }
+
+        if (!activeReservationIds.isEmpty()) {
+            List<Allocation> allocations = allocationRepo.findByReservationIdIn(activeReservationIds);
+            boolean allocationsChanged = false;
+            for (Allocation allocation : allocations) {
+                if (allocation.getExpiresAt() != null) {
+                    allocation.setExpiresAt(null);
+                    allocationsChanged = true;
+                }
+            }
+            if (allocationsChanged) {
+                allocationRepo.saveAll(allocations);
+            }
+        }
+
+        return requestChanged ? requestRepo.save(request) : request;
+    }
+
     private int extensionCount(ReservationRequest request) {
         return request.getExtensionCount() != null ? request.getExtensionCount() : 0;
+    }
+
+    private boolean isOpenEndedDraftRequest(ReservationRequest request) {
+        return request != null
+                && request.getStatus() == ReservationRequest.Status.DRAFT
+                && request.getType() == ReservationRequest.Type.INTERNAL;
     }
 
     private boolean isExpired(OffsetDateTime expiresAt) {

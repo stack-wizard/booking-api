@@ -77,7 +77,7 @@ public class ReservationRequestController {
         if (request.getStatus() == null) {
             request.setStatus(ReservationRequest.Status.DRAFT);
         }
-        if (request.getExpiresAt() == null) {
+        if (request.getExpiresAt() == null && requiresDefaultExpiry(request)) {
             int minutes = tenantConfigService.holdTtlMinutes(tenantId);
             request.setExpiresAt(OffsetDateTime.now().plusMinutes(minutes));
         }
@@ -180,5 +180,10 @@ public class ReservationRequestController {
             return Sort.Direction.DESC;
         }
         throw new IllegalArgumentException("sortDir must be ASC or DESC");
+    }
+
+    private boolean requiresDefaultExpiry(ReservationRequest request) {
+        return request.getType() != ReservationRequest.Type.INTERNAL
+                || request.getStatus() != ReservationRequest.Status.DRAFT;
     }
 }
