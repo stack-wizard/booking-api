@@ -98,6 +98,8 @@ public class ReservationRequestDtoMapper {
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
+                .notes(request.getNotes())
+                .externalReservation(request.getExternalReservation())
                 .confirmationCode(request.getConfirmationCode())
                 .confirmedAt(request.getConfirmedAt())
                 .publicAccessUrl(publicAccessUrl)

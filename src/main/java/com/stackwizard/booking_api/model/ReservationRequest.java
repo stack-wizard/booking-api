@@ -49,6 +49,12 @@ public class ReservationRequest {
     @Column(name = "customer_phone")
     private String customerPhone;
 
+    @Column(name = "notes")
+    private String notes;
+
+    @Column(name = "external_reservation")
+    private String externalReservation;
+
     @Column(name = "confirmation_code")
     private String confirmationCode;
 
@@ -63,7 +69,9 @@ public class ReservationRequest {
 
     public enum Type {
         INTERNAL,
-        EXTERNAL
+        EXTERNAL,
+        WALKIN,
+        INHOUSE
     }
 
     public enum Status {

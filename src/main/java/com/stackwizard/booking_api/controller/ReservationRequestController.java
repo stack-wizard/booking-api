@@ -147,6 +147,8 @@ public class ReservationRequestController {
             case "customername", "customer_name" -> "customerName";
             case "customeremail", "customer_email" -> "customerEmail";
             case "customerphone", "customer_phone" -> "customerPhone";
+            case "notes" -> "notes";
+            case "externalreservation", "external_reservation" -> "externalReservation";
             case "confirmationcode", "confirmationnumber", "confirmation_number", "confirmation_code" -> "confirmationCode";
             case "extensioncount", "extension_count" -> "extensionCount";
             default -> throw new IllegalArgumentException("Unsupported sortBy value: " + sortBy);

@@ -20,6 +20,8 @@ public class ReservationRequestDto {
     private String customerName;
     private String customerEmail;
     private String customerPhone;
+    private String notes;
+    private String externalReservation;
     private String confirmationCode;
     private OffsetDateTime confirmedAt;
     private String publicAccessUrl;
