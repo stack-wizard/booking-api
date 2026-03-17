@@ -11,11 +11,13 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByTenantId(Long tenantId);
 
+    List<Product> findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(Long tenantId);
+
     Optional<Product> findByIdAndTenantId(Long id, Long tenantId);
 
-    Page<Product> findByTenantIdOrderByNameAsc(Long tenantId, Pageable pageable);
+    Page<Product> findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(Long tenantId, Pageable pageable);
 
-    Page<Product> findByTenantIdAndNameContainingIgnoreCaseOrderByNameAsc(Long tenantId, String name, Pageable pageable);
+    Page<Product> findByTenantIdAndNameContainingIgnoreCaseOrderByDisplayOrderAscNameAscIdAsc(Long tenantId, String name, Pageable pageable);
 
-    Optional<Product> findFirstByTenantIdAndProductTypeIgnoreCaseOrderByIdAsc(Long tenantId, String productType);
+    Optional<Product> findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(Long tenantId, String productType);
 }

@@ -519,7 +519,7 @@ public class InvoiceService {
         Long requestId = paymentIntent.getReservationRequestId();
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found for payment intent"));
-        Product depositProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByIdAsc(
+        Product depositProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(
                         paymentIntent.getTenantId(), PRODUCT_TYPE_DEPOSIT)
                 .orElseThrow(() -> new IllegalStateException("Deposit product is missing for tenant " + paymentIntent.getTenantId()));
 

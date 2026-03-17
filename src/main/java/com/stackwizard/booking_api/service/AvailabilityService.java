@@ -112,7 +112,7 @@ public class AvailabilityService {
         }
 
         Map<Long, List<Product>> productsByResourceId = new HashMap<>();
-        List<Product> products = productRepo.findByTenantId(tenantId);
+        List<Product> products = productRepo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(tenantId);
         Map<Long, Product> productById = new HashMap<>();
         for (Product product : products) {
             if (product.getResource() != null && product.getResource().getId() != null) {
@@ -396,6 +396,7 @@ public class AvailabilityService {
                 .tenantId(product.getTenantId())
                 .productId(product.getId())
                 .productName(product.getName())
+                .displayOrder(product.getDisplayOrder())
                 .description(firstNonBlank(product.getDescription(), product.getName()))
                 .defaultImageUrl(resolveDefaultImageUrl(product.getImages()))
                 .galleryImages(toGalleryImageDtos(product.getImages()))

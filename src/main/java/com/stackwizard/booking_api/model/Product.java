@@ -47,6 +47,9 @@ public class Product {
     @Column(nullable = false)
     private String name;
 
+    @Column(name = "display_order", nullable = false)
+    private Integer displayOrder;
+
     @Column(columnDefinition = "text")
     private String description;
 

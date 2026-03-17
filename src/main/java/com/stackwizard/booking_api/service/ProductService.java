@@ -9,6 +9,7 @@ import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -47,7 +48,14 @@ public class ProductService {
     }
 
     @Transactional(readOnly = true)
-    public List<Product> findAll() { return repo.findAll(); }
+    public List<Product> findAll() {
+        return repo.findAll(Sort.by(
+                Sort.Order.asc("tenantId"),
+                Sort.Order.asc("displayOrder"),
+                Sort.Order.asc("name"),
+                Sort.Order.asc("id")
+        ));
+    }
 
     @Transactional(readOnly = true)
     public Optional<Product> findById(Long id) { return repo.findById(id); }
@@ -155,9 +163,9 @@ public class ProductService {
         int normalizedLimit = Math.min(Math.max(limit, 1), 50);
         PageRequest page = PageRequest.of(0, normalizedLimit);
         if (!StringUtils.hasText(query)) {
-            return repo.findByTenantIdOrderByNameAsc(tenantId, page).getContent();
+            return repo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(tenantId, page).getContent();
         }
-        return repo.findByTenantIdAndNameContainingIgnoreCaseOrderByNameAsc(
+        return repo.findByTenantIdAndNameContainingIgnoreCaseOrderByDisplayOrderAscNameAscIdAsc(
                 tenantId,
                 query.trim(),
                 page
@@ -196,6 +204,7 @@ public class ProductService {
         return ProductSelectionDto.builder()
                 .productId(product.getId())
                 .productName(product.getName())
+                .displayOrder(product.getDisplayOrder())
                 .description(firstNonBlank(product.getDescription(), product.getName()))
                 .defaultImageUrl(resolveDefaultImageUrl(product.getImages()))
                 .galleryImages(product.getImages().stream()
@@ -215,6 +224,7 @@ public class ProductService {
             target.setTenantId(source.getTenantId());
         }
         target.setName(source.getName());
+        target.setDisplayOrder(source.getDisplayOrder());
         target.setDescription(trimToNull(source.getDescription()));
         target.setResource(source.getResource());
         target.setDefaultUom(source.getDefaultUom());
@@ -237,6 +247,10 @@ public class ProductService {
         product.setName(trimToNull(product.getName()));
         if (!StringUtils.hasText(product.getName())) {
             throw new IllegalArgumentException("name is required");
+        }
+
+        if (product.getDisplayOrder() == null) {
+            product.setDisplayOrder(0);
         }
 
         product.setDefaultUom(trimToNull(product.getDefaultUom()));
