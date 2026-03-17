@@ -110,32 +110,32 @@ public class InvoiceFiscalizationService {
         this.operaFiscalMappingService = operaFiscalMappingService;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = RuntimeException.class)
     public Invoice fiscalizeInvoice(Long invoiceId, InvoiceFiscalizeRequest request) {
         if (request == null) {
             throw new IllegalArgumentException("request body is required");
         }
         Invoice sourceInvoice = invoiceRepo.findById(invoiceId)
                 .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
-
-        Invoice invoice = ensureIssuedForFiscalization(sourceInvoice, request);
-        List<InvoiceItem> items = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoice.getId());
-        List<InvoicePaymentAllocation> allocations = allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId());
-        ReservationRequest reservationRequest = resolveReservationRequest(invoice);
-        Map<Long, Product> productsById = loadProductsById(items);
-
-        JsonNode payload = request.getOfisPayload();
-        if (payload == null || payload.isNull()) {
-            payload = buildOfisPayload(invoice, items, allocations, reservationRequest, productsById, request);
-        } else if (!payload.isObject()) {
-            throw new IllegalArgumentException("ofisPayload must be a JSON object");
-        }
-
-        invoice.setFiscalLastRequestPayload(payload);
-        invoice.setFiscalErrorMessage(null);
-        invoiceRepo.save(invoice);
-
+        Invoice invoice = sourceInvoice;
         try {
+            invoice = ensureIssuedForFiscalization(sourceInvoice, request);
+            List<InvoiceItem> items = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoice.getId());
+            List<InvoicePaymentAllocation> allocations = allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(invoice.getId());
+            ReservationRequest reservationRequest = resolveReservationRequest(invoice);
+            Map<Long, Product> productsById = loadProductsById(items);
+
+            JsonNode payload = request.getOfisPayload();
+            if (payload == null || payload.isNull()) {
+                payload = buildOfisPayload(invoice, items, allocations, reservationRequest, productsById, request);
+            } else if (!payload.isObject()) {
+                throw new IllegalArgumentException("ofisPayload must be a JSON object");
+            }
+
+            invoice.setFiscalLastRequestPayload(payload);
+            invoice.setFiscalErrorMessage(null);
+            invoiceRepo.save(invoice);
+
             JsonNode response = ofisFiscalizationClient.fiscalize(invoice.getTenantId(), payload);
             applyFiscalResponse(invoice, response);
             invoice.setFiscalizationStatus(InvoiceFiscalizationStatus.FISCALIZED);

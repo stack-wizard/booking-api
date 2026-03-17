@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stackwizard.booking_api.dto.PaymentInitiateRequest;
 import com.stackwizard.booking_api.dto.PaymentInitiateResponse;
 import com.stackwizard.booking_api.model.DepositPolicy;
+import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.Reservation;
@@ -14,12 +15,14 @@ import com.stackwizard.booking_api.repository.PaymentEventRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
+import com.stackwizard.booking_api.service.fiscal.InvoiceAutoFiscalizationRequestedEvent;
 import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderInitResult;
 import com.stackwizard.booking_api.service.payment.PaymentProviderWebhookResult;
 import com.stackwizard.booking_api.service.payment.MonriTenantConfigResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -74,6 +77,7 @@ public class PaymentService {
     private final DepositPolicyRepository depositPolicyRepo;
     private final ReservationService reservationService;
     private final InvoiceService invoiceService;
+    private final ApplicationEventPublisher eventPublisher;
     private final MonriTenantConfigResolver monriTenantConfigResolver;
     private final Environment environment;
     private final Map<String, PaymentProviderClient> providerClients;
@@ -86,6 +90,7 @@ public class PaymentService {
                           DepositPolicyRepository depositPolicyRepo,
                           ReservationService reservationService,
                           InvoiceService invoiceService,
+                          ApplicationEventPublisher eventPublisher,
                           MonriTenantConfigResolver monriTenantConfigResolver,
                           Environment environment,
                           List<PaymentProviderClient> providerClients) {
@@ -96,6 +101,7 @@ public class PaymentService {
         this.depositPolicyRepo = depositPolicyRepo;
         this.reservationService = reservationService;
         this.invoiceService = invoiceService;
+        this.eventPublisher = eventPublisher;
         this.monriTenantConfigResolver = monriTenantConfigResolver;
         this.environment = environment;
         this.providerClients = providerClients.stream()
@@ -495,7 +501,8 @@ public class PaymentService {
                         && !STATUS_EXPIRED.equals(previousStatus)
                         && !STATUS_CANCELED.equals(previousStatus)) {
                     reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
-                    invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+                    Invoice depositInvoice = invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+                    eventPublisher.publishEvent(new InvoiceAutoFiscalizationRequestedEvent(depositInvoice.getId()));
                 }
             }
             return;
