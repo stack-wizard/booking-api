@@ -90,12 +90,17 @@ public class ReservationService {
         if (r.getInfants() == null) {
             r.setInfants(0);
         }
-        if (r.getExpiresAt() == null) {
-            ReservationRequest request = null;
-            if (r.getRequest() != null && r.getRequest().getId() != null) {
-                request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
-                r.setRequest(request);
+        ReservationRequest request = null;
+        if (r.getRequest() != null && r.getRequest().getId() != null) {
+            request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
+            r.setRequest(request);
+            if (request.getType() != null) {
+                r.setRequestType(request.getType());
             }
+        }
+        if (isOpenEndedDraftRequest(request)) {
+            r.setExpiresAt(null);
+        } else if (r.getExpiresAt() == null) {
             r.setExpiresAt(expiresAtForReservationHold(request, r.getTenantId()));
         }
         return repo.save(r);

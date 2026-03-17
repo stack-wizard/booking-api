@@ -34,7 +34,6 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -193,5 +192,66 @@ class ReservationServiceInternalRequestTest {
         assertThat(saved.getRequest().getExpiresAt()).isNull();
         assertThat(existingReservation.getExpiresAt()).isNull();
         assertThat(existingAllocation.getExpiresAt()).isNull();
+    }
+
+    @Test
+    void createReservationAndAllocateUsesNullExpiryForExistingInternalDraftRequest() {
+        Long tenantId = 1L;
+        OffsetDateTime futureExpiry = OffsetDateTime.now().plusMinutes(15);
+        LocalDateTime startsAt = LocalDateTime.of(2026, 5, 17, 18, 31);
+        LocalDateTime endsAt = LocalDateTime.of(2026, 5, 17, 19, 31);
+
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(118L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.INTERNAL)
+                .status(ReservationRequest.Status.DRAFT)
+                .expiresAt(futureExpiry)
+                .extensionCount(0)
+                .build();
+        Resource requestedResource = Resource.builder()
+                .id(211L)
+                .tenantId(tenantId)
+                .kind("EXACT")
+                .unitCount(1)
+                .build();
+        Reservation incoming = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .requestType(ReservationRequest.Type.INTERNAL)
+                .requestedResource(Resource.builder().id(requestedResource.getId()).build())
+                .startsAt(startsAt)
+                .endsAt(endsAt)
+                .build();
+        Reservation linkedReservation = Reservation.builder()
+                .id(4177L)
+                .tenantId(tenantId)
+                .status("HOLD")
+                .expiresAt(futureExpiry)
+                .build();
+
+        when(resourceRepo.findById(requestedResource.getId())).thenReturn(Optional.of(requestedResource));
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of(linkedReservation));
+        when(reservationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.findByReservationIdIn(List.of(linkedReservation.getId()))).thenReturn(List.of());
+        when(allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
+                requestedResource.getId(), endsAt, startsAt)).thenReturn(0L);
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
+            Reservation reservation = invocation.getArgument(0);
+            reservation.setId(4178L);
+            return reservation;
+        });
+        when(compositionRepo.findByParentResourceId(requestedResource.getId())).thenReturn(List.of());
+        when(allocationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<Allocation> allocations = service.createReservationAndAllocate(incoming);
+
+        assertThat(allocations).hasSize(1);
+        Reservation savedReservation = allocations.getFirst().getReservation();
+        assertThat(savedReservation.getRequest().getExpiresAt()).isNull();
+        assertThat(savedReservation.getExpiresAt()).isNull();
+        assertThat(savedReservation.getRequestType()).isEqualTo(ReservationRequest.Type.INTERNAL);
     }
 }
