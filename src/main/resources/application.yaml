@@ -44,3 +44,6 @@ security:
 
 payments:
   intent-expiry-scan-ms: ${PAYMENTS_INTENT_EXPIRY_SCAN_MS:60000}
+
+booking:
+  public-base-url: ${BOOKING_PUBLIC_BASE_URL:}

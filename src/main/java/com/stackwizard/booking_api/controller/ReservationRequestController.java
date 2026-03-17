@@ -7,9 +7,11 @@ import com.stackwizard.booking_api.dto.ReservationTtlExtendRequest;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
+import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.TenantConfigService;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -29,15 +31,18 @@ public class ReservationRequestController {
 
     private final ReservationRequestService service;
     private final ReservationService reservationService;
+    private final ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestDtoMapper dtoMapper;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
+                                        ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider,
                                         TenantConfigService tenantConfigService,
                                         ReservationRequestDtoMapper dtoMapper) {
         this.service = service;
         this.reservationService = reservationService;
+        this.reservationConfirmationEmailServiceProvider = reservationConfirmationEmailServiceProvider;
         this.tenantConfigService = tenantConfigService;
         this.dtoMapper = dtoMapper;
     }
@@ -95,6 +100,17 @@ public class ReservationRequestController {
     public ResponseEntity<Void> finalizeRequest(@PathVariable Long id) {
         reservationService.finalizeRequest(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{id}/send-confirmation-email")
+    public ResponseEntity<ReservationConfirmationEmailService.DispatchResult> sendConfirmationEmail(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean force) {
+        ReservationConfirmationEmailService service = reservationConfirmationEmailServiceProvider.getIfAvailable();
+        if (service == null) {
+            throw new IllegalStateException("Reservation confirmation email feature is not available");
+        }
+        return ResponseEntity.ok(service.sendForDebug(id, force));
     }
 
     @PatchMapping("/{id}/customer")

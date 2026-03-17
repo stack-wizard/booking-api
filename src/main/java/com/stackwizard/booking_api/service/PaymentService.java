@@ -20,6 +20,7 @@ import com.stackwizard.booking_api.service.payment.PaymentProviderWebhookResult;
 import com.stackwizard.booking_api.service.payment.MonriTenantConfigResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -73,6 +75,7 @@ public class PaymentService {
     private final ReservationService reservationService;
     private final InvoiceService invoiceService;
     private final MonriTenantConfigResolver monriTenantConfigResolver;
+    private final Environment environment;
     private final Map<String, PaymentProviderClient> providerClients;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -84,6 +87,7 @@ public class PaymentService {
                           ReservationService reservationService,
                           InvoiceService invoiceService,
                           MonriTenantConfigResolver monriTenantConfigResolver,
+                          Environment environment,
                           List<PaymentProviderClient> providerClients) {
         this.paymentIntentRepo = paymentIntentRepo;
         this.paymentEventRepo = paymentEventRepo;
@@ -93,6 +97,7 @@ public class PaymentService {
         this.reservationService = reservationService;
         this.invoiceService = invoiceService;
         this.monriTenantConfigResolver = monriTenantConfigResolver;
+        this.environment = environment;
         this.providerClients = providerClients.stream()
                 .collect(Collectors.toMap(c -> c.providerCode().toUpperCase(Locale.ROOT), c -> c));
     }
@@ -271,14 +276,19 @@ public class PaymentService {
                                      String authorization,
                                      String httpAuthorization) {
         MonriTenantConfigResolver.MonriResolvedConfig monriConfig = monriTenantConfigResolver.resolve(tenantId);
-        verifyMonriCallbackDigest(
-                tenantId,
-                monriConfig.callbackAuthToken(),
-                monriConfig.clientSecret(),
-                payload,
-                authorization,
-                httpAuthorization
-        );
+        if (isLocalProfileActive()) {
+            log.warn("Skipping Monri callback authorization digest verification for tenant {} because local profile is active",
+                    tenantId);
+        } else {
+            verifyMonriCallbackDigest(
+                    tenantId,
+                    monriConfig.callbackAuthToken(),
+                    monriConfig.clientSecret(),
+                    payload,
+                    authorization,
+                    httpAuthorization
+            );
+        }
         JsonNode payloadNode = parsePayloadNode(payload);
         JsonNode data = payloadNode.path("payload").isObject() ? payloadNode.path("payload") : payloadNode;
 
@@ -316,6 +326,11 @@ public class PaymentService {
         }
 
         applyMonriStatusTransition(paymentIntent, STATUS_PAID);
+    }
+
+    private boolean isLocalProfileActive() {
+        return Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "local".equalsIgnoreCase(profile));
     }
 
     private void verifyMonriCallbackDigest(Long tenantId,

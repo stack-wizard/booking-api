@@ -203,7 +203,7 @@ public class AvailabilityService {
         }
 
         Map<Long, List<Interval>> effectiveSlotsByResourceId = computeEffectiveSlots(
-                resources, freeSlotsByResourceId, membersByParent, parentsByMember);
+                resources, freeSlotsByResourceId, membersByParent);
         List<AvailabilityResourceDto> resourceDtos = new ArrayList<>();
         for (Resource resource : resources) {
             ServiceCalendarService.ServiceWindow window = windowByResourceId.get(resource.getId());
@@ -483,8 +483,7 @@ public class AvailabilityService {
 
     private Map<Long, List<Interval>> computeEffectiveSlots(List<Resource> resources,
                                                             Map<Long, List<Interval>> freeSlotsByResourceId,
-                                                            Map<Long, List<Resource>> membersByParent,
-                                                            Map<Long, List<Resource>> parentsByMember) {
+                                                            Map<Long, List<Resource>> membersByParent) {
         Map<Long, List<Interval>> effective = new HashMap<>();
         for (Resource resource : resources) {
             effective.put(resource.getId(), freeSlotsByResourceId.getOrDefault(resource.getId(), List.of()));
@@ -500,6 +499,8 @@ public class AvailabilityService {
 
                 List<Resource> members = membersByParent.getOrDefault(id, List.of());
                 if (!members.isEmpty()) {
+                    // Composition availability depends on all of its members. Member resources do not inherit
+                    // parent availability because package bookings allocate the members directly.
                     List<Interval> memberIntersection = null;
                     for (Resource member : members) {
                         List<Interval> memberSlots = effective.getOrDefault(member.getId(), List.of());
@@ -515,15 +516,6 @@ public class AvailabilityService {
                     if (memberIntersection != null) {
                         next = intersectIntervals(next, memberIntersection);
                     }
-                }
-
-                List<Resource> parents = parentsByMember.getOrDefault(id, List.of());
-                if (!parents.isEmpty()) {
-                    List<Interval> parentUnion = new ArrayList<>();
-                    for (Resource parent : parents) {
-                        parentUnion = unionIntervals(parentUnion, effective.getOrDefault(parent.getId(), List.of()));
-                    }
-                    next = intersectIntervals(next, parentUnion);
                 }
 
                 if (!sameIntervals(current, next)) {

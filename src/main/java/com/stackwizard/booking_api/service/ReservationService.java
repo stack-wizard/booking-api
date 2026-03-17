@@ -18,6 +18,7 @@ import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ResourceCompositionRepository;
 import com.stackwizard.booking_api.repository.ResourceRepository;
 import com.stackwizard.booking_api.security.TenantResolver;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,6 +44,7 @@ public class ReservationService {
     private final ReservationRequestRepository requestRepo;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestAccessTokenService accessTokenService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ReservationService(ReservationRepository repo,
                               AllocationRepository allocationRepo,
@@ -53,7 +55,8 @@ public class ReservationService {
                               BookingTranslationService translationService,
                               ReservationRequestRepository requestRepo,
                               TenantConfigService tenantConfigService,
-                              ReservationRequestAccessTokenService accessTokenService) {
+                              ReservationRequestAccessTokenService accessTokenService,
+                              ApplicationEventPublisher eventPublisher) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
         this.resourceRepo = resourceRepo;
@@ -64,6 +67,7 @@ public class ReservationService {
         this.requestRepo = requestRepo;
         this.tenantConfigService = tenantConfigService;
         this.accessTokenService = accessTokenService;
+        this.eventPublisher = eventPublisher;
     }
 
     public List<Reservation> findAll() { return repo.findAll(); }
@@ -371,6 +375,7 @@ public class ReservationService {
                 requestRepo.save(request);
             }
             accessTokenService.ensureActiveTokenForFinalizedRequest(request, reservations);
+            eventPublisher.publishEvent(new ReservationRequestFinalizedEvent(requestId));
             return;
         }
         request.setStatus(ReservationRequest.Status.FINALIZED);
@@ -401,6 +406,7 @@ public class ReservationService {
         }
 
         accessTokenService.ensureActiveTokenForFinalizedRequest(request, reservations);
+        eventPublisher.publishEvent(new ReservationRequestFinalizedEvent(requestId));
     }
 
     @Transactional

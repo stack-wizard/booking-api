@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reservation Confirmed</title>
+    <style>
+        @media only screen and (max-width: 620px) {
+            .shell {
+                width: 100% !important;
+            }
+            .shell-cell {
+                padding-left: 14px !important;
+                padding-right: 14px !important;
+            }
+            .panel-cell {
+                padding-left: 20px !important;
+                padding-right: 20px !important;
+            }
+        }
+    </style>
+</head>
+<body style="margin:0; padding:0; background:#050603; color:#f6efe0; font-family:Arial, Helvetica, sans-serif;">
+<div style="display:none; overflow:hidden; line-height:1px; opacity:0; max-height:0; max-width:0;">
+    [[PREHEADER]]
+</div>
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#050603;">
+    <tr>
+        <td align="center" class="shell-cell" style="padding:20px 12px;">
+            <table role="presentation" width="620" cellspacing="0" cellpadding="0" class="shell" style="width:620px; max-width:620px; border:1px solid #695229; background:#070804;">
+                <tr>
+                    <td class="panel-cell" style="padding:26px 32px 18px; border-top:1px solid #b28939;">
+                        <div style="font-size:11px; letter-spacing:5px; text-transform:uppercase; color:#ae9e73; margin-bottom:14px;">[[BRAND_NAME_UPPER]]</div>
+                        <div style="font-family:Georgia, 'Times New Roman', serif; font-size:48px; line-height:1.08; color:#f6efe0;">Reservation Confirmed</div>
+                        <div style="margin-top:10px; font-size:16px; line-height:1.7; color:#938b77;">Your booking has been received and confirmed.</div>
+                    </td>
+                </tr>
+                <tr>
+                    <td align="center" class="panel-cell" style="padding:16px 32px 10px;">
+                        <span style="display:inline-block; padding:14px 28px; border:1px solid #355535; background:#102111; color:#b7d4a5; font-size:12px; letter-spacing:4px; text-transform:uppercase;">Booking Confirmed</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="panel-cell" style="padding:8px 32px 0;">
+                        [[BOOKING_CARDS]]
+                    </td>
+                </tr>
+                <tr>
+                    <td class="panel-cell" style="padding:12px 32px 0;">
+                        <div style="font-size:11px; letter-spacing:4px; text-transform:uppercase; color:#ae9e73; margin-bottom:14px;">Price Summary</div>
+                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #2c2b20; background:#0a0b07;">
+                            [[PRICE_ROWS]]
+                            <tr>
+                                <td style="padding:16px 20px; border-bottom:1px solid #202116; color:#8c886f; font-size:13px;">Subtotal</td>
+                                <td align="right" style="padding:16px 20px; border-bottom:1px solid #202116; color:#8c886f; font-size:13px; white-space:nowrap;">[[SUBTOTAL_AMOUNT]]</td>
+                            </tr>
+                            <tr style="background:#151108;">
+                                <td style="padding:16px 20px; border-bottom:1px solid #202116; color:#f6efe0; font-size:16px;">[[DEPOSIT_LABEL]]</td>
+                                <td align="right" style="padding:16px 20px; border-bottom:1px solid #202116; color:#d8bf84; font-family:Georgia, 'Times New Roman', serif; font-size:30px; white-space:nowrap;">[[DEPOSIT_AMOUNT]]</td>
+                            </tr>
+                            <tr>
+                                <td style="padding:16px 20px; color:#8c886f; font-size:13px;">Remaining at venue</td>
+                                <td align="right" style="padding:16px 20px; color:#8c886f; font-size:13px; white-space:nowrap;">[[REMAINING_AMOUNT]]</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                [[INCLUDES_BLOCK]]
+                [[ARRIVAL_NOTE_BLOCK]]
+                <tr>
+                    <td style="padding:30px 32px 28px; border-top:1px solid #1a1b14; text-align:center;">
+                        <div style="font-size:11px; letter-spacing:4px; text-transform:uppercase; color:#7f7a63;">[[FOOTER_LOCATION]]</div>
+                        [[CONTACT_LINE]]
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

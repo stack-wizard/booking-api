@@ -61,6 +61,9 @@ public class ReservationRequest {
     @Column(name = "confirmed_at")
     private OffsetDateTime confirmedAt;
 
+    @Column(name = "confirmation_email_sent_at")
+    private OffsetDateTime confirmationEmailSentAt;
+
     @Column(name = "extension_count", nullable = false)
     private Integer extensionCount;
 

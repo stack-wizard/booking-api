@@ -3,6 +3,7 @@ package com.stackwizard.booking_api;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 import com.stackwizard.booking_api.config.MediaS3Properties;
@@ -10,7 +11,12 @@ import com.stackwizard.booking_api.config.PaymentsProperties;
 import com.stackwizard.booking_api.security.JwtProperties;
 
 @SpringBootApplication
-@EnableConfigurationProperties({JwtProperties.class, MediaS3Properties.class, PaymentsProperties.class})
+@EnableConfigurationProperties({
+		JwtProperties.class,
+		MediaS3Properties.class,
+		PaymentsProperties.class
+})
+@EnableAsync
 @EnableScheduling
 public class BookingApiApplication {
 

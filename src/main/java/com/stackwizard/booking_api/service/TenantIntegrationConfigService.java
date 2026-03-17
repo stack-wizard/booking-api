@@ -75,6 +75,20 @@ public class TenantIntegrationConfigService {
         config.setClientSecret(normalizeNullable(config.getClientSecret()));
         config.setAuthenticityToken(normalizeNullable(config.getAuthenticityToken()));
         config.setCallbackAuthToken(normalizeNullable(config.getCallbackAuthToken()));
+        config.setSmtpHost(normalizeNullable(config.getSmtpHost()));
+        config.setSmtpPort(config.getSmtpPort());
+        config.setSmtpUsername(normalizeNullable(config.getSmtpUsername()));
+        config.setSmtpPassword(normalizeNullable(config.getSmtpPassword()));
+        config.setSmtpAuth(config.getSmtpAuth());
+        config.setSmtpStarttlsEnabled(config.getSmtpStarttlsEnabled());
+        config.setSmtpSslEnabled(config.getSmtpSslEnabled());
+        config.setEmailFrom(normalizeNullable(config.getEmailFrom()));
+        config.setEmailReplyTo(normalizeNullable(config.getEmailReplyTo()));
+        config.setEmailBrandName(normalizeNullable(config.getEmailBrandName()));
+        config.setEmailSupportEmail(normalizeNullable(config.getEmailSupportEmail()));
+        config.setEmailFooterLocation(normalizeNullable(config.getEmailFooterLocation()));
+        config.setEmailArrivalNote(normalizeNullable(config.getEmailArrivalNote()));
+        config.setEmailLocale(normalizeNullableLower(config.getEmailLocale()));
         if (config.getActive() == null) {
             config.setActive(Boolean.TRUE);
         }
@@ -96,5 +110,10 @@ public class TenantIntegrationConfigService {
     private String normalizeNullableUpper(String value) {
         String normalized = normalizeNullable(value);
         return normalized == null ? null : normalized.toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeNullableLower(String value) {
+        String normalized = normalizeNullable(value);
+        return normalized == null ? null : normalized.toLowerCase(Locale.ROOT);
     }
 }

@@ -1,0 +1,15 @@
+alter table tenant_integration_config
+  add column if not exists smtp_host text null,
+  add column if not exists smtp_port integer null,
+  add column if not exists smtp_username text null,
+  add column if not exists smtp_password text null,
+  add column if not exists smtp_auth boolean null,
+  add column if not exists smtp_starttls_enabled boolean null,
+  add column if not exists smtp_ssl_enabled boolean null,
+  add column if not exists email_from text null,
+  add column if not exists email_reply_to text null,
+  add column if not exists email_brand_name text null,
+  add column if not exists email_support_email text null,
+  add column if not exists email_footer_location text null,
+  add column if not exists email_arrival_note text null,
+  add column if not exists email_locale text null;
