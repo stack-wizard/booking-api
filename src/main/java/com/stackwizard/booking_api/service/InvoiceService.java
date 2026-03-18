@@ -520,6 +520,7 @@ public class InvoiceService {
         Long requestId = paymentIntent.getReservationRequestId();
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found for payment intent"));
+        List<Reservation> reservations = reservationRepo.findByRequestId(requestId);
         Product depositProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(
                         paymentIntent.getTenantId(), PRODUCT_TYPE_DEPOSIT)
                 .orElseThrow(() -> new IllegalStateException("Deposit product is missing for tenant " + paymentIntent.getTenantId()));
@@ -541,9 +542,12 @@ public class InvoiceService {
                 .invoiceType(InvoiceType.DEPOSIT)
                 .invoiceNumber(invoiceNumber)
                 .invoiceDate(LocalDate.now())
-                .customerName(request.getCustomerName())
-                .customerEmail(request.getCustomerEmail())
-                .customerPhone(request.getCustomerPhone())
+                .customerName(firstNonBlank(request.getCustomerName(),
+                        reservations.stream().map(Reservation::getCustomerName).filter(v -> v != null && !v.isBlank()).findFirst().orElse(null)))
+                .customerEmail(firstNonBlank(request.getCustomerEmail(),
+                        reservations.stream().map(Reservation::getCustomerEmail).filter(v -> v != null && !v.isBlank()).findFirst().orElse(null)))
+                .customerPhone(firstNonBlank(request.getCustomerPhone(),
+                        reservations.stream().map(Reservation::getCustomerPhone).filter(v -> v != null && !v.isBlank()).findFirst().orElse(null)))
                 .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
                 .issuedAt(OffsetDateTime.now())
                 .status(InvoiceStatus.ISSUED)
