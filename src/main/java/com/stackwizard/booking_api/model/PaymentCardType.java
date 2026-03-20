@@ -11,16 +11,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "payment_transaction")
+@Table(name = "payment_card_type")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PaymentTransaction {
+public class PaymentCardType {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,32 +27,14 @@ public class PaymentTransaction {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "reservation_request_id")
-    private Long reservationRequestId;
-
-    @Column(name = "payment_intent_id")
-    private Long paymentIntentId;
-
-    @Column(name = "payment_type", nullable = false)
-    private String paymentType;
-
-    @Column(name = "card_type")
-    private String cardType;
-
     @Column(nullable = false)
-    private String status;
-
-    @Column(nullable = false)
-    private String currency;
-
-    @Column(nullable = false)
-    private BigDecimal amount;
-
-    @Column(name = "external_ref")
-    private String externalRef;
+    private String code;
 
     @Column
-    private String note;
+    private String name;
+
+    @Column(nullable = false)
+    private Boolean active;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

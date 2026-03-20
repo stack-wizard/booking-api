@@ -18,6 +18,7 @@ public class PaymentTransactionDto {
     private Long reservationRequestId;
     private Long paymentIntentId;
     private String paymentType;
+    private String cardType;
     private String status;
     private String currency;
     private BigDecimal amount;

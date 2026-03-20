@@ -1,5 +1,7 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.InvoiceCreateItemRequest;
+import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceItem;
 import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
@@ -7,8 +9,11 @@ import com.stackwizard.booking_api.model.InvoiceSequence;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.model.Product;
+import com.stackwizard.booking_api.model.AppUser;
+import com.stackwizard.booking_api.model.OperaPostingStatus;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
+import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.repository.AppUserRepository;
 import com.stackwizard.booking_api.repository.InvoiceItemRepository;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
@@ -158,5 +163,63 @@ class InvoiceServiceTest {
         assertThat(invoice.getCustomerName()).isEqualTo("John Doe");
         assertThat(invoice.getCustomerEmail()).isEqualTo("john@example.com");
         assertThat(invoice.getCustomerPhone()).isEqualTo("+38591111222");
+    }
+
+    @Test
+    void createManualRoomChargeDraftStoresOperaTargetFields() {
+        Long tenantId = 1L;
+        Product product = Product.builder()
+                .id(77L)
+                .tenantId(tenantId)
+                .name("Room Charge")
+                .tax1Percent(new BigDecimal("25"))
+                .tax2Percent(BigDecimal.ZERO)
+                .build();
+        InvoiceSequence sequence = InvoiceSequence.builder()
+                .tenantId(tenantId)
+                .invoiceType("ROOM_CHARGE")
+                .invoiceYear(LocalDate.now().getYear())
+                .lastNumber(0)
+                .build();
+        AppUser onlineSystemUser = AppUser.builder()
+                .id(12L)
+                .tenantId(tenantId)
+                .username("online-system-tenant-1")
+                .build();
+
+        InvoiceCreateRequest request = new InvoiceCreateRequest();
+        request.setTenantId(tenantId);
+        request.setInvoiceType(InvoiceType.ROOM_CHARGE);
+        request.setCurrency("eur");
+        request.setOperaReservationId(460983L);
+        request.setOperaHotelCode("dh");
+
+        InvoiceCreateItemRequest item = new InvoiceCreateItemRequest();
+        item.setProductId(product.getId());
+        item.setQuantity(1);
+        item.setUnitPriceGross(new BigDecimal("170.00"));
+        request.setItems(List.of(item));
+
+        when(productRepo.findByIdAndTenantId(product.getId(), tenantId)).thenReturn(Optional.of(product));
+        when(sequenceRepo.findForUpdate(tenantId, "ROOM_CHARGE", LocalDate.now().getYear()))
+                .thenReturn(Optional.of(sequence));
+        when(sequenceRepo.save(any(InvoiceSequence.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(appUserRepo.findByTenantIdAndUsername(tenantId, "online-system-tenant-1"))
+                .thenReturn(Optional.of(onlineSystemUser));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> {
+            Invoice invoice = invocation.getArgument(0);
+            if (invoice.getId() == null) {
+                invoice.setId(901L);
+            }
+            return invoice;
+        });
+        when(invoiceItemRepo.save(any(InvoiceItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Invoice invoice = service.createManualDraft(request);
+
+        assertThat(invoice.getInvoiceType()).isEqualTo(InvoiceType.ROOM_CHARGE);
+        assertThat(invoice.getOperaReservationId()).isEqualTo(460983L);
+        assertThat(invoice.getOperaHotelCode()).isEqualTo("DH");
+        assertThat(invoice.getOperaPostingStatus()).isEqualTo(OperaPostingStatus.NOT_POSTED);
     }
 }

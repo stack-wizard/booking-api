@@ -72,11 +72,20 @@ public class TenantIntegrationConfig {
     @Column(name = "client_secret")
     private String clientSecret;
 
+    @Column(name = "enterprise_id")
+    private String enterpriseId;
+
     @Column(name = "authenticity_token")
     private String authenticityToken;
 
     @Column(name = "callback_auth_token")
     private String callbackAuthToken;
+
+    @Column(name = "app_key")
+    private String appKey;
+
+    @Column(name = "access_token")
+    private String accessToken;
 
     @Column(name = "smtp_host")
     private String smtpHost;

@@ -9,5 +9,14 @@ import java.util.Optional;
 public interface OperaFiscalPaymentMappingRepository extends JpaRepository<OperaFiscalPaymentMapping, Long> {
     List<OperaFiscalPaymentMapping> findByTenantId(Long tenantId);
 
-    Optional<OperaFiscalPaymentMapping> findByTenantIdAndPaymentTypeIgnoreCase(Long tenantId, String paymentType);
+    Optional<OperaFiscalPaymentMapping> findFirstByTenantIdAndActiveTrueAndPaymentTypeIgnoreCaseAndCardTypeIgnoreCase(
+            Long tenantId,
+            String paymentType,
+            String cardType
+    );
+
+    Optional<OperaFiscalPaymentMapping> findFirstByTenantIdAndActiveTrueAndPaymentTypeIgnoreCaseAndCardTypeIsNull(
+            Long tenantId,
+            String paymentType
+    );
 }

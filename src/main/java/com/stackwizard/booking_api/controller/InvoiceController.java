@@ -6,6 +6,7 @@ import com.stackwizard.booking_api.dto.InvoiceSearchCriteria;
 import com.stackwizard.booking_api.dto.InvoiceIssueRequest;
 import com.stackwizard.booking_api.dto.InvoiceFiscalizeRequest;
 import com.stackwizard.booking_api.dto.InvoicePaymentAllocationRequest;
+import com.stackwizard.booking_api.dto.OperaInvoicePostRequest;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoiceItem;
@@ -14,6 +15,8 @@ import com.stackwizard.booking_api.model.IssuedByMode;
 import com.stackwizard.booking_api.service.InvoicePdfService;
 import com.stackwizard.booking_api.service.InvoiceService;
 import com.stackwizard.booking_api.service.fiscal.InvoiceFiscalizationService;
+import com.stackwizard.booking_api.service.opera.OperaInvoicePostingResult;
+import com.stackwizard.booking_api.service.opera.OperaInvoicePostingService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -43,13 +46,16 @@ public class InvoiceController {
     private final InvoiceService invoiceService;
     private final InvoicePdfService invoicePdfService;
     private final InvoiceFiscalizationService invoiceFiscalizationService;
+    private final OperaInvoicePostingService operaInvoicePostingService;
 
     public InvoiceController(InvoiceService invoiceService,
                              InvoicePdfService invoicePdfService,
-                             InvoiceFiscalizationService invoiceFiscalizationService) {
+                             InvoiceFiscalizationService invoiceFiscalizationService,
+                             OperaInvoicePostingService operaInvoicePostingService) {
         this.invoiceService = invoiceService;
         this.invoicePdfService = invoicePdfService;
         this.invoiceFiscalizationService = invoiceFiscalizationService;
+        this.operaInvoicePostingService = operaInvoicePostingService;
     }
 
     @GetMapping("/{id}")
@@ -186,6 +192,21 @@ public class InvoiceController {
 
         Invoice fiscalized = invoiceFiscalizationService.fiscalizeInvoice(invoiceId, request);
         return toResponse(fiscalized);
+    }
+
+    @PostMapping(value = "/{invoiceId}/opera-post/preview", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<String> previewOperaPosting(@PathVariable Long invoiceId,
+                                                      @RequestBody(required = false) OperaInvoicePostRequest request) {
+        JsonNode payload = operaInvoicePostingService.previewPayload(invoiceId, request);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(payload != null ? payload.toPrettyString() : "{}");
+    }
+
+    @PostMapping("/{invoiceId}/opera-post")
+    public ResponseEntity<OperaInvoicePostingResult> postToOpera(@PathVariable Long invoiceId,
+                                                                 @RequestBody(required = false) OperaInvoicePostRequest request) {
+        return ResponseEntity.ok(operaInvoicePostingService.postInvoice(invoiceId, request));
     }
 
     @GetMapping(value = "/{invoiceId}/pdf", produces = MediaType.APPLICATION_PDF_VALUE)

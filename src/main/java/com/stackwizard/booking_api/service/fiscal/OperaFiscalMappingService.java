@@ -8,6 +8,7 @@ import com.stackwizard.booking_api.repository.OperaFiscalChargeMappingRepository
 import com.stackwizard.booking_api.repository.OperaFiscalPaymentMappingRepository;
 import com.stackwizard.booking_api.repository.OperaFiscalTaxMappingRepository;
 import com.stackwizard.booking_api.repository.OperaFiscalUdfMappingRepository;
+import com.stackwizard.booking_api.service.PaymentCardTypeService;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -21,15 +22,18 @@ public class OperaFiscalMappingService {
     private final OperaFiscalPaymentMappingRepository paymentRepo;
     private final OperaFiscalTaxMappingRepository taxRepo;
     private final OperaFiscalUdfMappingRepository udfRepo;
+    private final PaymentCardTypeService paymentCardTypeService;
 
     public OperaFiscalMappingService(OperaFiscalChargeMappingRepository chargeRepo,
                                      OperaFiscalPaymentMappingRepository paymentRepo,
                                      OperaFiscalTaxMappingRepository taxRepo,
-                                     OperaFiscalUdfMappingRepository udfRepo) {
+                                     OperaFiscalUdfMappingRepository udfRepo,
+                                     PaymentCardTypeService paymentCardTypeService) {
         this.chargeRepo = chargeRepo;
         this.paymentRepo = paymentRepo;
         this.taxRepo = taxRepo;
         this.udfRepo = udfRepo;
+        this.paymentCardTypeService = paymentCardTypeService;
     }
 
     public Optional<OperaFiscalChargeMapping> resolveChargeMapping(Long tenantId, Long productId, String productType) {
@@ -57,11 +61,32 @@ public class OperaFiscalMappingService {
     }
 
     public Optional<OperaFiscalPaymentMapping> resolvePaymentMapping(Long tenantId, String paymentType) {
+        return resolvePaymentMapping(tenantId, paymentType, null);
+    }
+
+    public Optional<OperaFiscalPaymentMapping> resolvePaymentMapping(Long tenantId, String paymentType, String cardType) {
         if (tenantId == null || paymentType == null || paymentType.isBlank()) {
             return Optional.empty();
         }
-        return paymentRepo.findByTenantIdAndPaymentTypeIgnoreCase(tenantId, paymentType.trim())
-                .filter(m -> Boolean.TRUE.equals(m.getActive()));
+        String normalizedPaymentType = paymentType.trim();
+        if (cardType != null && !cardType.isBlank()) {
+            String configuredCardType = paymentCardTypeService.findActiveCodeOrNull(tenantId, cardType.trim());
+            if (configuredCardType != null) {
+                Optional<OperaFiscalPaymentMapping> byCardType = paymentRepo
+                        .findFirstByTenantIdAndActiveTrueAndPaymentTypeIgnoreCaseAndCardTypeIgnoreCase(
+                                tenantId,
+                                normalizedPaymentType,
+                                configuredCardType
+                        );
+                if (byCardType.isPresent()) {
+                    return byCardType;
+                }
+            }
+        }
+        return paymentRepo.findFirstByTenantIdAndActiveTrueAndPaymentTypeIgnoreCaseAndCardTypeIsNull(
+                tenantId,
+                normalizedPaymentType
+        );
     }
 
     public Optional<OperaFiscalTaxMapping> resolveTaxMapping(Long tenantId, BigDecimal taxPercent) {
@@ -135,7 +160,15 @@ public class OperaFiscalMappingService {
             throw new IllegalArgumentException("trxCode is required");
         }
         mapping.setPaymentType(normalizeUpper(mapping.getPaymentType()));
+        mapping.setCardType(normalizeNullableUpper(mapping.getCardType()));
+        if (mapping.getCardType() != null && !"CARD".equals(mapping.getPaymentType())) {
+            throw new IllegalArgumentException("cardType is supported only for paymentType CARD");
+        }
+        if (mapping.getCardType() != null) {
+            mapping.setCardType(paymentCardTypeService.requireActiveCode(mapping.getTenantId(), mapping.getCardType()));
+        }
         mapping.setTrxCode(normalizeUpper(mapping.getTrxCode()));
+        mapping.setPaymentMethodCode(normalizeNullableUpper(mapping.getPaymentMethodCode()));
         mapping.setTrxType(normalizeUpperDefault(mapping.getTrxType(), "FC"));
         mapping.setTrxCodeType(normalizeUpperDefault(mapping.getTrxCodeType(), "O"));
         mapping.setTrxGroup(normalizeNullable(mapping.getTrxGroup()));

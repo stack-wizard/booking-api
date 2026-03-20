@@ -19,6 +19,8 @@ public class InvoiceCreateRequest {
     private String customerEmail;
     private String customerPhone;
     private String currency;
+    private Long operaReservationId;
+    private String operaHotelCode;
 
     private String referenceTable;
     private Long referenceId;

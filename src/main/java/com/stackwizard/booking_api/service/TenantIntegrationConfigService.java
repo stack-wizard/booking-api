@@ -10,7 +10,7 @@ import java.util.Optional;
 
 @Service
 public class TenantIntegrationConfigService {
-    private static final List<String> ALLOWED_TYPES = List.of("PAYMENT", "BOOKING", "FISCALIZATION");
+    private static final List<String> ALLOWED_TYPES = List.of("PAYMENT", "BOOKING", "FISCALIZATION", "PMS");
 
     private final TenantIntegrationConfigRepository repo;
 
@@ -57,7 +57,7 @@ public class TenantIntegrationConfigService {
         }
         String integrationType = config.getIntegrationType().trim().toUpperCase(Locale.ROOT);
         if (!ALLOWED_TYPES.contains(integrationType)) {
-            throw new IllegalArgumentException("integrationType must be PAYMENT, BOOKING, or FISCALIZATION");
+            throw new IllegalArgumentException("integrationType must be PAYMENT, BOOKING, FISCALIZATION, or PMS");
         }
         config.setIntegrationType(integrationType);
         config.setProvider(config.getProvider().trim().toUpperCase(Locale.ROOT));
@@ -73,8 +73,11 @@ public class TenantIntegrationConfigService {
         config.setApplicationName(normalizeNullable(config.getApplicationName()));
         config.setClientId(normalizeNullable(config.getClientId()));
         config.setClientSecret(normalizeNullable(config.getClientSecret()));
+        config.setEnterpriseId(normalizeNullable(config.getEnterpriseId()));
         config.setAuthenticityToken(normalizeNullable(config.getAuthenticityToken()));
         config.setCallbackAuthToken(normalizeNullable(config.getCallbackAuthToken()));
+        config.setAppKey(normalizeNullable(config.getAppKey()));
+        config.setAccessToken(normalizeNullable(config.getAccessToken()));
         config.setSmtpHost(normalizeNullable(config.getSmtpHost()));
         config.setSmtpPort(config.getSmtpPort());
         config.setSmtpUsername(normalizeNullable(config.getSmtpUsername()));

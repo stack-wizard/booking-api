@@ -30,8 +30,14 @@ public class OperaFiscalPaymentMapping {
     @Column(name = "payment_type", nullable = false)
     private String paymentType;
 
+    @Column(name = "card_type")
+    private String cardType;
+
     @Column(name = "trx_code", nullable = false)
     private String trxCode;
+
+    @Column(name = "payment_method_code")
+    private String paymentMethodCode;
 
     @Column(name = "trx_type", nullable = false)
     private String trxType;

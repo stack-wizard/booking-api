@@ -1,11 +1,14 @@
 package com.stackwizard.booking_api.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
 import com.stackwizard.booking_api.dto.PaymentTransactionDto;
 import com.stackwizard.booking_api.dto.PaymentTransactionSearchCriteria;
+import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
+import com.stackwizard.booking_api.repository.PaymentEventRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.PaymentTransactionRepository;
 import com.stackwizard.booking_api.repository.specification.PaymentTransactionSpecifications;
@@ -43,14 +46,20 @@ public class PaymentTransactionService {
 
     private final PaymentTransactionRepository paymentTransactionRepo;
     private final PaymentIntentRepository paymentIntentRepo;
+    private final PaymentEventRepository paymentEventRepo;
     private final InvoicePaymentAllocationRepository allocationRepo;
+    private final PaymentCardTypeService paymentCardTypeService;
 
     public PaymentTransactionService(PaymentTransactionRepository paymentTransactionRepo,
                                      PaymentIntentRepository paymentIntentRepo,
-                                     InvoicePaymentAllocationRepository allocationRepo) {
+                                     PaymentEventRepository paymentEventRepo,
+                                     InvoicePaymentAllocationRepository allocationRepo,
+                                     PaymentCardTypeService paymentCardTypeService) {
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.paymentIntentRepo = paymentIntentRepo;
+        this.paymentEventRepo = paymentEventRepo;
         this.allocationRepo = allocationRepo;
+        this.paymentCardTypeService = paymentCardTypeService;
     }
 
     @Transactional(readOnly = true)
@@ -108,7 +117,7 @@ public class PaymentTransactionService {
         }
         Optional<PaymentTransaction> existing = paymentTransactionRepo.findByPaymentIntentId(paymentIntent.getId());
         if (existing.isPresent()) {
-            return existing.get();
+            return enrichExistingTransactionWithCardType(existing.get(), request.getCardType(), paymentIntent);
         }
 
         Long tenantId = paymentIntent.getTenantId();
@@ -122,6 +131,7 @@ public class PaymentTransactionService {
 
         Long reservationRequestId = resolveReservationRequestId(request.getReservationRequestId(), paymentIntent.getReservationRequestId());
         String paymentType = normalizePaymentType(request.getPaymentType(), PAYMENT_TYPE_CARD);
+        String cardType = resolveCardType(request.getCardType(), paymentType, paymentIntent, tenantId);
         String status = normalizeStatus(request.getStatus());
         String currency = normalizeCurrency(request.getCurrency(), paymentIntent.getCurrency());
         BigDecimal amount = resolveIntentAmount(request.getAmount(), paymentIntent.getAmount());
@@ -131,6 +141,7 @@ public class PaymentTransactionService {
                 .reservationRequestId(reservationRequestId)
                 .paymentIntentId(paymentIntent.getId())
                 .paymentType(paymentType)
+                .cardType(cardType)
                 .status(status)
                 .currency(currency)
                 .amount(amount)
@@ -143,6 +154,7 @@ public class PaymentTransactionService {
     private PaymentTransaction createManualTransaction(PaymentTransactionCreateRequest request) {
         Long tenantId = TenantResolver.resolveTenantId(request.getTenantId());
         String paymentType = normalizePaymentType(request.getPaymentType(), null);
+        String cardType = normalizeConfiguredCardType(request.getCardType(), paymentType, tenantId);
         String status = normalizeStatus(request.getStatus());
         String currency = normalizeCurrency(request.getCurrency(), null);
         BigDecimal amount = requirePositiveAmount(request.getAmount());
@@ -152,6 +164,7 @@ public class PaymentTransactionService {
                 .reservationRequestId(request.getReservationRequestId())
                 .paymentIntentId(null)
                 .paymentType(paymentType)
+                .cardType(cardType)
                 .status(status)
                 .currency(currency)
                 .amount(amount)
@@ -170,6 +183,7 @@ public class PaymentTransactionService {
                 .reservationRequestId(transaction.getReservationRequestId())
                 .paymentIntentId(transaction.getPaymentIntentId())
                 .paymentType(transaction.getPaymentType())
+                .cardType(transaction.getCardType())
                 .status(transaction.getStatus())
                 .currency(transaction.getCurrency())
                 .amount(amount)
@@ -267,6 +281,99 @@ public class PaymentTransactionService {
             throw new IllegalArgumentException("paymentType must be CASH, CARD, BANK_TRANSFER, or ROOM_CHARGE");
         }
         return normalized;
+    }
+
+    private PaymentTransaction enrichExistingTransactionWithCardType(PaymentTransaction transaction,
+                                                                     String requestedCardType,
+                                                                     PaymentIntent paymentIntent) {
+        if (transaction == null || !PAYMENT_TYPE_CARD.equals(transaction.getPaymentType())) {
+            return transaction;
+        }
+        if (StringUtils.hasText(transaction.getCardType())) {
+            return transaction;
+        }
+        String resolvedCardType = resolveCardType(requestedCardType, transaction.getPaymentType(), paymentIntent, transaction.getTenantId());
+        if (!StringUtils.hasText(resolvedCardType)) {
+            return transaction;
+        }
+        transaction.setCardType(resolvedCardType);
+        return paymentTransactionRepo.save(transaction);
+    }
+
+    private String resolveCardType(String requestedCardType,
+                                   String paymentType,
+                                   PaymentIntent paymentIntent,
+                                   Long tenantId) {
+        String normalizedRequested = normalizeConfiguredCardType(requestedCardType, paymentType, tenantId);
+        if (normalizedRequested != null) {
+            return normalizedRequested;
+        }
+        if (!PAYMENT_TYPE_CARD.equals(paymentType) || paymentIntent == null || paymentIntent.getId() == null) {
+            return null;
+        }
+        return paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(paymentIntent.getId()).stream()
+                .map(PaymentEvent::getPayload)
+                .map(this::extractCardTypeFromPayload)
+                .filter(StringUtils::hasText)
+                .map(cardType -> paymentCardTypeService.findActiveCodeOrNull(tenantId, cardType))
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String normalizeConfiguredCardType(String cardType, String paymentType, Long tenantId) {
+        String normalizedCardType = normalizeCardType(cardType, paymentType);
+        if (normalizedCardType == null) {
+            return null;
+        }
+        return paymentCardTypeService.requireActiveCode(tenantId, normalizedCardType);
+    }
+
+    private String normalizeCardType(String cardType, String paymentType) {
+        if (!StringUtils.hasText(cardType) || !PAYMENT_TYPE_CARD.equals(paymentType)) {
+            return null;
+        }
+        return cardType.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String extractCardTypeFromPayload(JsonNode payload) {
+        return firstNonBlank(
+                textAt(payload, "payload.payment_method.card.brand"),
+                firstNonBlank(
+                        textAt(payload, "payload.payment_method.brand"),
+                        firstNonBlank(
+                                textAt(payload, "payload.card.brand"),
+                                firstNonBlank(
+                                        textAt(payload, "payment_method.card.brand"),
+                                        firstNonBlank(
+                                                textAt(payload, "payment_method.brand"),
+                                                firstNonBlank(
+                                                        textAt(payload, "card.brand"),
+                                                        textAt(payload, "brand")
+                                                )
+                                        )
+                                )
+                        )
+                )
+        );
+    }
+
+    private String textAt(JsonNode root, String path) {
+        if (root == null || path == null || path.isBlank()) {
+            return null;
+        }
+        JsonNode current = root;
+        for (String part : path.split("\\.")) {
+            if (current == null) {
+                return null;
+            }
+            current = current.path(part);
+        }
+        if (current == null || current.isMissingNode() || current.isNull()) {
+            return null;
+        }
+        String value = current.asText();
+        return StringUtils.hasText(value) ? value.trim().toUpperCase(Locale.ROOT) : null;
     }
 
     private String normalizeStatus(String status) {

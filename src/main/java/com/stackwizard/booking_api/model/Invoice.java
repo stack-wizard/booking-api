@@ -127,6 +127,31 @@ public class Invoice {
     @Column(name = "storno_id")
     private Long stornoId;
 
+    @Column(name = "opera_reservation_id")
+    private Long operaReservationId;
+
+    @Column(name = "opera_hotel_code")
+    private String operaHotelCode;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "opera_posting_status", nullable = false)
+    private OperaPostingStatus operaPostingStatus = OperaPostingStatus.NOT_POSTED;
+
+    @Column(name = "opera_posted_at")
+    private OffsetDateTime operaPostedAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "opera_last_request_payload", columnDefinition = "jsonb")
+    private JsonNode operaLastRequestPayload;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "opera_last_response_payload", columnDefinition = "jsonb")
+    private JsonNode operaLastResponsePayload;
+
+    @Column(name = "opera_error_message")
+    private String operaErrorMessage;
+
     @Column(nullable = false)
     private String currency;
 

@@ -14,6 +14,7 @@ import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceSequence;
 import com.stackwizard.booking_api.model.InvoiceStatus;
 import com.stackwizard.booking_api.model.InvoiceType;
+import com.stackwizard.booking_api.model.OperaPostingStatus;
 import com.stackwizard.booking_api.model.IssuedByMode;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
@@ -250,6 +251,7 @@ public class InvoiceService {
                 .referenceTable(REFERENCE_TABLE_RESERVATION_REQUEST)
                 .referenceId(requestId)
                 .reservationRequestId(requestId)
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(currency)
                 .subtotalNet(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
                 .discountTotal(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
@@ -359,6 +361,9 @@ public class InvoiceService {
                 .referenceTable(null)
                 .referenceId(null)
                 .reservationRequestId(null)
+                .operaReservationId(normalizeOperaReservationId(request.getOperaReservationId()))
+                .operaHotelCode(normalizeOperaHotelCode(request.getOperaHotelCode()))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(currency)
                 .subtotalNet(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
                 .discountTotal(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
@@ -479,6 +484,12 @@ public class InvoiceService {
         if (request.getCurrency() != null) {
             invoice.setCurrency(normalizeCurrency(request.getCurrency()));
         }
+        if (request.getOperaReservationId() != null) {
+            invoice.setOperaReservationId(normalizeOperaReservationId(request.getOperaReservationId()));
+        }
+        if (request.getOperaHotelCode() != null) {
+            invoice.setOperaHotelCode(normalizeOperaHotelCode(request.getOperaHotelCode()));
+        }
 
         if (request.getIssuedByMode() != null || request.getIssuedByUserId() != null) {
             IssuedByMode targetMode = request.getIssuedByMode() != null
@@ -556,6 +567,7 @@ public class InvoiceService {
                 .referenceTable(REFERENCE_TABLE_PAYMENT_INTENT)
                 .referenceId(paymentIntent.getId())
                 .reservationRequestId(requestId)
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(paymentIntent.getCurrency())
                 .subtotalNet(money(netAmount))
                 .discountTotal(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
@@ -629,6 +641,9 @@ public class InvoiceService {
                 .referenceTable(REFERENCE_TABLE_INVOICE)
                 .referenceId(source.getId())
                 .reservationRequestId(source.getReservationRequestId())
+                .operaReservationId(source.getOperaReservationId())
+                .operaHotelCode(source.getOperaHotelCode())
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(source.getCurrency())
                 .subtotalNet(money(negate(source.getSubtotalNet())))
                 .discountTotal(money(negate(source.getDiscountTotal())))
@@ -893,6 +908,23 @@ public class InvoiceService {
             return primary;
         }
         return fallback;
+    }
+
+    private Long normalizeOperaReservationId(Long operaReservationId) {
+        if (operaReservationId == null) {
+            return null;
+        }
+        if (operaReservationId <= 0) {
+            return null;
+        }
+        return operaReservationId;
+    }
+
+    private String normalizeOperaHotelCode(String operaHotelCode) {
+        if (!StringUtils.hasText(operaHotelCode)) {
+            return null;
+        }
+        return operaHotelCode.trim().toUpperCase(Locale.ROOT);
     }
 
     private InvoiceType normalizeInvoiceType(InvoiceType invoiceType) {

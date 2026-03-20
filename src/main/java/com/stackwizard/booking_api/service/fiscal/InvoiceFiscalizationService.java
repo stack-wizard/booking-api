@@ -426,7 +426,8 @@ public class InvoiceFiscalizationService {
             PaymentTransaction paymentTransaction = paymentTransactionService.requireById(allocation.getPaymentTransactionId());
             Optional<OperaFiscalPaymentMapping> paymentMappingOpt = operaFiscalMappingService.resolvePaymentMapping(
                     invoice.getTenantId(),
-                    paymentTransaction.getPaymentType()
+                    paymentTransaction.getPaymentType(),
+                    paymentTransaction.getCardType()
             );
             OperaFiscalPaymentMapping paymentMapping = paymentMappingOpt.orElse(null);
 

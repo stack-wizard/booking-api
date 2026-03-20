@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -11,16 +13,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "payment_transaction")
+@Table(name = "opera_invoice_type_routing")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PaymentTransaction {
+public class OperaInvoiceTypeRouting {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,32 +29,18 @@ public class PaymentTransaction {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "reservation_request_id")
-    private Long reservationRequestId;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invoice_type", nullable = false)
+    private InvoiceType invoiceType;
 
-    @Column(name = "payment_intent_id")
-    private Long paymentIntentId;
+    @Column(name = "hotel_code", nullable = false)
+    private String hotelCode;
 
-    @Column(name = "payment_type", nullable = false)
-    private String paymentType;
-
-    @Column(name = "card_type")
-    private String cardType;
+    @Column(name = "reservation_id", nullable = false)
+    private Long reservationId;
 
     @Column(nullable = false)
-    private String status;
-
-    @Column(nullable = false)
-    private String currency;
-
-    @Column(nullable = false)
-    private BigDecimal amount;
-
-    @Column(name = "external_ref")
-    private String externalRef;
-
-    @Column
-    private String note;
+    private Boolean active;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
