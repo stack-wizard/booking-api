@@ -22,6 +22,7 @@ import com.stackwizard.booking_api.service.payment.PaymentProviderWebhookResult;
 import com.stackwizard.booking_api.service.payment.MonriTenantConfigResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -259,13 +260,15 @@ public class PaymentService {
             throw new IllegalArgumentException("Invalid Monri callback token");
         }
 
-        paymentEventRepo.save(PaymentEvent.builder()
+        if (!saveMonriEventIfAbsent(PaymentEvent.builder()
                 .paymentIntentId(paymentIntent.getId())
                 .provider("MONRI")
                 .eventType(StringUtils.hasText(webhook.eventType()) ? webhook.eventType() : "unknown")
                 .providerEventId(webhook.eventId())
                 .payload(payloadNode)
-                .build());
+                .build())) {
+            return;
+        }
 
         if (StringUtils.hasText(webhook.providerPaymentId()) && !StringUtils.hasText(paymentIntent.getProviderPaymentId())) {
             paymentIntent.setProviderPaymentId(webhook.providerPaymentId());
@@ -300,7 +303,7 @@ public class PaymentService {
 
         String orderNumber = firstText(data, "order_number", "order_info.order_number", "order_info");
         String providerPaymentId = firstText(data, "id", "payment_id", "transaction_uuid", "uuid");
-        PaymentIntent paymentIntent = resolveIntentForMonri(orderNumber, providerPaymentId)
+        PaymentIntent paymentIntent = resolveIntentForMonriForUpdate(orderNumber, providerPaymentId)
                 .orElseThrow(() -> new IllegalArgumentException("Payment intent not found for callback payload"));
         if (!Objects.equals(paymentIntent.getTenantId(), tenantId)) {
             throw new IllegalArgumentException("Callback tenant does not match payment intent tenant");
@@ -319,13 +322,15 @@ public class PaymentService {
             }
         }
 
-        paymentEventRepo.save(PaymentEvent.builder()
+        if (!saveMonriEventIfAbsent(PaymentEvent.builder()
                 .paymentIntentId(paymentIntent.getId())
                 .provider("MONRI")
                 .eventType("callback:approved")
                 .providerEventId(providerEventId)
                 .payload(payloadNode)
-                .build());
+                .build())) {
+            return;
+        }
 
         if (StringUtils.hasText(providerPaymentId) && !StringUtils.hasText(paymentIntent.getProviderPaymentId())) {
             paymentIntent.setProviderPaymentId(providerPaymentId);
@@ -425,7 +430,7 @@ public class PaymentService {
 
     @Transactional
     public PaymentIntent markIntentProcessing(Long paymentIntentId) {
-        PaymentIntent intent = paymentIntentRepo.findById(paymentIntentId)
+        PaymentIntent intent = paymentIntentRepo.findLockedById(paymentIntentId)
                 .orElseThrow(() -> new IllegalArgumentException("Payment intent not found"));
         String status = normalizeIntentStatus(intent.getStatus());
         if (isTerminalStatus(status)) {
@@ -454,7 +459,7 @@ public class PaymentService {
     @Transactional
     public void expireStalePaymentIntents() {
         OffsetDateTime now = OffsetDateTime.now();
-        List<PaymentIntent> stale = paymentIntentRepo.findByStatusInAndExpiresAtBefore(EXPIRABLE_INTENT_STATUSES, now);
+        List<PaymentIntent> stale = paymentIntentRepo.findLockedByStatusInAndExpiresAtBefore(EXPIRABLE_INTENT_STATUSES, now);
         if (stale.isEmpty()) {
             return;
         }
@@ -470,18 +475,18 @@ public class PaymentService {
     }
 
     private Optional<PaymentIntent> resolveIntentForWebhook(PaymentProviderWebhookResult webhook) {
-        return resolveIntentForMonri(webhook.orderNumber(), webhook.providerPaymentId());
+        return resolveIntentForMonriForUpdate(webhook.orderNumber(), webhook.providerPaymentId());
     }
 
-    private Optional<PaymentIntent> resolveIntentForMonri(String orderNumber, String providerPaymentId) {
+    private Optional<PaymentIntent> resolveIntentForMonriForUpdate(String orderNumber, String providerPaymentId) {
         if (StringUtils.hasText(orderNumber)) {
-            Optional<PaymentIntent> byOrder = paymentIntentRepo.findByProviderAndProviderOrderNumber("MONRI", orderNumber);
+            Optional<PaymentIntent> byOrder = paymentIntentRepo.findLockedByProviderAndProviderOrderNumber("MONRI", orderNumber);
             if (byOrder.isPresent()) {
                 return byOrder;
             }
         }
         if (StringUtils.hasText(providerPaymentId)) {
-            return paymentIntentRepo.findByProviderAndProviderPaymentId("MONRI", providerPaymentId);
+            return paymentIntentRepo.findLockedByProviderAndProviderPaymentId("MONRI", providerPaymentId);
         }
         return Optional.empty();
     }
@@ -565,7 +570,7 @@ public class PaymentService {
     }
 
     private List<PaymentIntent> expireStaleActiveIntents(Long reservationRequestId, OffsetDateTime now) {
-        List<PaymentIntent> active = paymentIntentRepo.findByReservationRequestIdAndStatusInOrderByCreatedAtDesc(
+        List<PaymentIntent> active = paymentIntentRepo.findLockedByReservationRequestIdAndStatusInOrderByCreatedAtDesc(
                 reservationRequestId,
                 ACTIVE_INTENT_STATUSES
         );
@@ -602,6 +607,16 @@ public class PaymentService {
             }
         }
         paymentIntentRepo.saveAll(activeIntents);
+    }
+
+    private boolean saveMonriEventIfAbsent(PaymentEvent event) {
+        try {
+            paymentEventRepo.saveAndFlush(event);
+            return true;
+        } catch (DataIntegrityViolationException ex) {
+            log.info("Ignoring duplicate Monri payment event for providerEventId={}", event.getProviderEventId());
+            return false;
+        }
     }
 
     private boolean isExpired(PaymentIntent intent, OffsetDateTime now) {

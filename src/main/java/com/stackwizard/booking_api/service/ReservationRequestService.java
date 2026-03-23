@@ -165,7 +165,7 @@ public class ReservationRequestService {
 
     private void cancelPaymentAttempt(ReservationRequest request) {
         Long requestId = request.getId();
-        var paymentIntents = paymentIntentRepo.findByReservationRequestId(requestId);
+        var paymentIntents = paymentIntentRepo.findLockedByReservationRequestId(requestId);
         boolean hasPaidIntent = paymentIntents.stream()
                 .anyMatch(i -> "PAID".equalsIgnoreCase(i.getStatus()));
         if (hasPaidIntent) {
