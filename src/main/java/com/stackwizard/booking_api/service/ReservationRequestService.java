@@ -42,17 +42,20 @@ public class ReservationRequestService {
     private final AllocationRepository allocationRepo;
     private final PaymentIntentRepository paymentIntentRepo;
     private final ReservationRequestAccessTokenService accessTokenService;
+    private final ReservationService reservationService;
 
     public ReservationRequestService(ReservationRequestRepository requestRepo,
                                      ReservationRepository reservationRepo,
                                      AllocationRepository allocationRepo,
                                      PaymentIntentRepository paymentIntentRepo,
-                                     ReservationRequestAccessTokenService accessTokenService) {
+                                     ReservationRequestAccessTokenService accessTokenService,
+                                     ReservationService reservationService) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.allocationRepo = allocationRepo;
         this.paymentIntentRepo = paymentIntentRepo;
         this.accessTokenService = accessTokenService;
+        this.reservationService = reservationService;
     }
 
     public List<ReservationRequest> findAll() { return requestRepo.findAll(); }
@@ -192,6 +195,7 @@ public class ReservationRequestService {
         // Re-open request so user can edit/add reservations and initiate payment again.
         request.setStatus(ReservationRequest.Status.DRAFT);
         requestRepo.save(request);
+        reservationService.refreshDraftRequestExpiry(requestId);
     }
 
     private void deleteReservationsAndAllocations(Long requestId) {

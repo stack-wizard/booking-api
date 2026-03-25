@@ -189,7 +189,9 @@ public class PaymentService {
                 .filter(intent -> Objects.equals(intent.getCurrency(), currency))
                 .findFirst();
         if (reusable.isPresent()) {
-            return toInitiateResponse(reusable.get());
+            PaymentIntent intent = reusable.get();
+            ensurePendingPaymentRequestState(reservationRequest, intent.getExpiresAt());
+            return toInitiateResponse(intent);
         }
         supersedeActiveIntents(activeIntents, now);
 
@@ -225,10 +227,7 @@ public class PaymentService {
         paymentIntent.setUpdatedAt(OffsetDateTime.now());
         paymentIntentRepo.save(paymentIntent);
 
-        if (reservationRequest.getStatus() == ReservationRequest.Status.DRAFT) {
-            reservationRequest.setStatus(ReservationRequest.Status.PENDING_PAYMENT);
-            requestRepo.save(reservationRequest);
-        }
+        ensurePendingPaymentRequestState(reservationRequest, paymentIntent.getExpiresAt());
 
         return toInitiateResponse(paymentIntent);
     }
@@ -450,9 +449,15 @@ public class PaymentService {
             paymentIntentRepo.save(intent);
             throw new IllegalStateException("Payment intent is expired");
         }
+        OffsetDateTime processingExpiry = now.plusMinutes(DEFAULT_INTENT_TTL_MINUTES);
+        if (intent.getExpiresAt() == null || intent.getExpiresAt().isBefore(processingExpiry)) {
+            intent.setExpiresAt(processingExpiry);
+        }
         intent.setStatus(STATUS_PROCESSING);
         intent.setUpdatedAt(now);
-        return paymentIntentRepo.save(intent);
+        PaymentIntent savedIntent = paymentIntentRepo.save(intent);
+        reservationService.synchronizeRequestExpiry(intent.getReservationRequestId(), savedIntent.getExpiresAt());
+        return savedIntent;
     }
 
     @Scheduled(fixedDelayString = "${payments.intent-expiry-scan-ms:60000}")
@@ -607,6 +612,14 @@ public class PaymentService {
             }
         }
         paymentIntentRepo.saveAll(activeIntents);
+    }
+
+    private void ensurePendingPaymentRequestState(ReservationRequest reservationRequest, OffsetDateTime expiresAt) {
+        if (reservationRequest.getStatus() == ReservationRequest.Status.DRAFT) {
+            reservationRequest.setStatus(ReservationRequest.Status.PENDING_PAYMENT);
+            requestRepo.save(reservationRequest);
+        }
+        reservationService.synchronizeRequestExpiry(reservationRequest.getId(), expiresAt);
     }
 
     private boolean saveMonriEventIfAbsent(PaymentEvent event) {

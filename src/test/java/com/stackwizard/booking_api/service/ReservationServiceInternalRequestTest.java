@@ -254,4 +254,62 @@ class ReservationServiceInternalRequestTest {
         assertThat(savedReservation.getExpiresAt()).isNull();
         assertThat(savedReservation.getRequestType()).isEqualTo(ReservationRequest.Type.INTERNAL);
     }
+
+    @Test
+    void saveHoldReservationRefreshesExpiryForExistingExternalDraftRequest() {
+        Long tenantId = 3L;
+        OffsetDateTime originalExpiry = OffsetDateTime.now().plusMinutes(5);
+
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(900L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.DRAFT)
+                .expiresAt(originalExpiry)
+                .extensionCount(0)
+                .build();
+        Reservation existingActiveReservation = Reservation.builder()
+                .id(901L)
+                .tenantId(tenantId)
+                .status("HOLD")
+                .expiresAt(originalExpiry)
+                .build();
+        Reservation cancelledReservation = Reservation.builder()
+                .id(902L)
+                .tenantId(tenantId)
+                .status("CANCELLED")
+                .expiresAt(originalExpiry)
+                .build();
+        Allocation activeAllocation = Allocation.builder()
+                .id(903L)
+                .expiresAt(originalExpiry)
+                .build();
+        Reservation reservationToSave = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .build();
+
+        when(tenantConfigService.holdTtlMinutes(tenantId)).thenReturn(30);
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.findByRequestId(existingRequest.getId()))
+                .thenReturn(List.of(existingActiveReservation, cancelledReservation));
+        when(reservationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.findByReservationIdIn(List.of(existingActiveReservation.getId())))
+                .thenReturn(List.of(activeAllocation));
+        when(allocationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
+            Reservation reservation = invocation.getArgument(0);
+            reservation.setId(904L);
+            return reservation;
+        });
+
+        Reservation saved = service.saveHoldReservation(reservationToSave);
+
+        assertThat(saved.getExpiresAt()).isAfter(originalExpiry);
+        assertThat(saved.getRequest().getExpiresAt()).isEqualTo(saved.getExpiresAt());
+        assertThat(existingActiveReservation.getExpiresAt()).isEqualTo(saved.getExpiresAt());
+        assertThat(activeAllocation.getExpiresAt()).isEqualTo(saved.getExpiresAt());
+        assertThat(cancelledReservation.getExpiresAt()).isEqualTo(originalExpiry);
+    }
 }

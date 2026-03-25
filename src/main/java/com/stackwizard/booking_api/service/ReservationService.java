@@ -27,6 +27,7 @@ import java.time.OffsetDateTime;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -75,6 +76,23 @@ public class ReservationService {
     public List<Reservation> findByRequestId(Long requestId) { return repo.findByRequestId(requestId); }
     public Reservation save(Reservation r) { return repo.save(r); }
     public void deleteById(Long id) { repo.deleteById(id); }
+
+    @Transactional
+    public ReservationRequest refreshDraftRequestExpiry(Long requestId) {
+        ReservationRequest request = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (request.getStatus() != ReservationRequest.Status.DRAFT) {
+            throw new IllegalStateException("Only DRAFT requests can refresh expiry");
+        }
+        return refreshDraftRequestExpiry(request);
+    }
+
+    @Transactional
+    public ReservationRequest synchronizeRequestExpiry(Long requestId, OffsetDateTime expiresAt) {
+        ReservationRequest request = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        return synchronizeRequestExpiry(request, expiresAt);
+    }
 
     @Transactional
     public Reservation saveHoldReservation(Reservation r) {
@@ -438,28 +456,7 @@ public class ReservationService {
         request.setExpiresAt(newExpiresAt);
         request.setExtensionCount(extensionCount(request) + 1);
         ReservationRequest savedRequest = requestRepo.save(request);
-
-        List<Reservation> reservations = repo.findByRequestId(requestId);
-        for (Reservation reservation : reservations) {
-            if (!"CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
-                reservation.setExpiresAt(newExpiresAt);
-            }
-        }
-        repo.saveAll(reservations);
-
-        List<Long> reservationIds = reservations.stream().map(Reservation::getId).toList();
-        if (!reservationIds.isEmpty()) {
-            List<Allocation> allocations = allocationRepo.findByReservationIdIn(reservationIds);
-            for (Allocation allocation : allocations) {
-                Reservation reservation = allocation.getReservation();
-                if (reservation != null && "CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
-                    continue;
-                }
-                allocation.setExpiresAt(newExpiresAt);
-            }
-            allocationRepo.saveAll(allocations);
-        }
-
+        synchronizeActiveReservationExpiry(requestId, newExpiresAt);
         return savedRequest;
     }
 
@@ -591,17 +588,35 @@ public class ReservationService {
             existing.setExtensionCount(extensionCount(existing) + 1);
             return requestRepo.save(existing);
         }
-        return existing;
+        return refreshDraftRequestExpiry(existing);
     }
 
     private ReservationRequest ensureOpenEndedDraftRequest(ReservationRequest request) {
-        boolean requestChanged = false;
-        if (request.getExpiresAt() != null) {
-            request.setExpiresAt(null);
-            requestChanged = true;
-        }
+        return synchronizeRequestExpiry(request, null);
+    }
 
-        List<Reservation> reservations = repo.findByRequestId(request.getId());
+    private int extensionCount(ReservationRequest request) {
+        return request.getExtensionCount() != null ? request.getExtensionCount() : 0;
+    }
+
+    private ReservationRequest refreshDraftRequestExpiry(ReservationRequest request) {
+        if (isOpenEndedDraftRequest(request)) {
+            return ensureOpenEndedDraftRequest(request);
+        }
+        return synchronizeRequestExpiry(request, expiresAtForTenant(request.getTenantId()));
+    }
+
+    private ReservationRequest synchronizeRequestExpiry(ReservationRequest request, OffsetDateTime expiresAt) {
+        boolean requestChanged = !Objects.equals(request.getExpiresAt(), expiresAt);
+        if (requestChanged) {
+            request.setExpiresAt(expiresAt);
+        }
+        synchronizeActiveReservationExpiry(request.getId(), expiresAt);
+        return requestChanged ? requestRepo.save(request) : request;
+    }
+
+    private void synchronizeActiveReservationExpiry(Long requestId, OffsetDateTime expiresAt) {
+        List<Reservation> reservations = repo.findByRequestId(requestId);
         boolean reservationsChanged = false;
         List<Long> activeReservationIds = new ArrayList<>();
         for (Reservation reservation : reservations) {
@@ -609,8 +624,8 @@ public class ReservationService {
                 continue;
             }
             activeReservationIds.add(reservation.getId());
-            if (reservation.getExpiresAt() != null) {
-                reservation.setExpiresAt(null);
+            if (!Objects.equals(reservation.getExpiresAt(), expiresAt)) {
+                reservation.setExpiresAt(expiresAt);
                 reservationsChanged = true;
             }
         }
@@ -618,25 +633,21 @@ public class ReservationService {
             repo.saveAll(reservations);
         }
 
-        if (!activeReservationIds.isEmpty()) {
-            List<Allocation> allocations = allocationRepo.findByReservationIdIn(activeReservationIds);
-            boolean allocationsChanged = false;
-            for (Allocation allocation : allocations) {
-                if (allocation.getExpiresAt() != null) {
-                    allocation.setExpiresAt(null);
-                    allocationsChanged = true;
-                }
-            }
-            if (allocationsChanged) {
-                allocationRepo.saveAll(allocations);
-            }
+        if (activeReservationIds.isEmpty()) {
+            return;
         }
 
-        return requestChanged ? requestRepo.save(request) : request;
-    }
-
-    private int extensionCount(ReservationRequest request) {
-        return request.getExtensionCount() != null ? request.getExtensionCount() : 0;
+        List<Allocation> allocations = allocationRepo.findByReservationIdIn(activeReservationIds);
+        boolean allocationsChanged = false;
+        for (Allocation allocation : allocations) {
+            if (!Objects.equals(allocation.getExpiresAt(), expiresAt)) {
+                allocation.setExpiresAt(expiresAt);
+                allocationsChanged = true;
+            }
+        }
+        if (allocationsChanged) {
+            allocationRepo.saveAll(allocations);
+        }
     }
 
     private boolean isOpenEndedDraftRequest(ReservationRequest request) {
