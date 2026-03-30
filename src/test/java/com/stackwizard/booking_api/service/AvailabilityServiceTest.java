@@ -115,6 +115,11 @@ class AvailabilityServiceTest {
         UomRepository uomRepo = stub(UomRepository.class, Map.of(
                 "findByActiveTrue", args -> List.of()
         ));
+        CancellationPolicyService cancellationPolicyService = new CancellationPolicyService(
+                stub(com.stackwizard.booking_api.repository.CancellationPolicyRepository.class, Map.of(
+                        "findByTenantIdAndActiveTrueOrderByPriorityDescIdDesc", args -> List.of()
+                ))
+        );
 
         ServiceCalendarService calendarService = new ServiceCalendarService(null, null) {
             @Override
@@ -141,7 +146,8 @@ class AvailabilityServiceTest {
                 calendarService,
                 mapRepo,
                 mapResourceRepo,
-                uomRepo
+                uomRepo,
+                cancellationPolicyService
         );
 
         List<AvailabilityResourceDto> responseResources = service.getAvailability(tenantId, date, locationId).getResources();

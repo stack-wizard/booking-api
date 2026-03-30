@@ -73,8 +73,9 @@ public class ReservationRequestService {
         ReservationRequestAccessToken accessToken = accessTokenService.requireValidToken(token);
         ReservationRequest request = requestRepo.findById(accessToken.getReservationRequestId())
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
-        if (request.getStatus() != ReservationRequest.Status.FINALIZED) {
-            throw new IllegalStateException("Reservation request is not finalized");
+        if (request.getStatus() != ReservationRequest.Status.FINALIZED
+                && request.getStatus() != ReservationRequest.Status.CANCELLED) {
+            throw new IllegalStateException("Reservation request is not available for public access");
         }
         return request;
     }

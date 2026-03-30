@@ -64,6 +64,9 @@ public class ReservationRequest {
     @Column(name = "confirmation_email_sent_at")
     private OffsetDateTime confirmationEmailSentAt;
 
+    @Column(name = "cancellation_policy_text")
+    private String cancellationPolicyText;
+
     @Column(name = "extension_count", nullable = false)
     private Integer extensionCount;
 

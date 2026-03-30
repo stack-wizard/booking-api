@@ -1,5 +1,7 @@
 package com.stackwizard.booking_api.controller;
 
+import com.stackwizard.booking_api.dto.CancellationExecuteRequest;
+import com.stackwizard.booking_api.dto.CancellationRequestDto;
 import com.stackwizard.booking_api.dto.ReservationRequestCustomerPatchRequest;
 import com.stackwizard.booking_api.dto.ReservationRequestDto;
 import com.stackwizard.booking_api.dto.ReservationRequestSearchCriteria;
@@ -8,6 +10,7 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
 import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
+import com.stackwizard.booking_api.service.CancellationService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.TenantConfigService;
@@ -31,17 +34,20 @@ public class ReservationRequestController {
 
     private final ReservationRequestService service;
     private final ReservationService reservationService;
+    private final CancellationService cancellationService;
     private final ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestDtoMapper dtoMapper;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
+                                        CancellationService cancellationService,
                                         ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider,
                                         TenantConfigService tenantConfigService,
                                         ReservationRequestDtoMapper dtoMapper) {
         this.service = service;
         this.reservationService = reservationService;
+        this.cancellationService = cancellationService;
         this.reservationConfirmationEmailServiceProvider = reservationConfirmationEmailServiceProvider;
         this.tenantConfigService = tenantConfigService;
         this.dtoMapper = dtoMapper;
@@ -129,6 +135,17 @@ public class ReservationRequestController {
     public ResponseEntity<ReservationRequestDto> cancelPayment(@PathVariable Long id) {
         ReservationRequest updated = service.cancelPaymentForRequest(id);
         return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
+    @GetMapping("/{id}/cancellations")
+    public ResponseEntity<List<CancellationRequestDto>> cancellations(@PathVariable Long id) {
+        return ResponseEntity.ok(cancellationService.findByReservationRequestId(id));
+    }
+
+    @PostMapping("/{id}/cancellations")
+    public ResponseEntity<CancellationRequestDto> createCancellation(@PathVariable Long id,
+                                                                     @RequestBody(required = false) CancellationExecuteRequest request) {
+        return ResponseEntity.ok(cancellationService.execute(id, request));
     }
 
     @DeleteMapping("/{id}")

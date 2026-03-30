@@ -9,11 +9,15 @@ public class PaymentTransactionCreateRequest {
     private Long tenantId;
     private Long reservationRequestId;
     private Long paymentIntentId;
+    private String transactionType;
     private String paymentType;
     private String cardType;
     private String status;
     private String currency;
     private BigDecimal amount;
+    private String refundType;
+    private Long sourcePaymentTransactionId;
+    private Long creditNoteInvoiceId;
     private String externalRef;
     private String note;
 }

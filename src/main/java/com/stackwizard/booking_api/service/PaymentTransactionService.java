@@ -31,6 +31,8 @@ import java.util.Set;
 @Service
 public class PaymentTransactionService {
     private static final String STATUS_POSTED = "POSTED";
+    private static final String TRANSACTION_TYPE_CHARGE = "CHARGE";
+    private static final String TRANSACTION_TYPE_REFUND = "REFUND";
     private static final String PAYMENT_TYPE_CARD = "CARD";
     private static final String PAYMENT_TYPE_BANK_TRANSFER = "BANK_TRANSFER";
     private static final Set<String> SUPPORTED_PAYMENT_TYPES = Set.of(
@@ -42,6 +44,14 @@ public class PaymentTransactionService {
     private static final Set<String> SUPPORTED_STATUSES = Set.of(
             STATUS_POSTED,
             "VOIDED"
+    );
+    private static final Set<String> SUPPORTED_TRANSACTION_TYPES = Set.of(
+            TRANSACTION_TYPE_CHARGE,
+            TRANSACTION_TYPE_REFUND
+    );
+    private static final Set<String> SUPPORTED_REFUND_TYPES = Set.of(
+            "CANCELLATION",
+            "MANUAL"
     );
 
     private final PaymentTransactionRepository paymentTransactionRepo;
@@ -68,13 +78,22 @@ public class PaymentTransactionService {
         Page<PaymentTransaction> page = paymentTransactionRepo.findAll(PaymentTransactionSpecifications.byCriteria(normalized), pageable);
         List<Long> transactionIds = page.getContent().stream().map(PaymentTransaction::getId).toList();
         Map<Long, BigDecimal> allocatedByTransactionId = allocatedByTransactionId(transactionIds);
-        return page.map(tx -> toDto(tx, allocatedByTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO)));
+        Map<Long, BigDecimal> refundedBySourceTransactionId = refundedBySourceTransactionId(transactionIds);
+        return page.map(tx -> toDto(
+                tx,
+                allocatedByTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO),
+                refundedBySourceTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO)
+        ));
     }
 
     @Transactional(readOnly = true)
     public Optional<PaymentTransactionDto> findById(Long id) {
         return paymentTransactionRepo.findById(id)
-                .map(tx -> toDto(tx, zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(tx.getId()))));
+                .map(tx -> toDto(
+                        tx,
+                        zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(tx.getId())),
+                        refundedAmountForSourcePaymentTransaction(tx.getId())
+                ));
     }
 
     @Transactional(readOnly = true)
@@ -98,7 +117,11 @@ public class PaymentTransactionService {
             saved = createManualTransaction(request);
         }
 
-        return toDto(saved, zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(saved.getId())));
+        return toDto(
+                saved,
+                zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(saved.getId())),
+                refundedAmountForSourcePaymentTransaction(saved.getId())
+        );
     }
 
     @Transactional
@@ -107,6 +130,21 @@ public class PaymentTransactionService {
             throw new IllegalArgumentException("paymentIntent is required");
         }
         return createOrReuseForIntent(new PaymentTransactionCreateRequest(), paymentIntent, false);
+    }
+
+    @Transactional(readOnly = true)
+    public BigDecimal refundedAmountForSourcePaymentTransaction(Long sourcePaymentTransactionId) {
+        if (sourcePaymentTransactionId == null) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        BigDecimal refunded = paymentTransactionRepo.findBySourcePaymentTransactionId(sourcePaymentTransactionId).stream()
+                .filter(tx -> TRANSACTION_TYPE_REFUND.equals(normalizeTransactionType(tx.getTransactionType())))
+                .filter(tx -> STATUS_POSTED.equals(normalizeStatus(tx.getStatus())))
+                .map(PaymentTransaction::getAmount)
+                .map(this::zeroSafe)
+                .map(BigDecimal::abs)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return money(refunded);
     }
 
     private PaymentTransaction createOrReuseForIntent(PaymentTransactionCreateRequest request,
@@ -140,11 +178,15 @@ public class PaymentTransactionService {
                 .tenantId(tenantId)
                 .reservationRequestId(reservationRequestId)
                 .paymentIntentId(paymentIntent.getId())
+                .transactionType(TRANSACTION_TYPE_CHARGE)
                 .paymentType(paymentType)
                 .cardType(cardType)
                 .status(status)
                 .currency(currency)
                 .amount(amount)
+                .refundType(null)
+                .sourcePaymentTransactionId(null)
+                .creditNoteInvoiceId(null)
                 .externalRef(normalizeNullable(firstNonBlank(request.getExternalRef(), paymentIntent.getProviderPaymentId())))
                 .note(normalizeNullable(request.getNote()))
                 .build();
@@ -153,42 +195,57 @@ public class PaymentTransactionService {
 
     private PaymentTransaction createManualTransaction(PaymentTransactionCreateRequest request) {
         Long tenantId = TenantResolver.resolveTenantId(request.getTenantId());
+        String transactionType = normalizeTransactionType(request.getTransactionType());
         String paymentType = normalizePaymentType(request.getPaymentType(), null);
         String cardType = normalizeConfiguredCardType(request.getCardType(), paymentType, tenantId);
         String status = normalizeStatus(request.getStatus());
         String currency = normalizeCurrency(request.getCurrency(), null);
-        BigDecimal amount = requirePositiveAmount(request.getAmount());
+        BigDecimal amount = normalizeAmountForTransactionType(request.getAmount(), transactionType);
+        String refundType = normalizeRefundType(request.getRefundType(), transactionType);
+        Long sourcePaymentTransactionId = normalizeSourcePaymentTransactionId(
+                request.getSourcePaymentTransactionId(), tenantId, transactionType
+        );
 
         PaymentTransaction tx = PaymentTransaction.builder()
                 .tenantId(tenantId)
                 .reservationRequestId(request.getReservationRequestId())
                 .paymentIntentId(null)
+                .transactionType(transactionType)
                 .paymentType(paymentType)
                 .cardType(cardType)
                 .status(status)
                 .currency(currency)
                 .amount(amount)
+                .refundType(refundType)
+                .sourcePaymentTransactionId(sourcePaymentTransactionId)
+                .creditNoteInvoiceId(request.getCreditNoteInvoiceId())
                 .externalRef(normalizeNullable(request.getExternalRef()))
                 .note(normalizeNullable(request.getNote()))
                 .build();
         return paymentTransactionRepo.save(tx);
     }
 
-    private PaymentTransactionDto toDto(PaymentTransaction transaction, BigDecimal allocatedAmount) {
+    private PaymentTransactionDto toDto(PaymentTransaction transaction, BigDecimal allocatedAmount, BigDecimal refundedAmount) {
         BigDecimal amount = money(zeroSafe(transaction.getAmount()));
         BigDecimal allocated = money(zeroSafe(allocatedAmount));
+        BigDecimal refunded = money(zeroSafe(refundedAmount));
+        BigDecimal available = availableAmount(transaction, allocated, refunded);
         return PaymentTransactionDto.builder()
                 .id(transaction.getId())
                 .tenantId(transaction.getTenantId())
                 .reservationRequestId(transaction.getReservationRequestId())
                 .paymentIntentId(transaction.getPaymentIntentId())
+                .transactionType(transaction.getTransactionType())
                 .paymentType(transaction.getPaymentType())
                 .cardType(transaction.getCardType())
                 .status(transaction.getStatus())
                 .currency(transaction.getCurrency())
                 .amount(amount)
                 .allocatedAmount(allocated)
-                .availableAmount(money(amount.subtract(allocated)))
+                .availableAmount(available)
+                .refundType(transaction.getRefundType())
+                .sourcePaymentTransactionId(transaction.getSourcePaymentTransactionId())
+                .creditNoteInvoiceId(transaction.getCreditNoteInvoiceId())
                 .externalRef(transaction.getExternalRef())
                 .note(transaction.getNote())
                 .createdAt(transaction.getCreatedAt())
@@ -203,6 +260,17 @@ public class PaymentTransactionService {
         for (InvoicePaymentAllocationRepository.PaymentTransactionAllocationSum sum :
                 allocationRepo.sumAllocatedByPaymentTransactionIds(transactionIds)) {
             result.put(sum.getPaymentTransactionId(), money(zeroSafe(sum.getTotalAllocated())));
+        }
+        return result;
+    }
+
+    private Map<Long, BigDecimal> refundedBySourceTransactionId(List<Long> transactionIds) {
+        if (transactionIds == null || transactionIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, BigDecimal> result = new HashMap<>();
+        for (Long transactionId : transactionIds) {
+            result.put(transactionId, refundedAmountForSourcePaymentTransaction(transactionId));
         }
         return result;
     }
@@ -396,6 +464,33 @@ public class PaymentTransactionService {
         return normalized;
     }
 
+    private String normalizeTransactionType(String transactionType) {
+        String raw = StringUtils.hasText(transactionType)
+                ? transactionType.trim().toUpperCase(Locale.ROOT)
+                : TRANSACTION_TYPE_CHARGE;
+        if (!SUPPORTED_TRANSACTION_TYPES.contains(raw)) {
+            throw new IllegalArgumentException("transactionType must be CHARGE or REFUND");
+        }
+        return raw;
+    }
+
+    private String normalizeRefundType(String refundType, String transactionType) {
+        if (!TRANSACTION_TYPE_REFUND.equals(transactionType)) {
+            if (StringUtils.hasText(refundType)) {
+                throw new IllegalArgumentException("refundType is supported only for REFUND transactions");
+            }
+            return null;
+        }
+        if (!StringUtils.hasText(refundType)) {
+            return null;
+        }
+        String normalized = refundType.trim().toUpperCase(Locale.ROOT);
+        if (!SUPPORTED_REFUND_TYPES.contains(normalized)) {
+            throw new IllegalArgumentException("refundType must be CANCELLATION or MANUAL");
+        }
+        return normalized;
+    }
+
     private String normalizeCurrency(String currency, String fallback) {
         String raw = StringUtils.hasText(currency) ? currency : fallback;
         if (!StringUtils.hasText(raw)) {
@@ -421,6 +516,41 @@ public class PaymentTransactionService {
             throw new IllegalArgumentException("amount must be greater than zero");
         }
         return money(value);
+    }
+
+    private BigDecimal requireNegativeAmount(BigDecimal value) {
+        if (value == null || value.compareTo(BigDecimal.ZERO) >= 0) {
+            throw new IllegalArgumentException("amount must be less than zero");
+        }
+        return money(value);
+    }
+
+    private BigDecimal normalizeAmountForTransactionType(BigDecimal amount, String transactionType) {
+        if (TRANSACTION_TYPE_REFUND.equals(transactionType)) {
+            return requireNegativeAmount(amount);
+        }
+        return requirePositiveAmount(amount);
+    }
+
+    private Long normalizeSourcePaymentTransactionId(Long sourcePaymentTransactionId, Long tenantId, String transactionType) {
+        if (!TRANSACTION_TYPE_REFUND.equals(transactionType)) {
+            if (sourcePaymentTransactionId != null) {
+                throw new IllegalArgumentException("sourcePaymentTransactionId is supported only for REFUND transactions");
+            }
+            return null;
+        }
+        if (sourcePaymentTransactionId == null) {
+            return null;
+        }
+        PaymentTransaction sourceTransaction = paymentTransactionRepo.findById(sourcePaymentTransactionId)
+                .orElseThrow(() -> new IllegalArgumentException("Source payment transaction not found"));
+        if (!tenantId.equals(sourceTransaction.getTenantId())) {
+            throw new IllegalArgumentException("sourcePaymentTransactionId tenant mismatch");
+        }
+        if (!TRANSACTION_TYPE_CHARGE.equals(normalizeTransactionType(sourceTransaction.getTransactionType()))) {
+            throw new IllegalArgumentException("Refund source payment transaction must be a CHARGE transaction");
+        }
+        return sourcePaymentTransactionId;
     }
 
     private String normalizeNullable(String value) {
@@ -451,6 +581,16 @@ public class PaymentTransactionService {
 
     private BigDecimal money(BigDecimal value) {
         return zeroSafe(value).setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal availableAmount(PaymentTransaction transaction, BigDecimal allocatedAmount, BigDecimal refundedAmount) {
+        String transactionType = normalizeTransactionType(transaction.getTransactionType());
+        if (TRANSACTION_TYPE_REFUND.equals(transactionType)) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return money(zeroSafe(transaction.getAmount())
+                .subtract(zeroSafe(allocatedAmount))
+                .subtract(zeroSafe(refundedAmount)));
     }
 
     private <T extends Comparable<? super T>> void validateRange(String fieldName, T from, T to) {

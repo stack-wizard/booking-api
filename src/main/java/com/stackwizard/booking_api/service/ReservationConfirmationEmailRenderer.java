@@ -5,6 +5,7 @@ import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
+import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -37,7 +38,9 @@ public class ReservationConfirmationEmailRenderer {
                                 List<Reservation> reservations,
                                 Map<Long, Product> productsById,
                                 PaymentService.RequestPaymentSummary paymentSummary,
-                                TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
+                                TenantEmailConfigResolver.EmailResolvedConfig emailConfig,
+                                PublicCancellationPreviewDto publicCancellation,
+                                String publicAccessUrl) {
         try {
             List<Reservation> orderedReservations = reservations.stream()
                     .sorted(Comparator
@@ -63,6 +66,7 @@ public class ReservationConfirmationEmailRenderer {
             values.put("REMAINING_AMOUNT", esc(formatMoney(remainingAtVenue, currency)));
             values.put("INCLUDES_BLOCK", buildIncludesBlock(orderedReservations, productsById));
             values.put("ARRIVAL_NOTE_BLOCK", buildArrivalNoteBlock(emailConfig));
+            values.put("CANCELLATION_BLOCK", buildCancellationBlock(publicCancellation, publicAccessUrl));
             values.put("FOOTER_LOCATION", esc(firstNonBlank(emailConfig.footerLocation(), "")));
             values.put("CONTACT_LINE", buildContactLine(emailConfig));
 
@@ -76,7 +80,9 @@ public class ReservationConfirmationEmailRenderer {
                     remainingAtVenue,
                     currency,
                     locale,
-                    emailConfig
+                    emailConfig,
+                    publicCancellation,
+                    publicAccessUrl
             );
             return new RenderedEmail(subject, plainText, applyTemplate(template, values));
         } catch (IOException ex) {
@@ -200,6 +206,28 @@ public class ReservationConfirmationEmailRenderer {
                 + "</td></tr></table></td></tr>";
     }
 
+    private String buildCancellationBlock(PublicCancellationPreviewDto publicCancellation, String publicAccessUrl) {
+        if (publicCancellation == null || !publicCancellation.isCanCancel() || !StringUtils.hasText(publicAccessUrl)) {
+            return "";
+        }
+        String policyText = firstNonBlank(publicCancellation.getPolicyText(), "");
+        return "<tr><td style=\"padding:18px 32px 0;\">"
+                + "<div style=\"font-size:11px; letter-spacing:4px; text-transform:uppercase; color:#ae9e73; margin-bottom:14px;\">Cancellation</div>"
+                + "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border:1px solid #2c2b20; background:#0a0b07;\">"
+                + "<tr><td style=\"padding:18px 20px 10px; color:#f6efe0; font-size:15px; line-height:1.6;\">"
+                + esc(firstNonBlank(publicCancellation.getMessage(), "You can review cancellation options online."))
+                + "</td></tr>"
+                + (StringUtils.hasText(policyText)
+                ? "<tr><td style=\"padding:0 20px 12px; color:#bfb7a2; font-size:13px; line-height:1.6;\">"
+                + esc(policyText)
+                + "</td></tr>"
+                : "")
+                + "<tr><td style=\"padding:0 20px 20px;\">"
+                + "<a href=\"" + escAttribute(publicAccessUrl) + "\" style=\"display:inline-block; padding:13px 24px; border:1px solid #b28939; background:#151108; color:#f6efe0; text-decoration:none; font-size:12px; letter-spacing:3px; text-transform:uppercase;\">Review Or Cancel Booking</a>"
+                + "</td></tr>"
+                + "</table></td></tr>";
+    }
+
     private String buildContactLine(TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
         if (!StringUtils.hasText(emailConfig.supportEmail())) {
             return "";
@@ -217,7 +245,9 @@ public class ReservationConfirmationEmailRenderer {
                                   BigDecimal remainingAtVenue,
                                   String currency,
                                   Locale locale,
-                                  TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
+                                  TenantEmailConfigResolver.EmailResolvedConfig emailConfig,
+                                  PublicCancellationPreviewDto publicCancellation,
+                                  String publicAccessUrl) {
         StringBuilder text = new StringBuilder();
         text.append("Reservation Confirmed").append(System.lineSeparator())
                 .append(firstNonBlank(emailConfig.brandName(), "Booking")).append(System.lineSeparator())
@@ -272,6 +302,16 @@ public class ReservationConfirmationEmailRenderer {
         String note = firstNonBlank(emailConfig.arrivalNote(), DEFAULT_ARRIVAL_NOTE);
         if (StringUtils.hasText(note)) {
             text.append(System.lineSeparator()).append(note).append(System.lineSeparator());
+        }
+        if (publicCancellation != null && publicCancellation.isCanCancel() && StringUtils.hasText(publicAccessUrl)) {
+            text.append(System.lineSeparator())
+                    .append("Cancellation").append(System.lineSeparator())
+                    .append(firstNonBlank(publicCancellation.getMessage(), "You can review cancellation options online."))
+                    .append(System.lineSeparator());
+            if (StringUtils.hasText(publicCancellation.getPolicyText())) {
+                text.append(publicCancellation.getPolicyText()).append(System.lineSeparator());
+            }
+            text.append("Review or cancel booking: ").append(publicAccessUrl.trim()).append(System.lineSeparator());
         }
         if (StringUtils.hasText(emailConfig.supportEmail())) {
             text.append(System.lineSeparator())

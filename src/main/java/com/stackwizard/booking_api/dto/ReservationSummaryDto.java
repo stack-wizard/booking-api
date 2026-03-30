@@ -31,4 +31,5 @@ public class ReservationSummaryDto {
     private Integer qty;
     private BigDecimal unitPrice;
     private BigDecimal grossAmount;
+    private String cancellationPolicyText;
 }

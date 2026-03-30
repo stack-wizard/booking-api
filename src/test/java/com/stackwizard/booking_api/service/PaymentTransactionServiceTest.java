@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
+import com.stackwizard.booking_api.dto.PaymentTransactionDto;
 import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -85,5 +87,54 @@ class PaymentTransactionServiceTest {
         PaymentTransaction transaction = service.ensureForPaidIntent(paymentIntent);
 
         assertThat(transaction.getCardType()).isEqualTo("VISA");
+        assertThat(transaction.getTransactionType()).isEqualTo("CHARGE");
+    }
+
+    @Test
+    void createManualRefundRequiresNegativeAmountAndChargeSource() {
+        PaymentTransactionCreateRequest request = new PaymentTransactionCreateRequest();
+        request.setTenantId(1L);
+        request.setTransactionType("refund");
+        request.setPaymentType("card");
+        request.setStatus("posted");
+        request.setCurrency("eur");
+        request.setAmount(new BigDecimal("-50.00"));
+        request.setRefundType("cancellation");
+        request.setSourcePaymentTransactionId(40L);
+
+        when(paymentTransactionRepo.findById(40L)).thenReturn(Optional.of(
+                PaymentTransaction.builder()
+                        .id(40L)
+                        .tenantId(1L)
+                        .transactionType("CHARGE")
+                        .paymentType("CARD")
+                        .status("POSTED")
+                        .currency("EUR")
+                        .amount(new BigDecimal("100.00"))
+                        .build()
+        ));
+        when(paymentTransactionRepo.save(any(PaymentTransaction.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PaymentTransactionDto transaction = service.create(request);
+
+        assertThat(transaction.getTransactionType()).isEqualTo("REFUND");
+        assertThat(transaction.getAmount()).isEqualTo(new BigDecimal("-50.00"));
+        assertThat(transaction.getRefundType()).isEqualTo("CANCELLATION");
+        assertThat(transaction.getSourcePaymentTransactionId()).isEqualTo(40L);
+    }
+
+    @Test
+    void createManualRefundRejectsPositiveAmount() {
+        PaymentTransactionCreateRequest request = new PaymentTransactionCreateRequest();
+        request.setTenantId(1L);
+        request.setTransactionType("refund");
+        request.setPaymentType("card");
+        request.setStatus("posted");
+        request.setCurrency("eur");
+        request.setAmount(new BigDecimal("50.00"));
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("less than zero");
     }
 }

@@ -1,4 +1,5 @@
 package com.stackwizard.booking_api.service;
+import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
 import com.stackwizard.booking_api.model.LocationNode;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
@@ -76,7 +77,17 @@ class ReservationConfirmationEmailRendererTest {
                         BigDecimal.ZERO,
                         "PAID"
                 ),
-                emailConfig
+                emailConfig,
+                PublicCancellationPreviewDto.builder()
+                        .canCancel(true)
+                        .status("AVAILABLE")
+                        .settlementMode("CASH_REFUND")
+                        .currency("EUR")
+                        .refundAmount(new BigDecimal("147.50"))
+                        .message("If you cancel now, 147.50 EUR will be refunded.")
+                        .policyText("Free cancellation until April 1, 2026.")
+                        .build(),
+                "https://cms.example.com/bookings/285?token=test-token"
         );
 
         assertThat(rendered.subject()).isEqualTo("Reservation confirmed - Beach Club Hvar #285");
@@ -85,7 +96,10 @@ class ReservationConfirmationEmailRendererTest {
         assertThat(rendered.html()).contains("147.50 EUR");
         assertThat(rendered.html()).contains("One bottle of Prosecco upon arrival");
         assertThat(rendered.html()).contains("info@beachhvar.com");
+        assertThat(rendered.html()).contains("Review Or Cancel Booking");
+        assertThat(rendered.html()).contains("https://cms.example.com/bookings/285?token=test-token");
         assertThat(rendered.plainText()).contains("Reservation: #285");
         assertThat(rendered.plainText()).contains("Remaining at venue: 147.50 EUR");
+        assertThat(rendered.plainText()).contains("If you cancel now, 147.50 EUR will be refunded.");
     }
 }

@@ -45,6 +45,9 @@ public class TenantIntegrationConfig {
     @Column(name = "request_path")
     private String requestPath;
 
+    @Column(name = "refund_path")
+    private String refundPath;
+
     @Column(name = "hotel_code")
     private String hotelCode;
 
@@ -128,6 +131,9 @@ public class TenantIntegrationConfig {
 
     @Column(name = "email_locale")
     private String emailLocale;
+
+    @Column(name = "public_access_url_template")
+    private String publicAccessUrlTemplate;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

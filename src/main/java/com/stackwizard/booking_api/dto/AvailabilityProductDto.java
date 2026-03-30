@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -15,4 +16,6 @@ public class AvailabilityProductDto {
     private String description;
     private String defaultImageUrl;
     private List<ProductGalleryImageDto> galleryImages;
+    private String cancellationPolicyText;
+    private LocalDateTime cancellationFreeUntil;
 }

@@ -32,7 +32,8 @@ public class ProductService {
     private static final Set<String> SUPPORTED_PRODUCT_TYPES = Set.of(
             "SEALABLE_PRODUCT",
             "DEPOSIT",
-            "DEPOSIT_STORNO"
+            "DEPOSIT_STORNO",
+            "PENALTY"
     );
 
     private final ProductRepository repo;
@@ -270,7 +271,7 @@ public class ProductService {
             product.setProductType(product.getProductType().trim().toUpperCase(Locale.ROOT));
         }
         if (!SUPPORTED_PRODUCT_TYPES.contains(product.getProductType())) {
-            throw new IllegalArgumentException("productType must be SEALABLE_PRODUCT, DEPOSIT, or DEPOSIT_STORNO");
+            throw new IllegalArgumentException("productType must be SEALABLE_PRODUCT, DEPOSIT, DEPOSIT_STORNO, or PENALTY");
         }
         if (product.getExtraUoms() == null) {
             product.setExtraUoms(new HashSet<>());

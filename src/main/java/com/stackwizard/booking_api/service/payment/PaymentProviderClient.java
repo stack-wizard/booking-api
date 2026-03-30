@@ -8,5 +8,7 @@ public interface PaymentProviderClient {
 
     PaymentProviderInitResult initiate(PaymentIntent paymentIntent, PaymentInitiateRequest request);
 
+    PaymentProviderRefundResult refund(PaymentProviderRefundRequest request);
+
     PaymentProviderWebhookResult parseWebhook(String payload);
 }

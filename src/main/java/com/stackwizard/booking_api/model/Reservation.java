@@ -1,7 +1,10 @@
 package com.stackwizard.booking_api.model;
 
  
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.*;
 
 import java.math.BigDecimal;
@@ -65,6 +68,16 @@ public class Reservation {
 
     @Column(name = "customer_phone")
     private String customerPhone;
+
+    @Column(name = "cancellation_policy_id")
+    private Long cancellationPolicyId;
+
+    @Column(name = "cancellation_policy_text")
+    private String cancellationPolicyText;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "cancellation_policy_snapshot", columnDefinition = "jsonb")
+    private JsonNode cancellationPolicySnapshot;
 
     @Column(name = "currency")
     private String currency;

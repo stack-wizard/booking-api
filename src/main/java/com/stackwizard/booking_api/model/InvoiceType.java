@@ -5,7 +5,8 @@ public enum InvoiceType {
     DEPOSIT,
     INVOICE_STORNO,
     DEPOSIT_STORNO,
-    ROOM_CHARGE;
+    ROOM_CHARGE,
+    CREDIT_NOTE;
 
     public boolean isStornoType() {
         return this == INVOICE_STORNO || this == DEPOSIT_STORNO;

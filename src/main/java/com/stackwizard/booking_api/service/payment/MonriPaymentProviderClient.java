@@ -54,6 +54,22 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
     }
 
     @Override
+    public PaymentProviderRefundResult refund(PaymentProviderRefundRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("refund request is required");
+        }
+        MonriTenantConfigResolver.MonriResolvedConfig monri = configResolver.resolve(request.tenantId());
+        if (!StringUtils.hasText(monri.refundPath())) {
+            throw new IllegalStateException("Monri refundPath is missing for tenant " + request.tenantId());
+        }
+        String accessToken = getAccessToken(request.tenantId(), monri);
+        JsonNode response = createRefund(monri, accessToken, request);
+        String providerRefundId = firstText(response, "id", "payment_id", "transaction_uuid", "uuid");
+        String providerStatus = firstText(response, "status", "payment_status", "transaction_status");
+        return new PaymentProviderRefundResult(providerRefundId, providerRefundId, providerStatus);
+    }
+
+    @Override
     public PaymentProviderWebhookResult parseWebhook(String payload) {
         JsonNode json = parseJson(payload, "Monri webhook");
         JsonNode payloadNode = json.path("payload");
@@ -206,6 +222,58 @@ public class MonriPaymentProviderClient implements PaymentProviderClient {
         } catch (RestClientException ex) {
             log.error("Monri payment init failed for order {}", paymentIntent.getProviderOrderNumber(), ex);
             throw new IllegalStateException("Failed to initialize Monri payment", ex);
+        }
+    }
+
+    private JsonNode createRefund(MonriTenantConfigResolver.MonriResolvedConfig monri,
+                                  String accessToken,
+                                  PaymentProviderRefundRequest request) {
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("authenticity_token", monri.authenticityToken() == null ? "" : monri.authenticityToken());
+        body.put("transaction_type", "refund");
+        body.put("amount", toMinorUnits(request.amount().abs()));
+        body.put("currency", request.currency());
+        if (StringUtils.hasText(request.orderNumber())) {
+            body.put("order_number", request.orderNumber());
+        }
+        if (StringUtils.hasText(request.providerPaymentId())) {
+            body.put("payment_id", request.providerPaymentId());
+            body.put("provider_payment_id", request.providerPaymentId());
+            body.put("transaction_uuid", request.providerPaymentId());
+        }
+        if (StringUtils.hasText(request.note())) {
+            body.put("order_info", request.note());
+        }
+
+        log.info("Monri refund request: tenant={}, url={}, order={}, providerPaymentId={}, amountMinor={}, currency={}",
+                request.tenantId(),
+                normalizeUrl(monri.baseUrl(), monri.refundPath()),
+                defaultIfBlank(request.orderNumber(), ""),
+                defaultIfBlank(request.providerPaymentId(), ""),
+                toMinorUnits(request.amount().abs()),
+                request.currency());
+
+        try {
+            String raw = restClient.post()
+                    .uri(normalizeUrl(monri.baseUrl(), monri.refundPath()))
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("Authorization", "Bearer " + accessToken)
+                    .body(body)
+                    .retrieve()
+                    .body(String.class);
+            JsonNode response = parseJson(raw, "Monri refund");
+            log.info("Monri refund response for order {}: {}", defaultIfBlank(request.orderNumber(), "<none>"),
+                    response != null ? response.toString() : "<null>");
+            return response;
+        } catch (HttpClientErrorException ex) {
+            log.error("Monri refund failed for order {}. Status={} body={}",
+                    defaultIfBlank(request.orderNumber(), "<none>"),
+                    ex.getStatusCode(),
+                    ex.getResponseBodyAsString(), ex);
+            throw new IllegalStateException("Failed to initialize Monri refund: " + ex.getResponseBodyAsString(), ex);
+        } catch (RestClientException ex) {
+            log.error("Monri refund failed for order {}", defaultIfBlank(request.orderNumber(), "<none>"), ex);
+            throw new IllegalStateException("Failed to initialize Monri refund", ex);
         }
     }
 

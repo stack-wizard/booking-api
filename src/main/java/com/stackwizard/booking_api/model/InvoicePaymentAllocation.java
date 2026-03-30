@@ -48,6 +48,9 @@ public class InvoicePaymentAllocation {
     @Column(name = "allocated_amount", nullable = false)
     private BigDecimal allocatedAmount;
 
+    @Column(name = "allocation_type", nullable = false)
+    private String allocationType;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 }

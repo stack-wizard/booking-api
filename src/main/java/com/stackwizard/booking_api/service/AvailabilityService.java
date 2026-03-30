@@ -54,6 +54,7 @@ public class AvailabilityService {
     private final ServiceCalendarService calendarService;
     private final ResourceMapRepository mapRepo;
     private final ResourceMapResourceRepository mapResourceRepo;
+    private final CancellationPolicyService cancellationPolicyService;
 
     public AvailabilityService(ResourceRepository resourceRepo,
                                ResourceCompositionRepository compositionRepo,
@@ -63,7 +64,8 @@ public class AvailabilityService {
                                ServiceCalendarService calendarService,
                                ResourceMapRepository mapRepo,
                                ResourceMapResourceRepository mapResourceRepo,
-                               UomRepository uomRepo) {
+                               UomRepository uomRepo,
+                               CancellationPolicyService cancellationPolicyService) {
         this.resourceRepo = resourceRepo;
         this.compositionRepo = compositionRepo;
         this.allocationRepo = allocationRepo;
@@ -73,6 +75,7 @@ public class AvailabilityService {
         this.mapRepo = mapRepo;
         this.mapResourceRepo = mapResourceRepo;
         this.uomRepo = uomRepo;
+        this.cancellationPolicyService = cancellationPolicyService;
     }
 
     @Transactional(readOnly = true)
@@ -247,7 +250,10 @@ public class AvailabilityService {
             );
 
             Product resolvedProduct = resolveProduct(resource, productsByResourceId, productById);
-            AvailabilityProductDto productDto = toAvailabilityProductDto(resolvedProduct);
+            CancellationPolicyService.PolicySnapshot policySnapshot = resolvedProduct != null
+                    ? cancellationPolicyService.resolveBookingSnapshot(tenantId, resolvedProduct.getId(), window != null ? window.open() : date.atStartOfDay())
+                    : null;
+            AvailabilityProductDto productDto = toAvailabilityProductDto(resolvedProduct, policySnapshot);
             List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId, productById, uomNameByCode);
 
             AvailabilityMapPositionDto mapPosition = null;
@@ -388,7 +394,8 @@ public class AvailabilityService {
         return products.isEmpty() ? null : products.get(0);
     }
 
-    private AvailabilityProductDto toAvailabilityProductDto(Product product) {
+    private AvailabilityProductDto toAvailabilityProductDto(Product product,
+                                                            CancellationPolicyService.PolicySnapshot policySnapshot) {
         if (product == null) {
             return null;
         }
@@ -400,6 +407,8 @@ public class AvailabilityService {
                 .description(firstNonBlank(product.getDescription(), product.getName()))
                 .defaultImageUrl(resolveDefaultImageUrl(product.getImages()))
                 .galleryImages(toGalleryImageDtos(product.getImages()))
+                .cancellationPolicyText(policySnapshot != null ? policySnapshot.genericPolicyText() : null)
+                .cancellationFreeUntil(policySnapshot != null ? policySnapshot.cutoffAt() : null)
                 .build();
     }
 

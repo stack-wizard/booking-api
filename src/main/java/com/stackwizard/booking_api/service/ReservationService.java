@@ -21,6 +21,7 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
@@ -45,6 +46,7 @@ public class ReservationService {
     private final ReservationRequestRepository requestRepo;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestAccessTokenService accessTokenService;
+    private final CancellationPolicyService cancellationPolicyService;
     private final ApplicationEventPublisher eventPublisher;
 
     public ReservationService(ReservationRepository repo,
@@ -57,6 +59,7 @@ public class ReservationService {
                               ReservationRequestRepository requestRepo,
                               TenantConfigService tenantConfigService,
                               ReservationRequestAccessTokenService accessTokenService,
+                              CancellationPolicyService cancellationPolicyService,
                               ApplicationEventPublisher eventPublisher) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
@@ -68,6 +71,7 @@ public class ReservationService {
         this.requestRepo = requestRepo;
         this.tenantConfigService = tenantConfigService;
         this.accessTokenService = accessTokenService;
+        this.cancellationPolicyService = cancellationPolicyService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -271,6 +275,9 @@ public class ReservationService {
         }
 
         ReservationRequest reservationRequest = resolveOrCreateRequest(request, tenantId);
+        CancellationPolicyService.PolicySnapshot policySnapshot =
+                cancellationPolicyService.resolveBookingSnapshot(tenantId, product.getId(), period.start());
+        reservationRequest = applyRequestCancellationPolicySnapshot(reservationRequest, policySnapshot);
         PriceListEntry selectedPrice = priceEntries.get(0);
         int resolvedQty = qty != null ? qty : 1;
         BigDecimal unitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
@@ -292,6 +299,9 @@ public class ReservationService {
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
+                .cancellationPolicyId(policySnapshot != null ? policySnapshot.policyId() : null)
+                .cancellationPolicyText(policySnapshot != null ? policySnapshot.bookingPolicyText() : null)
+                .cancellationPolicySnapshot(policySnapshot != null ? policySnapshot.ruleSnapshot() : null)
                 .currency(request.getCurrency())
                 .qty(resolvedQty)
                 .unitPrice(unitPrice)
@@ -356,6 +366,19 @@ public class ReservationService {
                 .extensionCount(0)
                 .build();
         return requestRepo.save(newRequest);
+    }
+
+    private ReservationRequest applyRequestCancellationPolicySnapshot(ReservationRequest reservationRequest,
+                                                                      CancellationPolicyService.PolicySnapshot policySnapshot) {
+        if (reservationRequest == null || policySnapshot == null || !StringUtils.hasText(policySnapshot.bookingPolicyText())) {
+            return reservationRequest;
+        }
+        String mergedText = mergeCancellationPolicyText(reservationRequest.getCancellationPolicyText(), policySnapshot.bookingPolicyText());
+        if (Objects.equals(reservationRequest.getCancellationPolicyText(), mergedText)) {
+            return reservationRequest;
+        }
+        reservationRequest.setCancellationPolicyText(mergedText);
+        return requestRepo.save(reservationRequest);
     }
 
     @Transactional
@@ -675,5 +698,18 @@ public class ReservationService {
             changed = true;
         }
         return changed;
+    }
+
+    private String mergeCancellationPolicyText(String existingText, String newText) {
+        if (!StringUtils.hasText(newText)) {
+            return existingText;
+        }
+        if (!StringUtils.hasText(existingText)) {
+            return newText;
+        }
+        if (existingText.contains(newText)) {
+            return existingText;
+        }
+        return existingText + "\n\n" + newText;
     }
 }

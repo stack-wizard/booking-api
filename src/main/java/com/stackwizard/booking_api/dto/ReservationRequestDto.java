@@ -20,6 +20,7 @@ public class ReservationRequestDto {
     private String customerName;
     private String customerEmail;
     private String customerPhone;
+    private String cancellationPolicyText;
     private String notes;
     private String externalReservation;
     private String confirmationCode;
@@ -36,4 +37,5 @@ public class ReservationRequestDto {
     private LocalDateTime reservationStartsAt;
     private LocalDateTime reservationEndsAt;
     private List<ReservationSummaryDto> reservations;
+    private PublicCancellationPreviewDto publicCancellation;
 }

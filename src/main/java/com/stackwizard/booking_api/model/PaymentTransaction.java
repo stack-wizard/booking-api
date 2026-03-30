@@ -34,6 +34,9 @@ public class PaymentTransaction {
     @Column(name = "payment_intent_id")
     private Long paymentIntentId;
 
+    @Column(name = "transaction_type", nullable = false)
+    private String transactionType;
+
     @Column(name = "payment_type", nullable = false)
     private String paymentType;
 
@@ -48,6 +51,15 @@ public class PaymentTransaction {
 
     @Column(nullable = false)
     private BigDecimal amount;
+
+    @Column(name = "refund_type")
+    private String refundType;
+
+    @Column(name = "source_payment_transaction_id")
+    private Long sourcePaymentTransactionId;
+
+    @Column(name = "credit_note_invoice_id")
+    private Long creditNoteInvoiceId;
 
     @Column(name = "external_ref")
     private String externalRef;

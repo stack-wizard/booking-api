@@ -6,6 +6,7 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
+import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
 import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,19 +31,25 @@ public class ReservationConfirmationEmailService {
     private final PaymentService paymentService;
     private final ReservationConfirmationEmailRenderer renderer;
     private final TenantEmailConfigResolver tenantEmailConfigResolver;
+    private final CancellationService cancellationService;
+    private final ReservationRequestAccessTokenService accessTokenService;
 
     public ReservationConfirmationEmailService(ReservationRequestRepository reservationRequestRepository,
                                                ReservationRepository reservationRepository,
                                                ProductRepository productRepository,
                                                PaymentService paymentService,
                                                ReservationConfirmationEmailRenderer renderer,
-                                               TenantEmailConfigResolver tenantEmailConfigResolver) {
+                                               TenantEmailConfigResolver tenantEmailConfigResolver,
+                                               CancellationService cancellationService,
+                                               ReservationRequestAccessTokenService accessTokenService) {
         this.reservationRequestRepository = reservationRequestRepository;
         this.reservationRepository = reservationRepository;
         this.productRepository = productRepository;
         this.paymentService = paymentService;
         this.renderer = renderer;
         this.tenantEmailConfigResolver = tenantEmailConfigResolver;
+        this.cancellationService = cancellationService;
+        this.accessTokenService = accessTokenService;
     }
 
     @Transactional
@@ -108,8 +115,13 @@ public class ReservationConfirmationEmailService {
 
         PaymentService.RequestPaymentSummary paymentSummary =
                 paymentService.summarizeReservationRequest(request.getId(), request.getTenantId(), reservations);
+        String publicAccessUrl = accessTokenService.findActiveByReservationRequestId(request.getId())
+                .map(token -> accessTokenService.buildPublicAccessUrl(token.getTenantId(), token.getToken()))
+                .orElse(null);
+        PublicCancellationPreviewDto publicCancellation =
+                publicAccessUrl != null ? cancellationService.previewPublic(request.getId()) : null;
         ReservationConfirmationEmailRenderer.RenderedEmail rendered =
-                renderer.render(request, reservations, productsById, paymentSummary, emailConfig);
+                renderer.render(request, reservations, productsById, paymentSummary, emailConfig, publicCancellation, publicAccessUrl);
 
         try {
             JavaMailSenderImpl mailSender = buildMailSender(emailConfig);

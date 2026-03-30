@@ -8,4 +8,5 @@ import java.math.BigDecimal;
 public class InvoicePaymentAllocationRequest {
     private Long paymentTransactionId;
     private BigDecimal amount;
+    private String allocationType;
 }

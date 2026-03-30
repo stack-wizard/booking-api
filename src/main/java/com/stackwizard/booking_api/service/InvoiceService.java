@@ -55,9 +55,14 @@ import java.util.Optional;
 public class InvoiceService {
     private static final String ONLINE_SYSTEM_USERNAME_PREFIX = "online-system-tenant-";
     private static final String PRODUCT_TYPE_DEPOSIT = "DEPOSIT";
+    private static final String PRODUCT_TYPE_PENALTY = "PENALTY";
     private static final String REFERENCE_TABLE_RESERVATION_REQUEST = "reservation_request";
     private static final String REFERENCE_TABLE_PAYMENT_INTENT = "payment_intent";
     private static final String REFERENCE_TABLE_INVOICE = "invoice";
+    private static final String PAYMENT_TRANSACTION_TYPE_CHARGE = "CHARGE";
+    private static final String ALLOCATION_TYPE_SETTLEMENT = "SETTLEMENT";
+    private static final String ALLOCATION_TYPE_REFUND_RELEASE = "REFUND_RELEASE";
+    private static final String ALLOCATION_TYPE_REALLOCATION = "REALLOCATION";
     private static final String DEFAULT_CURRENCY = "EUR";
     private static final BigDecimal HUNDRED = new BigDecimal("100");
 
@@ -115,9 +120,34 @@ public class InvoiceService {
     }
 
     public Optional<Invoice> findPreferredByRequestId(Long requestId) {
+        return findDisplayPreferredByRequestId(requestId);
+    }
+
+    public Optional<Invoice> findDisplayPreferredByRequestId(Long requestId) {
+        List<Invoice> invoices = findByRequestId(requestId);
+        for (Invoice invoice : invoices) {
+            if (invoice.getInvoiceType() != InvoiceType.DEPOSIT
+                    && !isStornoType(invoice.getInvoiceType())) {
+                return Optional.of(invoice);
+            }
+        }
+        for (Invoice invoice : invoices) {
+            if (invoice.getInvoiceType() == InvoiceType.DEPOSIT) {
+                return Optional.of(invoice);
+            }
+        }
+        return invoices.isEmpty() ? Optional.empty() : Optional.of(invoices.get(0));
+    }
+
+    public Optional<Invoice> findCancellationSourceInvoiceByRequestId(Long requestId) {
         List<Invoice> invoices = findByRequestId(requestId);
         for (Invoice invoice : invoices) {
             if (invoice.getInvoiceType() == InvoiceType.DEPOSIT) {
+                return Optional.of(invoice);
+            }
+        }
+        for (Invoice invoice : invoices) {
+            if (!isStornoType(invoice.getInvoiceType())) {
                 return Optional.of(invoice);
             }
         }
@@ -602,6 +632,7 @@ public class InvoiceService {
                 .invoice(invoice)
                 .paymentTransaction(paymentTransaction)
                 .allocatedAmount(grossAmount)
+                .allocationType(ALLOCATION_TYPE_SETTLEMENT)
                 .build());
 
         refreshInvoicePaymentStatus(invoice);
@@ -661,7 +692,7 @@ public class InvoiceService {
                     .productId(sourceItem.getProductId())
                     .productName(sourceItem.getProductName())
                     .quantity(-sourceItem.getQuantity())
-                    .unitPriceGross(negate(sourceItem.getUnitPriceGross()))
+                    .unitPriceGross(sourceItem.getUnitPriceGross())
                     .discountPercent(sourceItem.getDiscountPercent())
                     .discountAmount(negate(sourceItem.getDiscountAmount()))
                     .priceWithoutTax(negate(sourceItem.getPriceWithoutTax()))
@@ -679,6 +710,7 @@ public class InvoiceService {
                     .invoice(storno)
                     .paymentTransaction(sourceAllocation.getPaymentTransaction())
                     .allocatedAmount(negate(sourceAllocation.getAllocatedAmount()))
+                    .allocationType(sourceAllocation.getAllocationType())
                     .build());
         }
 
@@ -689,9 +721,156 @@ public class InvoiceService {
     }
 
     @Transactional
+    public Invoice createCreditNoteInvoice(Long invoiceId) {
+        Invoice source = invoiceRepo.findById(invoiceId)
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        if (isStornoType(source.getInvoiceType()) || source.getInvoiceType() == InvoiceType.CREDIT_NOTE) {
+            throw new IllegalStateException("Credit note cannot be created from negative invoice");
+        }
+
+        int year = LocalDate.now().getYear();
+        int seq = nextSequence(source.getTenantId(), InvoiceType.CREDIT_NOTE, year);
+        String invoiceNumber = buildNumber(InvoiceType.CREDIT_NOTE, year, seq);
+
+        Invoice creditNote = Invoice.builder()
+                .tenantId(source.getTenantId())
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .invoiceNumber(invoiceNumber)
+                .invoiceDate(LocalDate.now())
+                .customerName(source.getCustomerName())
+                .customerEmail(source.getCustomerEmail())
+                .customerPhone(source.getCustomerPhone())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .issuedAt(OffsetDateTime.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
+                .referenceTable(REFERENCE_TABLE_INVOICE)
+                .referenceId(source.getId())
+                .reservationRequestId(source.getReservationRequestId())
+                .operaReservationId(source.getOperaReservationId())
+                .operaHotelCode(source.getOperaHotelCode())
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .currency(source.getCurrency())
+                .subtotalNet(money(negate(source.getSubtotalNet())))
+                .discountTotal(money(negate(source.getDiscountTotal())))
+                .tax1Total(money(negate(source.getTax1Total())))
+                .tax2Total(money(negate(source.getTax2Total())))
+                .totalGross(money(negate(source.getTotalGross())))
+                .build();
+        creditNote = invoiceRepo.save(creditNote);
+
+        for (InvoiceItem sourceItem : invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(source.getId())) {
+            invoiceItemRepo.save(InvoiceItem.builder()
+                    .invoice(creditNote)
+                    .lineNo(sourceItem.getLineNo())
+                    .reservationId(sourceItem.getReservationId())
+                    .productId(sourceItem.getProductId())
+                    .productName(sourceItem.getProductName())
+                    .quantity(-sourceItem.getQuantity())
+                    .unitPriceGross(sourceItem.getUnitPriceGross())
+                    .discountPercent(sourceItem.getDiscountPercent())
+                    .discountAmount(negate(sourceItem.getDiscountAmount()))
+                    .priceWithoutTax(negate(sourceItem.getPriceWithoutTax()))
+                    .tax1Percent(sourceItem.getTax1Percent())
+                    .tax2Percent(sourceItem.getTax2Percent())
+                    .tax1Amount(negate(sourceItem.getTax1Amount()))
+                    .tax2Amount(negate(sourceItem.getTax2Amount()))
+                    .nettPrice(negate(sourceItem.getNettPrice()))
+                    .grossAmount(negate(sourceItem.getGrossAmount()))
+                    .build());
+        }
+
+        refreshInvoicePaymentStatus(creditNote);
+        return creditNote;
+    }
+
+    @Transactional
+    public Invoice createPenaltyInvoice(Long reservationRequestId, BigDecimal penaltyAmount, String currency) {
+        if (reservationRequestId == null) {
+            throw new IllegalArgumentException("reservationRequestId is required");
+        }
+        BigDecimal grossAmount = money(zeroSafe(penaltyAmount));
+        if (grossAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("penaltyAmount must be greater than zero");
+        }
+        ReservationRequest request = requestRepo.findById(reservationRequestId)
+                .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        Product penaltyProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(
+                        request.getTenantId(), PRODUCT_TYPE_PENALTY)
+                .orElseThrow(() -> new IllegalStateException("Penalty product is missing for tenant " + request.getTenantId()));
+
+        int year = LocalDate.now().getYear();
+        int seq = nextSequence(request.getTenantId(), InvoiceType.INVOICE, year);
+        String invoiceNumber = buildNumber(InvoiceType.INVOICE, year, seq);
+        BigDecimal tax1Percent = percent(penaltyProduct.getTax1Percent());
+        BigDecimal tax2Percent = percent(penaltyProduct.getTax2Percent());
+        BigDecimal totalTaxPercent = tax1Percent.add(tax2Percent);
+        BigDecimal divisor = BigDecimal.ONE.add(totalTaxPercent.divide(HUNDRED, 8, RoundingMode.HALF_UP));
+        BigDecimal netAmount = amount(grossAmount.divide(divisor, 8, RoundingMode.HALF_UP));
+        BigDecimal tax1Amount = amount(netAmount.multiply(tax1Percent).divide(HUNDRED, 8, RoundingMode.HALF_UP));
+        BigDecimal tax2Amount = amount(netAmount.multiply(tax2Percent).divide(HUNDRED, 8, RoundingMode.HALF_UP));
+
+        Invoice invoice = Invoice.builder()
+                .tenantId(request.getTenantId())
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber(invoiceNumber)
+                .invoiceDate(LocalDate.now())
+                .customerName(request.getCustomerName())
+                .customerEmail(request.getCustomerEmail())
+                .customerPhone(request.getCustomerPhone())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .issuedAt(OffsetDateTime.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
+                .referenceTable(REFERENCE_TABLE_RESERVATION_REQUEST)
+                .referenceId(reservationRequestId)
+                .reservationRequestId(reservationRequestId)
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .currency(normalizeCurrency(currency))
+                .subtotalNet(money(netAmount))
+                .discountTotal(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
+                .tax1Total(money(tax1Amount))
+                .tax2Total(money(tax2Amount))
+                .totalGross(grossAmount)
+                .build();
+        invoice = invoiceRepo.save(invoice);
+
+        invoiceItemRepo.save(InvoiceItem.builder()
+                .invoice(invoice)
+                .lineNo(1)
+                .reservationId(null)
+                .productId(penaltyProduct.getId())
+                .productName(penaltyProduct.getName())
+                .quantity(1)
+                .unitPriceGross(grossAmount)
+                .discountPercent(BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP))
+                .discountAmount(amountZero())
+                .priceWithoutTax(netAmount)
+                .tax1Percent(tax1Percent.setScale(4, RoundingMode.HALF_UP))
+                .tax2Percent(tax2Percent.setScale(4, RoundingMode.HALF_UP))
+                .tax1Amount(tax1Amount)
+                .tax2Amount(tax2Amount)
+                .nettPrice(netAmount)
+                .grossAmount(grossAmount)
+                .build());
+
+        refreshInvoicePaymentStatus(invoice);
+        return invoice;
+    }
+
+    @Transactional
+    public Invoice issueSystemFinalInvoiceForRequest(Long requestId) {
+        Invoice invoice = createDraftForFinalizedRequest(requestId);
+        return issueSystemInvoiceIfNeeded(invoice);
+    }
+
+    @Transactional
     public InvoicePaymentAllocation allocatePaymentToInvoice(Long invoiceId,
                                                              Long paymentTransactionId,
-                                                             BigDecimal amount) {
+                                                             BigDecimal amount,
+                                                             String allocationType) {
         Invoice invoice = invoiceRepo.findById(invoiceId)
                 .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
         if (paymentTransactionId == null) {
@@ -704,20 +883,26 @@ public class InvoiceService {
         if (!"POSTED".equalsIgnoreCase(paymentTransaction.getStatus())) {
             throw new IllegalStateException("Only POSTED payment transactions can be allocated");
         }
+        if (!PAYMENT_TRANSACTION_TYPE_CHARGE.equals(normalizePaymentTransactionType(paymentTransaction.getTransactionType()))) {
+            throw new IllegalStateException("Only CHARGE payment transactions can be allocated to invoices");
+        }
 
         BigDecimal alreadyAllocated = zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(paymentTransactionId));
         BigDecimal existingAmount = allocationRepo.findByInvoiceIdAndPaymentTransactionId(invoiceId, paymentTransactionId)
                 .map(InvoicePaymentAllocation::getAllocatedAmount)
                 .orElse(BigDecimal.ZERO);
-        BigDecimal available = money(zeroSafe(paymentTransaction.getAmount()).subtract(alreadyAllocated).add(existingAmount));
+        BigDecimal allocatedExcludingCurrent = money(alreadyAllocated.subtract(existingAmount));
+        BigDecimal invoiceTotal = money(zeroSafe(invoice.getTotalGross()));
+        BigDecimal refundedAmount = zeroSafe(paymentTransactionService.refundedAmountForSourcePaymentTransaction(paymentTransactionId));
+        BigDecimal chargeCapacity = money(zeroSafe(paymentTransaction.getAmount())
+                .subtract(allocatedExcludingCurrent)
+                .subtract(refundedAmount));
+        BigDecimal releasableCapacity = money(allocatedExcludingCurrent);
 
-        BigDecimal allocationAmount = amount != null ? money(amount) : available;
-        if (allocationAmount.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Allocation amount must be greater than zero");
-        }
-        if (allocationAmount.compareTo(available) > 0) {
-            throw new IllegalArgumentException("Allocation amount exceeds available payment amount");
-        }
+        BigDecimal allocationAmount = resolveAllocationAmount(amount, invoiceTotal, chargeCapacity, releasableCapacity);
+        String normalizedAllocationType = normalizeAllocationType(allocationType, allocationAmount);
+        validateAllocationDirection(invoiceTotal, allocationAmount, normalizedAllocationType);
+        validateAllocationCapacity(allocationAmount, chargeCapacity, releasableCapacity);
 
         PaymentTransaction linkedPaymentTransaction = paymentTransaction;
         InvoicePaymentAllocation allocation = allocationRepo.findByInvoiceIdAndPaymentTransactionId(invoiceId, paymentTransactionId)
@@ -725,8 +910,10 @@ public class InvoiceService {
                         .invoice(invoice)
                         .paymentTransaction(linkedPaymentTransaction)
                         .allocatedAmount(BigDecimal.ZERO)
+                        .allocationType(normalizedAllocationType)
                         .build());
         allocation.setAllocatedAmount(allocationAmount);
+        allocation.setAllocationType(normalizedAllocationType);
         InvoicePaymentAllocation saved = allocationRepo.save(allocation);
 
         refreshInvoicePaymentStatus(invoice);
@@ -885,6 +1072,73 @@ public class InvoiceService {
         return value == null ? BigDecimal.ZERO : value;
     }
 
+    private BigDecimal resolveAllocationAmount(BigDecimal requestedAmount,
+                                               BigDecimal invoiceTotal,
+                                               BigDecimal chargeCapacity,
+                                               BigDecimal releasableCapacity) {
+        if (requestedAmount != null) {
+            BigDecimal normalized = money(requestedAmount);
+            if (normalized.compareTo(BigDecimal.ZERO) == 0) {
+                throw new IllegalArgumentException("Allocation amount must not be zero");
+            }
+            return normalized;
+        }
+        if (invoiceTotal.compareTo(BigDecimal.ZERO) < 0) {
+            return invoiceTotal.abs().min(releasableCapacity).negate();
+        }
+        return chargeCapacity;
+    }
+
+    private void validateAllocationDirection(BigDecimal invoiceTotal,
+                                             BigDecimal allocationAmount,
+                                             String allocationType) {
+        if (invoiceTotal.compareTo(BigDecimal.ZERO) > 0 && allocationAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Positive invoices require positive allocations");
+        }
+        if (invoiceTotal.compareTo(BigDecimal.ZERO) < 0 && allocationAmount.compareTo(BigDecimal.ZERO) >= 0) {
+            throw new IllegalArgumentException("Negative invoices require negative allocations");
+        }
+        if (allocationAmount.compareTo(BigDecimal.ZERO) > 0 && !ALLOCATION_TYPE_SETTLEMENT.equals(allocationType)) {
+            throw new IllegalArgumentException("Positive allocations must use SETTLEMENT allocationType");
+        }
+        if (allocationAmount.compareTo(BigDecimal.ZERO) < 0
+                && !ALLOCATION_TYPE_REFUND_RELEASE.equals(allocationType)
+                && !ALLOCATION_TYPE_REALLOCATION.equals(allocationType)) {
+            throw new IllegalArgumentException("Negative allocations must use REFUND_RELEASE or REALLOCATION allocationType");
+        }
+    }
+
+    private void validateAllocationCapacity(BigDecimal allocationAmount,
+                                            BigDecimal chargeCapacity,
+                                            BigDecimal releasableCapacity) {
+        if (allocationAmount.compareTo(BigDecimal.ZERO) > 0 && allocationAmount.compareTo(chargeCapacity) > 0) {
+            throw new IllegalArgumentException("Allocation amount exceeds available payment amount");
+        }
+        if (allocationAmount.compareTo(BigDecimal.ZERO) < 0
+                && allocationAmount.abs().compareTo(releasableCapacity) > 0) {
+            throw new IllegalArgumentException("Negative allocation exceeds releasable payment amount");
+        }
+    }
+
+    private String normalizeAllocationType(String allocationType, BigDecimal allocationAmount) {
+        String defaultValue = allocationAmount.compareTo(BigDecimal.ZERO) < 0
+                ? ALLOCATION_TYPE_REFUND_RELEASE
+                : ALLOCATION_TYPE_SETTLEMENT;
+        String raw = StringUtils.hasText(allocationType) ? allocationType : defaultValue;
+        String normalized = raw.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case ALLOCATION_TYPE_SETTLEMENT, ALLOCATION_TYPE_REFUND_RELEASE, ALLOCATION_TYPE_REALLOCATION -> normalized;
+            default -> throw new IllegalArgumentException("allocationType must be SETTLEMENT, REFUND_RELEASE, or REALLOCATION");
+        };
+    }
+
+    private String normalizePaymentTransactionType(String transactionType) {
+        if (!StringUtils.hasText(transactionType)) {
+            return PAYMENT_TRANSACTION_TYPE_CHARGE;
+        }
+        return transactionType.trim().toUpperCase(Locale.ROOT);
+    }
+
     private boolean isStornoType(InvoiceType invoiceType) {
         return invoiceType != null && invoiceType.isStornoType();
     }
@@ -897,6 +1151,27 @@ public class InvoiceService {
             return InvoiceType.DEPOSIT_STORNO;
         }
         throw new IllegalArgumentException("Unsupported invoice type for storno: " + sourceType);
+    }
+
+    private Invoice issueSystemInvoiceIfNeeded(Invoice invoice) {
+        if (invoice.getStatus() == InvoiceStatus.ISSUED) {
+            return invoice;
+        }
+        invoice.setIssuedByMode(IssuedByMode.ONLINE_SYSTEM);
+        if (invoice.getStatus() == InvoiceStatus.DRAFT) {
+            invoice.setStatus(InvoiceStatus.ISSUED);
+        }
+        if (invoice.getIssuedAt() == null) {
+            invoice.setIssuedAt(OffsetDateTime.now());
+        }
+        if (invoice.getFiscalizationStatus() != InvoiceFiscalizationStatus.FISCALIZED) {
+            invoice.setFiscalizationStatus(
+                    invoice.getInvoiceType() == InvoiceType.ROOM_CHARGE
+                            ? InvoiceFiscalizationStatus.NOT_REQUIRED
+                            : InvoiceFiscalizationStatus.REQUIRED
+            );
+        }
+        return invoiceRepo.save(invoice);
     }
 
     private BigDecimal negate(BigDecimal value) {

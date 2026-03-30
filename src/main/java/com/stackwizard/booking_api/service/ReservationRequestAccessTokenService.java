@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.ReservationRequestAccessToken;
+import com.stackwizard.booking_api.model.TenantIntegrationConfig;
 import com.stackwizard.booking_api.repository.ReservationRequestAccessTokenRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -19,13 +20,22 @@ import java.util.UUID;
 
 @Service
 public class ReservationRequestAccessTokenService {
+    private static final String INTEGRATION_TYPE_BOOKING = "BOOKING";
+    private static final String PROVIDER_EMAIL = "EMAIL";
+
     private final ReservationRequestAccessTokenRepository tokenRepository;
+    private final TenantIntegrationConfigService tenantIntegrationConfigService;
     private final String publicBaseUrl;
+    private final String publicAccessUrlTemplate;
 
     public ReservationRequestAccessTokenService(ReservationRequestAccessTokenRepository tokenRepository,
-                                                @Value("${booking.public-base-url:}") String publicBaseUrl) {
+                                                TenantIntegrationConfigService tenantIntegrationConfigService,
+                                                @Value("${booking.public-base-url:}") String publicBaseUrl,
+                                                @Value("${booking.public-access-url-template:}") String publicAccessUrlTemplate) {
         this.tokenRepository = tokenRepository;
+        this.tenantIntegrationConfigService = tenantIntegrationConfigService;
         this.publicBaseUrl = publicBaseUrl;
+        this.publicAccessUrlTemplate = publicAccessUrlTemplate;
     }
 
     @Transactional
@@ -88,9 +98,13 @@ public class ReservationRequestAccessTokenService {
                 .findFirst();
     }
 
-    public String buildPublicAccessUrl(String token) {
+    public String buildPublicAccessUrl(Long tenantId, String token) {
         if (!StringUtils.hasText(token)) {
             return null;
+        }
+        String resolvedTemplate = resolvePublicAccessUrlTemplate(tenantId);
+        if (StringUtils.hasText(resolvedTemplate) && resolvedTemplate.contains("{token}")) {
+            return resolvedTemplate.replace("{token}", token.trim());
         }
         String path = "/api/public/reservation-requests/access/" + token;
         if (!StringUtils.hasText(publicBaseUrl)) {
@@ -98,6 +112,17 @@ public class ReservationRequestAccessTokenService {
         }
         String base = publicBaseUrl.endsWith("/") ? publicBaseUrl.substring(0, publicBaseUrl.length() - 1) : publicBaseUrl;
         return base + path;
+    }
+
+    private String resolvePublicAccessUrlTemplate(Long tenantId) {
+        if (tenantId != null) {
+            Optional<TenantIntegrationConfig> config = tenantIntegrationConfigService
+                    .findByTenantIdAndTypeAndProvider(tenantId, INTEGRATION_TYPE_BOOKING, PROVIDER_EMAIL);
+            if (config.isPresent() && StringUtils.hasText(config.get().getPublicAccessUrlTemplate())) {
+                return config.get().getPublicAccessUrlTemplate().trim();
+            }
+        }
+        return publicAccessUrlTemplate;
     }
 
     private OffsetDateTime calculatePublicAccessExpiry(List<Reservation> reservations) {

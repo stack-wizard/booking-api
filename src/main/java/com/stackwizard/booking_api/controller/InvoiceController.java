@@ -133,7 +133,7 @@ public class InvoiceController {
             throw new IllegalArgumentException("request body is required");
         }
         InvoicePaymentAllocation allocation = invoiceService.allocatePaymentToInvoice(
-                invoiceId, request.getPaymentTransactionId(), request.getAmount());
+                invoiceId, request.getPaymentTransactionId(), request.getAmount(), request.getAllocationType());
         return ResponseEntity.ok(allocation);
     }
 

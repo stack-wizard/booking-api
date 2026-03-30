@@ -34,6 +34,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +62,8 @@ class ReservationServiceInternalRequestTest {
     @Mock
     private ReservationRequestAccessTokenService accessTokenService;
     @Mock
+    private CancellationPolicyService cancellationPolicyService;
+    @Mock
     private ApplicationEventPublisher eventPublisher;
 
     private ReservationService service;
@@ -78,6 +81,7 @@ class ReservationServiceInternalRequestTest {
                 requestRepo,
                 tenantConfigService,
                 accessTokenService,
+                cancellationPolicyService,
                 eventPublisher
         );
     }
@@ -120,6 +124,15 @@ class ReservationServiceInternalRequestTest {
                 .thenReturn(List.of(priceListEntry));
         when(translationService.translate("DAY", 1, tenantId, null, serviceDate, null))
                 .thenReturn(new BookingTranslationService.TranslatedPeriod(startsAt, endsAt));
+        when(cancellationPolicyService.resolveBookingSnapshot(tenantId, product.getId(), startsAt))
+                .thenReturn(new CancellationPolicyService.PolicySnapshot(
+                        501L,
+                        "Free cancellation until 2026-06-01 09:00.",
+                        "Cancellation up to 14 days before start: full amount is returned as cash refund.",
+                        startsAt.minusDays(14),
+                        "CASH_REFUND",
+                        null
+                ));
         when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> {
             ReservationRequest request = invocation.getArgument(0);
             request.setId(99L);
@@ -143,11 +156,15 @@ class ReservationServiceInternalRequestTest {
         assertThat(allocation.getReservation().getExpiresAt()).isNull();
         assertThat(allocation.getReservation().getRequestType()).isEqualTo(ReservationRequest.Type.INTERNAL);
         assertThat(allocation.getReservation().getRequest().getExpiresAt()).isNull();
+        assertThat(allocation.getReservation().getCancellationPolicyText()).contains("Free cancellation until");
+        assertThat(allocation.getReservation().getRequest().getCancellationPolicyText()).contains("Free cancellation until");
 
         ArgumentCaptor<ReservationRequest> requestCaptor = ArgumentCaptor.forClass(ReservationRequest.class);
-        verify(requestRepo).save(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().getType()).isEqualTo(ReservationRequest.Type.INTERNAL);
-        assertThat(requestCaptor.getValue().getExpiresAt()).isNull();
+        verify(requestRepo, times(2)).save(requestCaptor.capture());
+        ReservationRequest persistedRequest = requestCaptor.getAllValues().getLast();
+        assertThat(persistedRequest.getType()).isEqualTo(ReservationRequest.Type.INTERNAL);
+        assertThat(persistedRequest.getExpiresAt()).isNull();
+        assertThat(persistedRequest.getCancellationPolicyText()).contains("Free cancellation until");
     }
 
     @Test

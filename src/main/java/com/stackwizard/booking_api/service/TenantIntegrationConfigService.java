@@ -92,6 +92,7 @@ public class TenantIntegrationConfigService {
         config.setEmailFooterLocation(normalizeNullable(config.getEmailFooterLocation()));
         config.setEmailArrivalNote(normalizeNullable(config.getEmailArrivalNote()));
         config.setEmailLocale(normalizeNullableLower(config.getEmailLocale()));
+        config.setPublicAccessUrlTemplate(normalizeNullable(config.getPublicAccessUrlTemplate()));
         if (config.getActive() == null) {
             config.setActive(Boolean.TRUE);
         }

@@ -77,6 +77,7 @@ public class ReservationRequestDtoMapper {
                         .qty(reservation.getQty())
                         .unitPrice(reservation.getUnitPrice())
                         .grossAmount(reservation.getGrossAmount())
+                        .cancellationPolicyText(reservation.getCancellationPolicyText())
                         .build())
                 .toList();
 
@@ -85,7 +86,7 @@ public class ReservationRequestDtoMapper {
 
         ReservationRequestAccessToken accessToken = accessTokenService.findActiveByReservationRequestId(request.getId()).orElse(null);
         String publicAccessUrl = accessToken != null
-                ? accessTokenService.buildPublicAccessUrl(accessToken.getToken())
+                ? accessTokenService.buildPublicAccessUrl(accessToken.getTenantId(), accessToken.getToken())
                 : null;
 
         return ReservationRequestDto.builder()
@@ -98,6 +99,7 @@ public class ReservationRequestDtoMapper {
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
+                .cancellationPolicyText(request.getCancellationPolicyText())
                 .notes(request.getNotes())
                 .externalReservation(request.getExternalReservation())
                 .confirmationCode(request.getConfirmationCode())
