@@ -9,6 +9,7 @@ import com.stackwizard.booking_api.dto.ReservationTtlExtendRequest;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
+import com.stackwizard.booking_api.service.ReservationRequestExportService;
 import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
 import com.stackwizard.booking_api.service.CancellationService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
@@ -20,10 +21,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 
@@ -38,19 +42,22 @@ public class ReservationRequestController {
     private final ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestDtoMapper dtoMapper;
+    private final ReservationRequestExportService exportService;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
                                         CancellationService cancellationService,
                                         ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider,
                                         TenantConfigService tenantConfigService,
-                                        ReservationRequestDtoMapper dtoMapper) {
+                                        ReservationRequestDtoMapper dtoMapper,
+                                        ReservationRequestExportService exportService) {
         this.service = service;
         this.reservationService = reservationService;
         this.cancellationService = cancellationService;
         this.reservationConfirmationEmailServiceProvider = reservationConfirmationEmailServiceProvider;
         this.tenantConfigService = tenantConfigService;
         this.dtoMapper = dtoMapper;
+        this.exportService = exportService;
     }
 
     @GetMapping
@@ -64,6 +71,19 @@ public class ReservationRequestController {
                                               @RequestParam(defaultValue = "desc") String sortDir) {
         Pageable pageable = buildPageable(page, size, sortBy, sortDir);
         return service.search(criteria, pageable).map(dtoMapper::toDto);
+    }
+
+    @GetMapping(value = "/search/export", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public ResponseEntity<byte[]> exportSearch(ReservationRequestSearchCriteria criteria,
+                                               @RequestParam(defaultValue = "createdAt") String sortBy,
+                                               @RequestParam(defaultValue = "desc") String sortDir) {
+        byte[] workbook = exportService.exportSearch(criteria, buildSort(sortBy, sortDir));
+        String fileName = "reservation-requests-export-"
+                + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(OffsetDateTime.now()) + ".xlsx";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(workbook);
     }
 
     @GetMapping("/{id}")
@@ -162,9 +182,13 @@ public class ReservationRequestController {
             throw new IllegalArgumentException("size must be between 1 and " + MAX_PAGE_SIZE);
         }
 
+        return PageRequest.of(page, size, buildSort(sortBy, sortDir));
+    }
+
+    private Sort buildSort(String sortBy, String sortDir) {
         String sortProperty = resolveSortProperty(sortBy);
         Sort.Direction direction = resolveDirection(sortDir);
-        return PageRequest.of(page, size, Sort.by(direction, sortProperty));
+        return Sort.by(direction, sortProperty);
     }
 
     private String resolveSortProperty(String sortBy) {

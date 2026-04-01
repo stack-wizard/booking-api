@@ -28,10 +28,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -124,5 +126,25 @@ class PaymentServiceTest {
         ArgumentCaptor<OffsetDateTime> expiresAtCaptor = ArgumentCaptor.forClass(OffsetDateTime.class);
         verify(reservationService).synchronizeRequestExpiry(eq(requestId), expiresAtCaptor.capture());
         assertThat(expiresAtCaptor.getValue()).isEqualTo(response.getExpiresAt());
+    }
+
+    @Test
+    void initiateForReservationRequestRejectsInternalRequests() {
+        Long requestId = 78L;
+        Long tenantId = 8L;
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.INTERNAL)
+                .status(ReservationRequest.Status.DRAFT)
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(reservationRequest));
+
+        assertThatThrownBy(() -> service.initiateForReservationRequest(requestId, new PaymentInitiateRequest()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Internal reservation requests are not payable online");
+
+        verify(paymentIntentRepo, never()).save(any(PaymentIntent.class));
     }
 }

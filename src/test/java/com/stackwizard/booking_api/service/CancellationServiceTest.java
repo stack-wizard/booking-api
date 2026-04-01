@@ -7,6 +7,7 @@ import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
 import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.CancellationRequest;
 import com.stackwizard.booking_api.model.Invoice;
+import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.PaymentIntent;
@@ -18,6 +19,7 @@ import com.stackwizard.booking_api.repository.CancellationRequestRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
+import com.stackwizard.booking_api.service.fiscal.InvoiceAutoFiscalizationRequestedEvent;
 import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundRequest;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundResult;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -62,6 +65,8 @@ class CancellationServiceTest {
     @Mock
     private ReservationRequestAccessTokenService accessTokenService;
     @Mock
+    private ApplicationEventPublisher eventPublisher;
+    @Mock
     private PaymentProviderClient paymentProviderClient;
 
     private CancellationService service;
@@ -79,6 +84,7 @@ class CancellationServiceTest {
                 paymentTransactionService,
                 cancellationPolicyService,
                 accessTokenService,
+                eventPublisher,
                 List.of(paymentProviderClient)
         );
     }
@@ -132,12 +138,14 @@ class CancellationServiceTest {
                 .id(201L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.CREDIT_NOTE)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-100.00"))
                 .build();
         Invoice penaltyInvoice = Invoice.builder()
                 .id(202L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.INVOICE)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("50.00"))
                 .build();
         PaymentIntent paymentIntent = PaymentIntent.builder()
@@ -206,6 +214,7 @@ class CancellationServiceTest {
         assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("-50.00");
         assertThat(paymentCaptor.getValue().getCreditNoteInvoiceId()).isEqualTo(201L);
         assertThat(paymentCaptor.getValue().getSourcePaymentTransactionId()).isEqualTo(300L);
+        verify(eventPublisher, times(2)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 
     @Test
@@ -256,6 +265,7 @@ class CancellationServiceTest {
                 .id(211L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-100.00"))
                 .build();
 
@@ -295,6 +305,7 @@ class CancellationServiceTest {
         assertThat(result.getRefundPaymentTransactionId()).isNull();
         verify(paymentProviderClient, never()).refund(any());
         verify(paymentTransactionService, never()).create(any());
+        verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 
     @Test
@@ -344,12 +355,14 @@ class CancellationServiceTest {
                 .id(221L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-70.00"))
                 .build();
         Invoice penaltyInvoice = Invoice.builder()
                 .id(222L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.INVOICE)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("70.00"))
                 .build();
 
@@ -390,6 +403,7 @@ class CancellationServiceTest {
         verify(invoiceService).allocatePaymentToInvoice(222L, 320L, new BigDecimal("70.00"), "SETTLEMENT");
         verify(paymentProviderClient, never()).refund(any());
         verify(paymentTransactionService, never()).create(any());
+        verify(eventPublisher, times(2)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 
     @Test
@@ -439,12 +453,14 @@ class CancellationServiceTest {
                 .id(231L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-30.00"))
                 .build();
         Invoice penaltyInvoice = Invoice.builder()
                 .id(232L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.INVOICE)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("30.00"))
                 .build();
 
@@ -485,6 +501,7 @@ class CancellationServiceTest {
         verify(invoiceService).allocatePaymentToInvoice(232L, 330L, new BigDecimal("30.00"), "SETTLEMENT");
         verify(paymentProviderClient, never()).refund(any());
         verify(paymentTransactionService, never()).create(any());
+        verify(eventPublisher, times(2)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 
     @Test
@@ -602,6 +619,7 @@ class CancellationServiceTest {
                 .id(251L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-100.00"))
                 .build();
 
@@ -642,5 +660,6 @@ class CancellationServiceTest {
         verify(invoiceService, times(1)).createStornoInvoice(250L);
         verify(paymentProviderClient, never()).refund(any());
         verify(paymentTransactionService, never()).create(any());
+        verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 }

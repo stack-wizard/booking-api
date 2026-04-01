@@ -155,6 +155,16 @@ public class InvoiceFiscalizationService {
         }
     }
 
+    @Transactional(noRollbackFor = RuntimeException.class)
+    public Invoice tryFiscalizeInvoice(Long invoiceId, InvoiceFiscalizeRequest request) {
+        try {
+            return fiscalizeInvoice(invoiceId, request);
+        } catch (RuntimeException ignored) {
+            return invoiceRepo.findById(invoiceId)
+                    .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        }
+    }
+
     @Transactional
     public JsonNode buildFiscalPayload(Long invoiceId, InvoiceFiscalizeRequest request) {
         InvoiceFiscalizeRequest effectiveRequest = request != null ? request : new InvoiceFiscalizeRequest();

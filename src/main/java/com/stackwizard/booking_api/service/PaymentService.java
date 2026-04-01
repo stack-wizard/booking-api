@@ -162,6 +162,9 @@ public class PaymentService {
                 || reservationRequest.getStatus() == ReservationRequest.Status.FINALIZED) {
             throw new IllegalStateException("Reservation request is not payable in current status");
         }
+        if (reservationRequest.getType() == ReservationRequest.Type.INTERNAL) {
+            throw new IllegalStateException("Internal reservation requests are not payable online");
+        }
 
         String provider = normalizeProvider(request != null ? request.getProvider() : null);
         PaymentProviderClient providerClient = providerClients.get(provider);
@@ -510,9 +513,13 @@ public class PaymentService {
                 if (!STATUS_SUPERSEDED.equals(previousStatus)
                         && !STATUS_EXPIRED.equals(previousStatus)
                         && !STATUS_CANCELED.equals(previousStatus)) {
+                    ReservationRequest reservationRequest = requestRepo.findById(paymentIntent.getReservationRequestId())
+                            .orElseThrow(() -> new IllegalArgumentException("Reservation request not found for payment intent"));
                     reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
-                    Invoice depositInvoice = invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
-                    eventPublisher.publishEvent(new InvoiceAutoFiscalizationRequestedEvent(depositInvoice.getId()));
+                    if (reservationRequest.getType() != ReservationRequest.Type.INTERNAL) {
+                        Invoice depositInvoice = invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
+                        eventPublisher.publishEvent(new InvoiceAutoFiscalizationRequestedEvent(depositInvoice.getId()));
+                    }
                 }
             }
             return;

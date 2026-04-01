@@ -63,6 +63,8 @@ public class ReservationRequestDtoMapper {
                         .requestId(reservation.getRequest() != null ? reservation.getRequest().getId() : null)
                         .requestType(reservation.getRequestType() != null ? reservation.getRequestType().name() : null)
                         .requestedResourceId(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getId() : null)
+                        .requestedResourceCode(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getCode() : null)
+                        .requestedResourceName(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getName() : null)
                         .startsAt(reservation.getStartsAt())
                         .endsAt(reservation.getEndsAt())
                         .status(reservation.getStatus())

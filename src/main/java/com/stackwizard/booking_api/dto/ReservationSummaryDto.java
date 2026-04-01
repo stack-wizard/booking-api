@@ -17,6 +17,8 @@ public class ReservationSummaryDto {
     private Long requestId;
     private String requestType;
     private Long requestedResourceId;
+    private String requestedResourceCode;
+    private String requestedResourceName;
     private LocalDateTime startsAt;
     private LocalDateTime endsAt;
     private String status;

@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.controller;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
 import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
+import com.stackwizard.booking_api.service.ReservationRequestExportService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.TenantConfigService;
@@ -35,6 +36,8 @@ class ReservationRequestControllerTest {
     private ReservationRequestDtoMapper dtoMapper;
     @Mock
     private CancellationService cancellationService;
+    @Mock
+    private ReservationRequestExportService exportService;
 
     @Test
     void createKeepsInternalDraftRequestWithoutExpiry() {
@@ -44,7 +47,8 @@ class ReservationRequestControllerTest {
                 cancellationService,
                 confirmationEmailServiceProvider,
                 tenantConfigService,
-                dtoMapper
+                dtoMapper,
+                exportService
         );
 
         ReservationRequest request = ReservationRequest.builder()

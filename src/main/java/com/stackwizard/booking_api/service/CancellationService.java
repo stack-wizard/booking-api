@@ -18,6 +18,8 @@ import com.stackwizard.booking_api.repository.CancellationRequestRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
+import com.stackwizard.booking_api.service.fiscal.InvoiceAutoFiscalizationRequestedEvent;
+import org.springframework.context.ApplicationEventPublisher;
 import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundRequest;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundResult;
@@ -55,6 +57,7 @@ public class CancellationService {
     private final PaymentTransactionService paymentTransactionService;
     private final CancellationPolicyService cancellationPolicyService;
     private final ReservationRequestAccessTokenService accessTokenService;
+    private final ApplicationEventPublisher eventPublisher;
     private final Map<String, PaymentProviderClient> providerClients;
 
     public CancellationService(CancellationRequestRepository cancellationRequestRepo,
@@ -66,6 +69,7 @@ public class CancellationService {
                                PaymentTransactionService paymentTransactionService,
                                CancellationPolicyService cancellationPolicyService,
                                ReservationRequestAccessTokenService accessTokenService,
+                               ApplicationEventPublisher eventPublisher,
                                List<PaymentProviderClient> providerClients) {
         this.cancellationRequestRepo = cancellationRequestRepo;
         this.requestRepo = requestRepo;
@@ -76,6 +80,7 @@ public class CancellationService {
         this.paymentTransactionService = paymentTransactionService;
         this.cancellationPolicyService = cancellationPolicyService;
         this.accessTokenService = accessTokenService;
+        this.eventPublisher = eventPublisher;
         this.providerClients = providerClients.stream()
                 .collect(Collectors.toMap(c -> c.providerCode().toUpperCase(Locale.ROOT), c -> c));
     }
@@ -276,6 +281,7 @@ public class CancellationService {
                 }
                 Invoice creditNote = invoiceService.createCreditNoteInvoice(sourceInvoice.getId());
                 cancellationRequest.setCreditNoteInvoiceId(creditNote.getId());
+                publishAutoFiscalizationIfRequired(creditNote);
                 invoiceService.allocatePaymentToInvoice(
                         creditNote.getId(),
                         sourceCharge.getId(),
@@ -286,6 +292,7 @@ public class CancellationService {
                 if (penaltyAmount.compareTo(BigDecimal.ZERO) > 0) {
                     Invoice penaltyInvoice = invoiceService.createPenaltyInvoice(reservationRequestId, penaltyAmount, currency);
                     cancellationRequest.setPenaltyInvoiceId(penaltyInvoice.getId());
+                    publishAutoFiscalizationIfRequired(penaltyInvoice);
                     invoiceService.allocatePaymentToInvoice(penaltyInvoice.getId(), sourceCharge.getId(), penaltyAmount, "SETTLEMENT");
                 }
 
@@ -308,6 +315,7 @@ public class CancellationService {
                 if (sourceInvoice != null) {
                     Invoice stornoInvoice = invoiceService.createStornoInvoice(sourceInvoice.getId());
                     cancellationRequest.setStornoInvoiceId(stornoInvoice.getId());
+                    publishAutoFiscalizationIfRequired(stornoInvoice);
                 }
                 if (penaltyAmount.compareTo(BigDecimal.ZERO) > 0) {
                     if (sourceCharge == null) {
@@ -315,18 +323,21 @@ public class CancellationService {
                     }
                     Invoice penaltyInvoice = invoiceService.createPenaltyInvoice(reservationRequestId, penaltyAmount, currency);
                     cancellationRequest.setPenaltyInvoiceId(penaltyInvoice.getId());
+                    publishAutoFiscalizationIfRequired(penaltyInvoice);
                     invoiceService.allocatePaymentToInvoice(penaltyInvoice.getId(), sourceCharge.getId(), penaltyAmount, "SETTLEMENT");
                 }
             } else {
                 if (sourceInvoice != null) {
                     Invoice stornoInvoice = invoiceService.createStornoInvoice(sourceInvoice.getId());
                     cancellationRequest.setStornoInvoiceId(stornoInvoice.getId());
+                    publishAutoFiscalizationIfRequired(stornoInvoice);
                 }
                 // Admin no-refund cancellations keep only the paid deposit/base amount as penalty.
                 // We intentionally do not create a full final invoice from reservation products here.
                 if (penaltyAmount.compareTo(BigDecimal.ZERO) > 0) {
                     Invoice penaltyInvoice = invoiceService.createPenaltyInvoice(reservationRequestId, penaltyAmount, currency);
                     cancellationRequest.setPenaltyInvoiceId(penaltyInvoice.getId());
+                    publishAutoFiscalizationIfRequired(penaltyInvoice);
                     if (sourceCharge != null) {
                         invoiceService.allocatePaymentToInvoice(
                                 penaltyInvoice.getId(),
@@ -561,6 +572,13 @@ public class CancellationService {
             return accessTokenService.buildPublicAccessUrl(accessToken.getTenantId(), accessToken.getToken());
         }
         return "/api/reservation-requests/" + reservationRequestId;
+    }
+
+    private void publishAutoFiscalizationIfRequired(Invoice invoice) {
+        if (invoice != null && invoice.getId() != null && invoice.getFiscalizationStatus() != null
+                && invoice.getFiscalizationStatus().name().equals("REQUIRED")) {
+            eventPublisher.publishEvent(new InvoiceAutoFiscalizationRequestedEvent(invoice.getId()));
+        }
     }
 
     private String normalizeSettlementMode(String settlementMode) {

@@ -156,7 +156,7 @@ public class InvoiceController {
             fiscalizeRequest.setIssuedByUserId(request.getIssuedByUserId());
             fiscalizeRequest.setBusinessPremiseId(request.getBusinessPremiseId());
             fiscalizeRequest.setCashRegisterId(request.getCashRegisterId());
-            Invoice fiscalized = invoiceFiscalizationService.fiscalizeInvoice(invoiceId, fiscalizeRequest);
+            Invoice fiscalized = invoiceFiscalizationService.tryFiscalizeInvoice(invoiceId, fiscalizeRequest);
             return toResponse(fiscalized);
         }
         return toResponse(issued);

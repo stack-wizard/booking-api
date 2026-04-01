@@ -12,6 +12,7 @@ import com.stackwizard.booking_api.repository.specification.ReservationRequestSp
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -66,6 +67,13 @@ public class ReservationRequestService {
     public Page<ReservationRequest> search(ReservationRequestSearchCriteria criteria, Pageable pageable) {
         ReservationRequestSearchCriteria normalized = normalizeAndValidate(criteria);
         return requestRepo.findAll(ReservationRequestSpecifications.byCriteria(normalized), pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ReservationRequest> searchAll(ReservationRequestSearchCriteria criteria, Sort sort) {
+        ReservationRequestSearchCriteria normalized = normalizeAndValidate(criteria);
+        Sort effectiveSort = (sort == null || sort.isUnsorted()) ? Sort.by(Sort.Direction.DESC, "createdAt") : sort;
+        return requestRepo.findAll(ReservationRequestSpecifications.byCriteria(normalized), effectiveSort);
     }
 
     @Transactional
