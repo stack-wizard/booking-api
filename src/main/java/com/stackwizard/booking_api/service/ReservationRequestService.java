@@ -2,6 +2,7 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.dto.ReservationRequestSearchCriteria;
 import com.stackwizard.booking_api.model.Reservation;
+import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.ReservationRequestAccessToken;
 import com.stackwizard.booking_api.repository.AllocationRepository;
@@ -13,6 +14,7 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -27,6 +29,16 @@ import java.util.stream.Collectors;
 
 @Service
 public class ReservationRequestService {
+    private static final List<ReservationRequest.Status> EXPIRABLE_REQUEST_STATUSES = List.of(
+            ReservationRequest.Status.DRAFT,
+            ReservationRequest.Status.PENDING_PAYMENT,
+            ReservationRequest.Status.MANUAL_REVIEW
+    );
+    private static final List<String> ACTIVE_PAYMENT_INTENT_STATUSES = List.of(
+            "CREATED",
+            "PENDING_CUSTOMER",
+            "PROCESSING"
+    );
     private static final Set<String> REQUEST_STATUS_VALUES = Arrays.stream(ReservationRequest.Status.values())
             .map(Enum::name)
             .collect(Collectors.toUnmodifiableSet());
@@ -44,24 +56,41 @@ public class ReservationRequestService {
     private final PaymentIntentRepository paymentIntentRepo;
     private final ReservationRequestAccessTokenService accessTokenService;
     private final ReservationService reservationService;
+    private final TenantConfigService tenantConfigService;
 
     public ReservationRequestService(ReservationRequestRepository requestRepo,
                                      ReservationRepository reservationRepo,
                                      AllocationRepository allocationRepo,
                                      PaymentIntentRepository paymentIntentRepo,
                                      ReservationRequestAccessTokenService accessTokenService,
-                                     ReservationService reservationService) {
+                                     ReservationService reservationService,
+                                     TenantConfigService tenantConfigService) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.allocationRepo = allocationRepo;
         this.paymentIntentRepo = paymentIntentRepo;
         this.accessTokenService = accessTokenService;
         this.reservationService = reservationService;
+        this.tenantConfigService = tenantConfigService;
     }
 
     public List<ReservationRequest> findAll() { return requestRepo.findAll(); }
     public Optional<ReservationRequest> findById(Long id) { return requestRepo.findById(id); }
     public ReservationRequest save(ReservationRequest request) { return requestRepo.save(request); }
+
+    @Scheduled(fixedDelayString = "${reservation-requests.expiry-scan-ms:60000}")
+    @Transactional
+    public void expireStaleRequests() {
+        OffsetDateTime now = OffsetDateTime.now();
+        List<ReservationRequest> stale = requestRepo.findLockedByStatusInAndExpiresAtBefore(EXPIRABLE_REQUEST_STATUSES, now);
+        for (ReservationRequest request : stale) {
+            if (request.getStatus() == ReservationRequest.Status.PENDING_PAYMENT) {
+                handlePendingPaymentExpiry(request, now);
+                continue;
+            }
+            expireRequest(request, now);
+        }
+    }
 
     @Transactional(readOnly = true)
     public Page<ReservationRequest> search(ReservationRequestSearchCriteria criteria, Pageable pageable) {
@@ -143,6 +172,7 @@ public class ReservationRequestService {
             return request;
         }
         if (request.getStatus() == ReservationRequest.Status.DRAFT
+                || request.getStatus() == ReservationRequest.Status.EXPIRED
                 || request.getStatus() == ReservationRequest.Status.CANCELLED) {
             return request;
         }
@@ -171,8 +201,62 @@ public class ReservationRequestService {
             // Idempotent cancel: already canceled.
             return;
         }
+        if (request.getStatus() == ReservationRequest.Status.EXPIRED) {
+            return;
+        }
 
         throw new IllegalStateException("Cannot delete/cancel reservation request in status " + request.getStatus());
+    }
+
+    private void handlePendingPaymentExpiry(ReservationRequest request, OffsetDateTime now) {
+        List<PaymentIntent> intents = paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(request.getId());
+        PaymentIntent latestIntent = intents.isEmpty() ? null : intents.getFirst();
+        if (latestIntent != null && "PROCESSING".equals(normalizePaymentIntentStatus(latestIntent.getStatus()))) {
+            moveToManualReview(request, now);
+            return;
+        }
+        expireRequest(request, now);
+    }
+
+    private void moveToManualReview(ReservationRequest request, OffsetDateTime now) {
+        OffsetDateTime expiresAt = now.plusMinutes(tenantConfigService.manualReviewTtlMinutes(request.getTenantId()));
+        request.setStatus(ReservationRequest.Status.MANUAL_REVIEW);
+        request.setExpiresAt(expiresAt);
+        requestRepo.save(request);
+        reservationService.synchronizeRequestExpiry(request.getId(), expiresAt);
+    }
+
+    private void expireRequest(ReservationRequest request, OffsetDateTime now) {
+        ReservationRequest.Status previousStatus = request.getStatus();
+        request.setStatus(ReservationRequest.Status.EXPIRED);
+        request.setExpiresAt(now);
+        requestRepo.save(request);
+        reservationService.synchronizeRequestExpiry(request.getId(), now);
+        if (previousStatus == ReservationRequest.Status.MANUAL_REVIEW
+                || previousStatus == ReservationRequest.Status.PENDING_PAYMENT) {
+            List<PaymentIntent> intents = paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(request.getId());
+            expireActivePaymentIntents(intents, now, "Reservation request expired");
+        }
+    }
+
+    private void expireActivePaymentIntents(List<PaymentIntent> intents, OffsetDateTime now, String errorMessage) {
+        boolean changed = false;
+        for (PaymentIntent intent : intents) {
+            String status = normalizePaymentIntentStatus(intent.getStatus());
+            if (!ACTIVE_PAYMENT_INTENT_STATUSES.contains(status)) {
+                continue;
+            }
+            intent.setStatus("EXPIRED");
+            intent.setCompletedAt(now);
+            intent.setUpdatedAt(now);
+            if (!StringUtils.hasText(intent.getErrorMessage())) {
+                intent.setErrorMessage(errorMessage);
+            }
+            changed = true;
+        }
+        if (changed) {
+            paymentIntentRepo.saveAll(intents);
+        }
     }
 
     private void cancelPaymentAttempt(ReservationRequest request) {
@@ -288,6 +372,10 @@ public class ReservationRequestService {
     }
 
     private String normalizePaymentIntentStatus(String status) {
+        if (status == null) {
+            return "";
+        }
+        status = status.trim().toUpperCase(Locale.ROOT);
         if ("CANCELLED".equals(status)) {
             return "CANCELED";
         }

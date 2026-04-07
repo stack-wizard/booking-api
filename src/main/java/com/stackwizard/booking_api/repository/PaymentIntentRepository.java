@@ -31,6 +31,9 @@ public interface PaymentIntentRepository extends JpaRepository<PaymentIntent, Lo
     List<PaymentIntent> findLockedByReservationRequestId(Long reservationRequestId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    List<PaymentIntent> findLockedByReservationRequestIdOrderByCreatedAtDesc(Long reservationRequestId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<PaymentIntent> findLockedByReservationRequestIdAndStatusInOrderByCreatedAtDesc(Long reservationRequestId, List<String> statuses);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

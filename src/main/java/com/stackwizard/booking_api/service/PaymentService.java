@@ -159,7 +159,9 @@ public class PaymentService {
         ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
         if (reservationRequest.getStatus() == ReservationRequest.Status.CANCELLED
-                || reservationRequest.getStatus() == ReservationRequest.Status.FINALIZED) {
+                || reservationRequest.getStatus() == ReservationRequest.Status.FINALIZED
+                || reservationRequest.getStatus() == ReservationRequest.Status.MANUAL_REVIEW
+                || reservationRequest.getStatus() == ReservationRequest.Status.EXPIRED) {
             throw new IllegalStateException("Reservation request is not payable in current status");
         }
         if (reservationRequest.getType() == ReservationRequest.Type.INTERNAL) {
@@ -515,6 +517,11 @@ public class PaymentService {
                         && !STATUS_CANCELED.equals(previousStatus)) {
                     ReservationRequest reservationRequest = requestRepo.findById(paymentIntent.getReservationRequestId())
                             .orElseThrow(() -> new IllegalArgumentException("Reservation request not found for payment intent"));
+                    if (reservationRequest.getStatus() == ReservationRequest.Status.EXPIRED) {
+                        log.warn("Received successful payment callback for expired reservation request {} and payment intent {}",
+                                reservationRequest.getId(), paymentIntent.getId());
+                        return;
+                    }
                     reservationService.finalizeRequest(paymentIntent.getReservationRequestId());
                     if (reservationRequest.getType() != ReservationRequest.Type.INTERNAL) {
                         Invoice depositInvoice = invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent);
@@ -544,9 +551,14 @@ public class PaymentService {
         }
 
         if (!isTerminalStatus(previousStatus)) {
+            OffsetDateTime processingExpiry = now.plusMinutes(DEFAULT_INTENT_TTL_MINUTES);
+            if (paymentIntent.getExpiresAt() == null || paymentIntent.getExpiresAt().isBefore(processingExpiry)) {
+                paymentIntent.setExpiresAt(processingExpiry);
+            }
             paymentIntent.setStatus(STATUS_PROCESSING);
             paymentIntent.setUpdatedAt(now);
-            paymentIntentRepo.save(paymentIntent);
+            PaymentIntent savedIntent = paymentIntentRepo.save(paymentIntent);
+            reservationService.synchronizeRequestExpiry(paymentIntent.getReservationRequestId(), savedIntent.getExpiresAt());
         }
     }
 

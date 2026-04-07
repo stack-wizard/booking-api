@@ -83,7 +83,9 @@ public class ReservationRequest {
     public enum Status {
         DRAFT,
         PENDING_PAYMENT,
+        MANUAL_REVIEW,
         FINALIZED,
-        CANCELLED
+        CANCELLED,
+        EXPIRED
     }
 }

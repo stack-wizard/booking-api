@@ -147,4 +147,88 @@ class PaymentServiceTest {
 
         verify(paymentIntentRepo, never()).save(any(PaymentIntent.class));
     }
+
+    @Test
+    void initiateForReservationRequestRejectsManualReviewRequests() {
+        Long requestId = 79L;
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(8L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.MANUAL_REVIEW)
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(reservationRequest));
+
+        assertThatThrownBy(() -> service.initiateForReservationRequest(requestId, new PaymentInitiateRequest()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Reservation request is not payable in current status");
+    }
+
+    @Test
+    void initiateForReservationRequestRejectsExpiredRequests() {
+        Long requestId = 80L;
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(8L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.EXPIRED)
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(reservationRequest));
+
+        assertThatThrownBy(() -> service.initiateForReservationRequest(requestId, new PaymentInitiateRequest()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Reservation request is not payable in current status");
+    }
+
+    @Test
+    void processMonriCallbackDoesNotFinalizeExpiredReservationRequest() {
+        Long tenantId = 8L;
+        PaymentIntent paymentIntent = PaymentIntent.builder()
+                .id(55L)
+                .tenantId(tenantId)
+                .reservationRequestId(77L)
+                .provider("MONRI")
+                .providerOrderNumber("RR-77-AAAA1111")
+                .status("PROCESSING")
+                .build();
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(77L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.EXPIRED)
+                .build();
+        MonriTenantConfigResolver.MonriResolvedConfig config = new MonriTenantConfigResolver.MonriResolvedConfig(
+                "https://example.test",
+                "/oauth",
+                "/request",
+                "/refund",
+                "client-id",
+                "client-secret",
+                "auth-token",
+                "callback-token"
+        );
+
+        when(environment.getActiveProfiles()).thenReturn(new String[]{"local"});
+        when(monriTenantConfigResolver.resolve(tenantId)).thenReturn(config);
+        when(paymentIntentRepo.findLockedByProviderAndProviderOrderNumber("MONRI", paymentIntent.getProviderOrderNumber()))
+                .thenReturn(Optional.of(paymentIntent));
+        when(paymentEventRepo.findByProviderAndProviderEventId(eq("MONRI"), any())).thenReturn(Optional.empty());
+        when(paymentEventRepo.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(requestRepo.findById(paymentIntent.getReservationRequestId())).thenReturn(Optional.of(reservationRequest));
+        when(paymentIntentRepo.save(any(PaymentIntent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        service.processMonriCallback(
+                tenantId,
+                "{\"order_number\":\"RR-77-AAAA1111\",\"id\":\"provider-1\"}",
+                "callback-token",
+                null,
+                null
+        );
+
+        assertThat(paymentIntent.getStatus()).isEqualTo("PAID");
+        verify(reservationService, never()).finalizeRequest(any());
+        verify(invoiceService, never()).createDepositInvoiceForPaymentIntent(any());
+    }
 }

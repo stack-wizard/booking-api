@@ -104,7 +104,9 @@ public class ReservationRequestController {
             request.setStatus(ReservationRequest.Status.DRAFT);
         }
         if (request.getExpiresAt() == null && requiresDefaultExpiry(request)) {
-            int minutes = tenantConfigService.holdTtlMinutes(tenantId);
+            int minutes = request.getStatus() == ReservationRequest.Status.MANUAL_REVIEW
+                    ? tenantConfigService.manualReviewTtlMinutes(tenantId)
+                    : tenantConfigService.holdTtlMinutes(tenantId);
             request.setExpiresAt(OffsetDateTime.now().plusMinutes(minutes));
         }
         if (request.getExtensionCount() == null) {
@@ -224,7 +226,9 @@ public class ReservationRequestController {
     }
 
     private boolean requiresDefaultExpiry(ReservationRequest request) {
-        return request.getType() != ReservationRequest.Type.INTERNAL
-                || request.getStatus() != ReservationRequest.Status.DRAFT;
+        return request.getStatus() == ReservationRequest.Status.DRAFT
+                ? request.getType() != ReservationRequest.Type.INTERNAL
+                : request.getStatus() == ReservationRequest.Status.PENDING_PAYMENT
+                || request.getStatus() == ReservationRequest.Status.MANUAL_REVIEW;
     }
 }

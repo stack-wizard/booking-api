@@ -30,6 +30,9 @@ public class TenantConfig {
     @Column(name = "hold_ttl_minutes", nullable = false)
     private Integer holdTtlMinutes;
 
+    @Column(name = "manual_review_ttl_minutes", nullable = false)
+    private Integer manualReviewTtlMinutes;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 }
