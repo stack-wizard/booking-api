@@ -21,6 +21,8 @@ import com.stackwizard.booking_api.repository.InvoiceRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.service.PaymentTransactionService;
 import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -37,6 +39,8 @@ import java.util.Map;
 
 @Service
 public class OperaInvoicePostingService {
+    private static final Logger log = LoggerFactory.getLogger(OperaInvoicePostingService.class);
+
     private final InvoiceRepository invoiceRepo;
     private final InvoiceItemRepository invoiceItemRepo;
     private final InvoicePaymentAllocationRepository allocationRepo;
@@ -136,6 +140,21 @@ public class OperaInvoicePostingService {
         }
     }
 
+    @Transactional(noRollbackFor = Exception.class)
+    public Invoice tryAutoPostInvoice(Long invoiceId) {
+        Invoice invoice = invoiceRepo.findById(invoiceId)
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        if (!isAutoPostingEligible(invoice)) {
+            return invoice;
+        }
+        try {
+            return postInvoice(invoiceId, null).invoice();
+        } catch (RuntimeException ex) {
+            log.warn("Automatic Opera/OHIP posting failed for invoice {}", invoiceId, ex);
+            return invoiceRepo.findById(invoiceId).orElse(invoice);
+        }
+    }
+
     private PreparedPosting preparePosting(Long invoiceId, OperaInvoicePostRequest request, boolean requireIssuedInvoice) {
         Invoice invoice = invoiceRepo.findById(invoiceId)
                 .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
@@ -151,6 +170,66 @@ public class OperaInvoicePostingService {
         ResolvedTarget target = resolveTarget(invoice, request);
         JsonNode payload = buildPayload(invoice, items, allocations, target, request);
         return new PreparedPosting(invoice, target, payload);
+    }
+
+    private boolean isAutoPostingEligible(Invoice invoice) {
+        if (invoice == null || invoice.getId() == null || invoice.getTenantId() == null) {
+            return false;
+        }
+        if (invoice.getStatus() != InvoiceStatus.ISSUED) {
+            return false;
+        }
+        if (effectivePostingStatus(invoice) == OperaPostingStatus.POSTED) {
+            return false;
+        }
+        if (!hasResolvedOperaConfig(invoice.getTenantId())) {
+            return false;
+        }
+
+        String invoiceHotelCode = normalizeHotelCode(invoice.getOperaHotelCode());
+        Long invoiceReservationId = normalizePositiveLong(invoice.getOperaReservationId());
+        OperaPostingTarget postingTarget = invoice.resolveOperaPostingTarget();
+
+        try {
+            if (postingTarget == OperaPostingTarget.RESERVATION) {
+                if (!StringUtils.hasText(invoiceHotelCode) || invoiceReservationId == null) {
+                    return false;
+                }
+                configurationService.requireActiveHotel(invoice.getTenantId(), invoiceHotelCode);
+                return true;
+            }
+
+            if (StringUtils.hasText(invoiceHotelCode) && invoiceReservationId != null) {
+                configurationService.requireActiveHotel(invoice.getTenantId(), invoiceHotelCode);
+                return true;
+            }
+
+            String preferredHotelCode = firstNonBlank(
+                    invoiceHotelCode,
+                    tenantConfigResolver.findDefaultHotelCode(invoice.getTenantId()).orElse(null)
+            );
+            OperaInvoiceTypeRouting routing = configurationService.resolveRouting(
+                    invoice.getTenantId(),
+                    invoice.getInvoiceType(),
+                    preferredHotelCode
+            );
+            if (routing.getReservationId() == null || routing.getReservationId() <= 0) {
+                return false;
+            }
+            configurationService.requireActiveHotel(invoice.getTenantId(), routing.getHotelCode());
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private boolean hasResolvedOperaConfig(Long tenantId) {
+        try {
+            tenantConfigResolver.resolve(tenantId);
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
+        }
     }
 
     private ResolvedTarget resolveTarget(Invoice invoice, OperaInvoicePostRequest request) {

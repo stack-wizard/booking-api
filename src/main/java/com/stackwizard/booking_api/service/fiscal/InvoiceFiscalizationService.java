@@ -31,6 +31,7 @@ import com.stackwizard.booking_api.service.FiscalCashRegisterService;
 import com.stackwizard.booking_api.service.InvoiceService;
 import com.stackwizard.booking_api.service.PaymentTransactionService;
 import com.stackwizard.booking_api.service.TenantIntegrationConfigService;
+import com.stackwizard.booking_api.service.opera.OperaInvoicePostingService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -82,6 +83,7 @@ public class InvoiceFiscalizationService {
     private final TenantIntegrationConfigService tenantIntegrationConfigService;
     private final OfisFiscalizationClient ofisFiscalizationClient;
     private final OperaFiscalMappingService operaFiscalMappingService;
+    private final OperaInvoicePostingService operaInvoicePostingService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public InvoiceFiscalizationService(InvoiceRepository invoiceRepo,
@@ -95,7 +97,8 @@ public class InvoiceFiscalizationService {
                                        FiscalCashRegisterService fiscalCashRegisterService,
                                        TenantIntegrationConfigService tenantIntegrationConfigService,
                                        OfisFiscalizationClient ofisFiscalizationClient,
-                                       OperaFiscalMappingService operaFiscalMappingService) {
+                                       OperaFiscalMappingService operaFiscalMappingService,
+                                       OperaInvoicePostingService operaInvoicePostingService) {
         this.invoiceRepo = invoiceRepo;
         this.invoiceItemRepo = invoiceItemRepo;
         this.allocationRepo = allocationRepo;
@@ -108,6 +111,7 @@ public class InvoiceFiscalizationService {
         this.tenantIntegrationConfigService = tenantIntegrationConfigService;
         this.ofisFiscalizationClient = ofisFiscalizationClient;
         this.operaFiscalMappingService = operaFiscalMappingService;
+        this.operaInvoicePostingService = operaInvoicePostingService;
     }
 
     @Transactional(noRollbackFor = RuntimeException.class)
@@ -142,7 +146,8 @@ public class InvoiceFiscalizationService {
             if (invoice.getFiscalizedAt() == null) {
                 invoice.setFiscalizedAt(OffsetDateTime.now());
             }
-            return invoiceRepo.save(invoice);
+            Invoice savedInvoice = invoiceRepo.save(invoice);
+            return operaInvoicePostingService.tryAutoPostInvoice(savedInvoice.getId());
         } catch (RuntimeException ex) {
             invoice.setFiscalizationStatus(InvoiceFiscalizationStatus.FAILED);
             String message = ex.getMessage();

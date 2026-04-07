@@ -407,4 +407,107 @@ class OperaInvoicePostingServiceTest {
 
         assertThat(result.response().path("status").asText()).isEqualTo("ok");
     }
+
+    @Test
+    void tryAutoPostInvoiceSkipsWhenOperaConfigIsMissing() {
+        Invoice invoice = Invoice.builder()
+                .id(14L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .invoiceNumber("DEPOSIT-2026-00004")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .currency("EUR")
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+
+        when(invoiceRepo.findById(14L)).thenReturn(Optional.of(invoice));
+        when(tenantConfigResolver.resolve(1L)).thenThrow(new IllegalStateException("Opera config is missing"));
+
+        Invoice result = service.tryAutoPostInvoice(14L);
+
+        assertThat(result).isSameAs(invoice);
+        verify(invoiceItemRepo, never()).findByInvoiceIdOrderByLineNoAsc(any());
+        verify(operaPostingClient, never()).postChargesAndPayments(any(), any(), any(), any());
+    }
+
+    @Test
+    void tryAutoPostInvoiceKeepsFailedOperaStatusWhenPostingThrows() {
+        Invoice invoice = Invoice.builder()
+                .id(15L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .invoiceNumber("DEPOSIT-2026-00005")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("50.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem item = InvoiceItem.builder()
+                .id(113L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(91L)
+                .productName("Deposit")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("50.00"))
+                .grossAmount(new BigDecimal("50.00"))
+                .build();
+        Product product = Product.builder()
+                .id(91L)
+                .tenantId(1L)
+                .productType("DEPOSIT")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(305L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaInvoiceTypeRouting routing = OperaInvoiceTypeRouting.builder()
+                .id(704L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .hotelCode("DH")
+                .reservationId(99004L)
+                .active(Boolean.TRUE)
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(604L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+
+        when(invoiceRepo.findById(15L)).thenReturn(Optional.of(invoice));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(15L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(15L)).thenReturn(List.of());
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.resolveRouting(1L, InvoiceType.DEPOSIT, "DH")).thenReturn(routing);
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq(99004L), any()))
+                .thenThrow(new IllegalStateException("OHIP request failed"));
+
+        Invoice result = service.tryAutoPostInvoice(15L);
+
+        assertThat(result.getOperaPostingStatus()).isEqualTo(OperaPostingStatus.FAILED);
+        assertThat(result.getOperaErrorMessage()).isEqualTo("OHIP request failed");
+    }
 }
