@@ -23,6 +23,8 @@ import org.springframework.context.ApplicationEventPublisher;
 import com.stackwizard.booking_api.service.payment.PaymentProviderClient;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundRequest;
 import com.stackwizard.booking_api.service.payment.PaymentProviderRefundResult;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -41,6 +43,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class CancellationService {
+    private static final Logger log = LoggerFactory.getLogger(CancellationService.class);
     private static final String STATUS_PENDING = "PENDING";
     private static final String STATUS_COMPLETED = "COMPLETED";
     private static final String STATUS_FAILED = "FAILED";
@@ -289,26 +292,40 @@ public class CancellationService {
                         "REFUND_RELEASE"
                 );
 
-                if (penaltyAmount.compareTo(BigDecimal.ZERO) > 0) {
-                    Invoice penaltyInvoice = invoiceService.createPenaltyInvoice(reservationRequestId, penaltyAmount, currency);
-                    cancellationRequest.setPenaltyInvoiceId(penaltyInvoice.getId());
-                    publishAutoFiscalizationIfRequired(penaltyInvoice);
-                    invoiceService.allocatePaymentToInvoice(penaltyInvoice.getId(), sourceCharge.getId(), penaltyAmount, "SETTLEMENT");
+                boolean automaticRefund = request == null
+                        || request.getAutomaticRefund() == null
+                        || Boolean.TRUE.equals(request.getAutomaticRefund());
+                PaymentProviderRefundResult refundResult = null;
+                if (automaticRefund && sourceCharge.getPaymentIntentId() != null) {
+                    refundResult = refundSourcePayment(
+                            reservationRequest,
+                            sourceCharge,
+                            refundAmount,
+                            currency,
+                            cancellationRequest.getNote()
+                    );
+                } else if (automaticRefund) {
+                    log.info(
+                            "Skipping provider refund for reservation request {} because source payment transaction {} is not linked to a payment intent",
+                            reservationRequestId,
+                            sourceCharge.getId()
+                    );
+                } else {
+                    log.info(
+                            "Skipping provider refund for reservation request {} because automaticRefund is disabled",
+                            reservationRequestId
+                    );
                 }
 
-                PaymentProviderRefundResult refundResult = refundSourcePayment(
-                        reservationRequest,
-                        sourceCharge,
-                        refundAmount,
-                        currency,
-                        cancellationRequest.getNote()
-                );
                 PaymentTransaction refundTransaction = createRefundTransaction(
                         reservationRequest,
                         sourceCharge,
                         creditNote,
                         refundAmount,
-                        refundResult
+                        refundResult,
+                        automaticRefund
+                                ? "Cancellation refund handled manually (no provider payment intent link)"
+                                : "Cancellation refund handled manually by finance"
                 );
                 cancellationRequest.setRefundPaymentTransactionId(refundTransaction.getId());
             } else if (MODE_CUSTOMER_CREDIT.equals(settlementMode)) {
@@ -396,7 +413,8 @@ public class CancellationService {
                                                        PaymentTransaction sourceCharge,
                                                        Invoice creditNote,
                                                        BigDecimal refundAmount,
-                                                       PaymentProviderRefundResult refundResult) {
+                                                       PaymentProviderRefundResult refundResult,
+                                                       String fallbackNote) {
         PaymentTransactionCreateRequest request = new PaymentTransactionCreateRequest();
         request.setTenantId(reservationRequest.getTenantId());
         request.setReservationRequestId(reservationRequest.getId());
@@ -409,8 +427,11 @@ public class CancellationService {
         request.setRefundType("CANCELLATION");
         request.setSourcePaymentTransactionId(sourceCharge.getId());
         request.setCreditNoteInvoiceId(creditNote.getId());
-        request.setExternalRef(firstNonBlank(refundResult.externalRef(), refundResult.providerRefundId()));
-        request.setNote("Cancellation refund");
+        String externalRef = refundResult != null
+                ? firstNonBlank(refundResult.externalRef(), refundResult.providerRefundId())
+                : null;
+        request.setExternalRef(externalRef);
+        request.setNote(refundResult != null ? "Cancellation refund" : fallbackNote);
         return paymentTransactionService.requireById(paymentTransactionService.create(request).getId());
     }
 

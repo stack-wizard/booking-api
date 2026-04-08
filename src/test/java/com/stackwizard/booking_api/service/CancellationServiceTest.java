@@ -141,13 +141,6 @@ class CancellationServiceTest {
                 .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .totalGross(new BigDecimal("-100.00"))
                 .build();
-        Invoice penaltyInvoice = Invoice.builder()
-                .id(202L)
-                .tenantId(1L)
-                .invoiceType(InvoiceType.INVOICE)
-                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
-                .totalGross(new BigDecimal("50.00"))
-                .build();
         PaymentIntent paymentIntent = PaymentIntent.builder()
                 .id(400L)
                 .tenantId(1L)
@@ -188,7 +181,6 @@ class CancellationServiceTest {
         when(paymentProviderClient.refund(any(PaymentProviderRefundRequest.class)))
                 .thenReturn(new PaymentProviderRefundResult("refund-1", "refund-1", "approved"));
         when(invoiceService.createCreditNoteInvoice(200L)).thenReturn(creditNote);
-        when(invoiceService.createPenaltyInvoice(10L, new BigDecimal("50.00"), "EUR")).thenReturn(penaltyInvoice);
         when(paymentTransactionService.create(any())).thenReturn(PaymentTransactionDto.builder().id(301L).build());
         when(paymentTransactionService.requireById(301L)).thenReturn(refundTransaction);
         when(allocationRepo.findByReservationIdIn(List.of(20L))).thenReturn(List.of(allocation));
@@ -201,7 +193,7 @@ class CancellationServiceTest {
 
         assertThat(result.getStatus()).isEqualTo("COMPLETED");
         assertThat(result.getCreditNoteInvoiceId()).isEqualTo(201L);
-        assertThat(result.getPenaltyInvoiceId()).isEqualTo(202L);
+        assertThat(result.getPenaltyInvoiceId()).isNull();
         assertThat(result.getRefundPaymentTransactionId()).isEqualTo(301L);
         assertThat(result.getRefundAmount()).isEqualByComparingTo("50.00");
         assertThat(reservationRequest.getStatus()).isEqualTo(ReservationRequest.Status.CANCELLED);
@@ -214,7 +206,115 @@ class CancellationServiceTest {
         assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("-50.00");
         assertThat(paymentCaptor.getValue().getCreditNoteInvoiceId()).isEqualTo(201L);
         assertThat(paymentCaptor.getValue().getSourcePaymentTransactionId()).isEqualTo(300L);
-        verify(eventPublisher, times(2)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
+        verify(invoiceService, never()).createPenaltyInvoice(10L, new BigDecimal("50.00"), "EUR");
+        verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
+    }
+
+    @Test
+    void executeCashRefundWithoutPaymentIntentSkipsProviderAndCreatesManualRefundTransaction() {
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(16L)
+                .tenantId(1L)
+                .status(ReservationRequest.Status.FINALIZED)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(26L)
+                .tenantId(1L)
+                .startsAt(LocalDateTime.now().plusDays(20))
+                .status("CONFIRMED")
+                .currency("EUR")
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        Allocation allocation = Allocation.builder()
+                .id(36L)
+                .status("CONFIRMED")
+                .reservation(reservation)
+                .build();
+        Invoice sourceInvoice = Invoice.builder()
+                .id(260L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .currency("EUR")
+                .totalGross(new BigDecimal("100.00"))
+                .build();
+        PaymentTransaction sourceCharge = PaymentTransaction.builder()
+                .id(360L)
+                .tenantId(1L)
+                .paymentIntentId(null)
+                .transactionType("CHARGE")
+                .paymentType("CARD")
+                .cardType("VISA")
+                .status("POSTED")
+                .currency("EUR")
+                .amount(new BigDecimal("100.00"))
+                .build();
+        InvoicePaymentAllocation sourceAllocation = InvoicePaymentAllocation.builder()
+                .id(560L)
+                .invoice(sourceInvoice)
+                .paymentTransaction(sourceCharge)
+                .allocatedAmount(new BigDecimal("100.00"))
+                .allocationType("SETTLEMENT")
+                .build();
+        Invoice creditNote = Invoice.builder()
+                .id(261L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
+                .totalGross(new BigDecimal("-100.00"))
+                .build();
+        PaymentTransaction refundTransaction = PaymentTransaction.builder()
+                .id(361L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .amount(new BigDecimal("-50.00"))
+                .build();
+
+        when(requestRepo.findById(16L)).thenReturn(Optional.of(reservationRequest));
+        when(cancellationRequestRepo.findFirstByReservationRequestIdOrderByCreatedAtDescIdDesc(16L)).thenReturn(Optional.empty());
+        when(reservationRepo.findByRequestId(16L)).thenReturn(List.of(reservation));
+        when(invoiceService.findCancellationSourceInvoiceByRequestId(16L)).thenReturn(Optional.of(sourceInvoice));
+        when(invoiceService.findAllocations(260L)).thenReturn(List.of(sourceAllocation));
+        when(cancellationPolicyService.evaluateReservation(reservation, null))
+                .thenReturn(new CancellationPolicyService.ReservationCancellationEvaluation(
+                        new BigDecimal("100.00"),
+                        new BigDecimal("50.00"),
+                        new BigDecimal("50.00"),
+                        "CASH_REFUND",
+                        reservation.getStartsAt().minusDays(14),
+                        506L,
+                        "BEFORE_CUTOFF"
+                ));
+        when(cancellationRequestRepo.save(any(CancellationRequest.class))).thenAnswer(invocation -> {
+            CancellationRequest saved = invocation.getArgument(0);
+            if (saved.getId() == null) {
+                saved.setId(905L);
+            }
+            return saved;
+        });
+        when(invoiceService.createCreditNoteInvoice(260L)).thenReturn(creditNote);
+        when(paymentTransactionService.create(any())).thenReturn(PaymentTransactionDto.builder().id(361L).build());
+        when(paymentTransactionService.requireById(361L)).thenReturn(refundTransaction);
+        when(allocationRepo.findByReservationIdIn(List.of(26L))).thenReturn(List.of(allocation));
+
+        CancellationExecuteRequest executeRequest = new CancellationExecuteRequest();
+        executeRequest.setSettlementMode("CASH_REFUND");
+
+        CancellationRequestDto result = service.execute(16L, executeRequest);
+
+        assertThat(result.getStatus()).isEqualTo("COMPLETED");
+        assertThat(result.getRefundPaymentTransactionId()).isEqualTo(361L);
+        verify(paymentProviderClient, never()).refund(any());
+
+        ArgumentCaptor<com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest> paymentCaptor =
+                ArgumentCaptor.forClass(com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest.class);
+        verify(paymentTransactionService).create(paymentCaptor.capture());
+        assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("-50.00");
+        assertThat(paymentCaptor.getValue().getCreditNoteInvoiceId()).isEqualTo(261L);
+        assertThat(paymentCaptor.getValue().getSourcePaymentTransactionId()).isEqualTo(360L);
+        assertThat(paymentCaptor.getValue().getExternalRef()).isNull();
+        assertThat(paymentCaptor.getValue().getNote()).isEqualTo("Cancellation refund handled manually (no provider payment intent link)");
+        verify(invoiceService, never()).createPenaltyInvoice(16L, new BigDecimal("50.00"), "EUR");
+        verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
 
     @Test

@@ -5,5 +5,6 @@ import lombok.Data;
 @Data
 public class CancellationExecuteRequest {
     private String settlementMode;
+    private Boolean automaticRefund;
     private String note;
 }
