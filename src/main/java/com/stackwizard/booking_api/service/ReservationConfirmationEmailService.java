@@ -127,8 +127,13 @@ public class ReservationConfirmationEmailService {
             JavaMailSenderImpl mailSender = buildMailSender(emailConfig);
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, StandardCharsets.UTF_8.name());
-            helper.setTo(request.getCustomerEmail().trim());
+            String customerEmail = request.getCustomerEmail().trim();
+            String senderEmail = emailConfig.emailFrom().trim();
+            helper.setTo(customerEmail);
             helper.setFrom(emailConfig.emailFrom());
+            if (!senderEmail.equalsIgnoreCase(customerEmail)) {
+                helper.addBcc(senderEmail);
+            }
             if (StringUtils.hasText(emailConfig.emailReplyTo())) {
                 helper.setReplyTo(emailConfig.emailReplyTo());
             }
