@@ -849,7 +849,7 @@ public class InvoiceFiscalizationService {
             reservationInfoNode.setAll((ObjectNode) requestedReservationInfo);
         }
 
-        String confirmationNo = firstNonBlank(
+        String baseConfirmationNo = firstNonBlank(
                 normalizeNullable(request.getConfirmationNo()),
                 firstNonBlank(
                         nodeText(reservationInfoNode.get("ConfirmationNo")),
@@ -857,6 +857,7 @@ public class InvoiceFiscalizationService {
                 ),
                 invoice.getId() != null ? invoice.getId().toString() : null
         );
+        String confirmationNo = appendInvoiceNumber(baseConfirmationNo, normalizeNullable(invoice.getInvoiceNumber()));
         if (confirmationNo == null) {
             reservationInfoNode.putNull("ConfirmationNo");
         } else {
@@ -1068,6 +1069,19 @@ public class InvoiceFiscalizationService {
 
     private String firstNonBlank(String primary, String secondary, String fallback) {
         return firstNonBlank(firstNonBlank(primary, secondary), fallback);
+    }
+
+    private String appendInvoiceNumber(String value, String invoiceNumber) {
+        if (!StringUtils.hasText(value)) {
+            return invoiceNumber;
+        }
+        if (!StringUtils.hasText(invoiceNumber)) {
+            return value;
+        }
+        if (value.contains(invoiceNumber)) {
+            return value;
+        }
+        return value + "+" + invoiceNumber;
     }
 
     private IssuedByMode firstNonNull(IssuedByMode primary, IssuedByMode fallback) {

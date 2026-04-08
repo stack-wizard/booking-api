@@ -167,6 +167,7 @@ class InvoiceFiscalizationServiceTest {
         InvoiceFiscalizeRequest request = new InvoiceFiscalizeRequest();
         request.setHotelCode("HOTEL");
         request.setPropertyTaxNumber("HR123");
+        request.setConfirmationNo("CONF-412");
 
         var payload = service.buildFiscalPayload(5L, request);
 
@@ -174,6 +175,7 @@ class InvoiceFiscalizationServiceTest {
         assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/0/Value").asText()).isEqualTo("1830");
         assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/1/Name").asText()).isEqualTo("FLIP_PARTNER_TAX2");
         assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/1/Value").asText()).isEqualTo("1");
+        assertThat(payload.at("/ReservationInfo/ConfirmationNo").asText()).isEqualTo("CONF-412+INV-2026-00001");
         assertThat(payload.at("/DocumentInfo/BusinessDateTime").asText()).isEqualTo("2026-04-08T11:37:28");
         verifyNoInteractions(operaFiscalMappingService);
     }

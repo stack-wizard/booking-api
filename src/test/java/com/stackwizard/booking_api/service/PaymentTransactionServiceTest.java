@@ -91,6 +91,40 @@ class PaymentTransactionServiceTest {
     }
 
     @Test
+    void ensureForPaidIntentStoresConfiguredCardTypeFromMonriCallbackCcType() {
+        PaymentIntent paymentIntent = PaymentIntent.builder()
+                .id(51L)
+                .tenantId(1L)
+                .reservationRequestId(11L)
+                .provider("MONRI")
+                .providerOrderNumber("ord-2")
+                .idempotencyKey("idem-2")
+                .currency("EUR")
+                .amount(new BigDecimal("50.00"))
+                .status("PAID")
+                .build();
+        ObjectNode payload = JsonNodeFactory.instance.objectNode();
+        payload.put("cc_type", "master");
+
+        when(paymentTransactionRepo.findByPaymentIntentId(51L)).thenReturn(Optional.empty());
+        when(paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(51L)).thenReturn(List.of(
+                PaymentEvent.builder()
+                        .paymentIntentId(51L)
+                        .provider("MONRI")
+                        .eventType("callback:approved")
+                        .payload(payload)
+                        .build()
+        ));
+        when(paymentCardTypeService.findActiveCodeOrNull(1L, "MASTER")).thenReturn("MASTER");
+        when(paymentTransactionRepo.save(any(PaymentTransaction.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PaymentTransaction transaction = service.ensureForPaidIntent(paymentIntent);
+
+        assertThat(transaction.getCardType()).isEqualTo("MASTER");
+        assertThat(transaction.getTransactionType()).isEqualTo("CHARGE");
+    }
+
+    @Test
     void createManualRefundRequiresNegativeAmountAndChargeSource() {
         PaymentTransactionCreateRequest request = new PaymentTransactionCreateRequest();
         request.setTenantId(1L);

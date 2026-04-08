@@ -417,7 +417,13 @@ public class PaymentTransactionService {
                                                 textAt(payload, "payment_method.brand"),
                                                 firstNonBlank(
                                                         textAt(payload, "card.brand"),
-                                                        textAt(payload, "brand")
+                                                        firstNonBlank(
+                                                                textAt(payload, "brand"),
+                                                                firstNonBlank(
+                                                                        textAt(payload, "payload.cc_type"),
+                                                                        textAt(payload, "cc_type")
+                                                                )
+                                                        )
                                                 )
                                         )
                                 )
