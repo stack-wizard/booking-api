@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.dto.PaymentInitiateRequest;
 import com.stackwizard.booking_api.dto.PaymentInitiateResponse;
+import com.stackwizard.booking_api.model.Invoice;
+import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
@@ -230,5 +232,76 @@ class PaymentServiceTest {
         assertThat(paymentIntent.getStatus()).isEqualTo("PAID");
         verify(reservationService, never()).finalizeRequest(any());
         verify(invoiceService, never()).createDepositInvoiceForPaymentIntent(any());
+    }
+
+    @Test
+    void markReservationRequestPaidManuallyFinalizesUsingLatestNonSupersededIntent() {
+        Long requestId = 81L;
+        Long tenantId = 8L;
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.MANUAL_REVIEW)
+                .build();
+        PaymentIntent supersededIntent = PaymentIntent.builder()
+                .id(901L)
+                .tenantId(tenantId)
+                .reservationRequestId(requestId)
+                .status("SUPERSEDED")
+                .build();
+        PaymentIntent processingIntent = PaymentIntent.builder()
+                .id(902L)
+                .tenantId(tenantId)
+                .reservationRequestId(requestId)
+                .status("PROCESSING")
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(reservationRequest), Optional.of(reservationRequest));
+        when(paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(requestId))
+                .thenReturn(List.of(supersededIntent, processingIntent));
+        when(paymentEventRepo.findByProviderAndProviderEventId("MANUAL", "manual-paid|request:81|intent:902"))
+                .thenReturn(Optional.empty());
+        when(paymentEventRepo.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(paymentIntentRepo.save(any(PaymentIntent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceService.createDepositInvoiceForPaymentIntent(processingIntent)).thenReturn(Invoice.builder().id(77L).build());
+
+        PaymentIntent result = service.markReservationRequestPaidManually(requestId);
+
+        assertThat(result).isSameAs(processingIntent);
+        assertThat(processingIntent.getStatus()).isEqualTo("PAID");
+        verify(reservationService).finalizeRequest(requestId);
+        verify(invoiceService).createDepositInvoiceForPaymentIntent(processingIntent);
+    }
+
+    @Test
+    void markReservationRequestPaidManuallyIsIdempotentWhenManualEventAlreadyExists() {
+        Long requestId = 82L;
+        Long tenantId = 8L;
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.MANUAL_REVIEW)
+                .build();
+        PaymentIntent paymentIntent = PaymentIntent.builder()
+                .id(903L)
+                .tenantId(tenantId)
+                .reservationRequestId(requestId)
+                .status("PAID")
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(reservationRequest));
+        when(paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(requestId))
+                .thenReturn(List.of(paymentIntent));
+        when(paymentEventRepo.findByProviderAndProviderEventId("MANUAL", "manual-paid|request:82|intent:903"))
+                .thenReturn(Optional.of(PaymentEvent.builder().id(1L).provider("MANUAL").eventType("manual:paid").build()));
+
+        PaymentIntent result = service.markReservationRequestPaidManually(requestId);
+
+        assertThat(result).isSameAs(paymentIntent);
+        verify(paymentEventRepo, never()).saveAndFlush(any());
+        verify(paymentIntentRepo, never()).save(any(PaymentIntent.class));
+        verify(reservationService, never()).finalizeRequest(any());
     }
 }

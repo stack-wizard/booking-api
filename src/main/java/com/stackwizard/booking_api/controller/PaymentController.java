@@ -49,6 +49,11 @@ public class PaymentController {
         return paymentService.findEventsByReservationRequestId(reservationRequestId);
     }
 
+    @PostMapping("/reservation-requests/{reservationRequestId}/mark-paid")
+    public ResponseEntity<PaymentIntent> markReservationRequestPaid(@PathVariable Long reservationRequestId) {
+        return ResponseEntity.ok(paymentService.markReservationRequestPaidManually(reservationRequestId));
+    }
+
     @GetMapping("/intents/{paymentIntentId}/events")
     public List<PaymentEvent> eventsByPaymentIntent(@PathVariable Long paymentIntentId) {
         return paymentService.findEventsByPaymentIntentId(paymentIntentId);

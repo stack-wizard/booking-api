@@ -343,6 +343,38 @@ public class PaymentService {
         applyMonriStatusTransition(paymentIntent, STATUS_PAID);
     }
 
+    @Transactional
+    public PaymentIntent markReservationRequestPaidManually(Long reservationRequestId) {
+        ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
+                .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        List<PaymentIntent> intents = paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId);
+        if (intents.isEmpty()) {
+            throw new IllegalArgumentException("Payment intent not found for reservation request");
+        }
+
+        PaymentIntent paymentIntent = intents.stream()
+                .filter(intent -> !STATUS_SUPERSEDED.equals(normalizeIntentStatus(intent.getStatus())))
+                .findFirst()
+                .orElse(intents.getFirst());
+
+        String providerEventId = buildManualPaidEventId(reservationRequestId, paymentIntent.getId());
+        if (paymentEventRepo.findByProviderAndProviderEventId("MANUAL", providerEventId).isEmpty()) {
+            paymentEventRepo.saveAndFlush(PaymentEvent.builder()
+                    .paymentIntentId(paymentIntent.getId())
+                    .provider("MANUAL")
+                    .eventType("manual:paid")
+                    .providerEventId(providerEventId)
+                    .payload(objectMapper.createObjectNode()
+                            .put("reservationRequestId", reservationRequest.getId())
+                            .put("paymentIntentId", paymentIntent.getId())
+                            .put("action", "manual_mark_paid"))
+                    .build());
+        }
+
+        applyMonriStatusTransition(paymentIntent, STATUS_PAID);
+        return paymentIntent;
+    }
+
     private boolean isLocalProfileActive() {
         return Arrays.stream(environment.getActiveProfiles())
                 .anyMatch(profile -> "local".equalsIgnoreCase(profile));
@@ -569,6 +601,10 @@ public class PaymentService {
         String order = StringUtils.hasText(orderNumber) ? orderNumber.trim() : "unknown-order";
         String payment = StringUtils.hasText(providerPaymentId) ? providerPaymentId.trim() : "unknown-payment";
         return "callback|" + order + "|" + payment;
+    }
+
+    private String buildManualPaidEventId(Long reservationRequestId, Long paymentIntentId) {
+        return "manual-paid|request:" + reservationRequestId + "|intent:" + paymentIntentId;
     }
 
     private String firstText(JsonNode root, String... paths) {
