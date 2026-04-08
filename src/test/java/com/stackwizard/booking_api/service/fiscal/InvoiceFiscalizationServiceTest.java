@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service.fiscal;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.dto.InvoiceFiscalizeRequest;
+import com.stackwizard.booking_api.model.FiscalCashRegister;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoiceStatus;
@@ -36,6 +37,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -139,6 +141,43 @@ class InvoiceFiscalizationServiceTest {
         verify(operaInvoicePostingService, never()).tryAutoPostInvoice(any());
     }
 
+    @Test
+    void buildFiscalPayloadPopulatesUserDefinedFieldsFromInvoiceSnapshots() {
+        Invoice invoice = baseInvoice();
+        invoice.setIssuedAt(OffsetDateTime.parse("2026-04-08T09:37:28Z"));
+        invoice.setInvoiceDate(LocalDate.of(2026, 4, 8));
+        invoice.setBusinessPremiseCodeSnapshot("1830");
+        invoice.setCashRegisterCodeSnapshot("1");
+
+        when(invoiceRepo.findById(5L)).thenReturn(Optional.of(invoice));
+        when(invoiceService.issueInvoice(eq(5L), any())).thenReturn(invoice);
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(5L)).thenReturn(List.of());
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(5L)).thenReturn(List.of());
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(1L, "FISCALIZATION", "OFIS"))
+                .thenReturn(Optional.empty());
+        when(fiscalCashRegisterService.requireByIdAndTenantId(22L, 1L)).thenReturn(FiscalCashRegister.builder()
+                .id(22L)
+                .tenantId(1L)
+                .businessPremiseId(11L)
+                .code("1")
+                .terminalId("TERM-1")
+                .active(Boolean.TRUE)
+                .build());
+
+        InvoiceFiscalizeRequest request = new InvoiceFiscalizeRequest();
+        request.setHotelCode("HOTEL");
+        request.setPropertyTaxNumber("HR123");
+
+        var payload = service.buildFiscalPayload(5L, request);
+
+        assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/0/Name").asText()).isEqualTo("FLIP_PARTNER_TAX1");
+        assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/0/Value").asText()).isEqualTo("1830");
+        assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/1/Name").asText()).isEqualTo("FLIP_PARTNER_TAX2");
+        assertThat(payload.at("/UserDefinedFields/CharacterUDFs/0/UDF/1/Value").asText()).isEqualTo("1");
+        assertThat(payload.at("/DocumentInfo/BusinessDateTime").asText()).isEqualTo("2026-04-08T11:37:28");
+        verifyNoInteractions(operaFiscalMappingService);
+    }
+
     private Invoice baseInvoice() {
         return Invoice.builder()
                 .id(5L)
@@ -151,6 +190,8 @@ class InvoiceFiscalizationServiceTest {
                 .issuedByMode(IssuedByMode.CASHIER)
                 .businessPremiseId(11L)
                 .cashRegisterId(22L)
+                .businessPremiseCodeSnapshot("BP-11")
+                .cashRegisterCodeSnapshot("CR-22")
                 .paymentStatus("PAID")
                 .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .currency("EUR")

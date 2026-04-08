@@ -16,7 +16,6 @@ import com.stackwizard.booking_api.model.IssuedByMode;
 import com.stackwizard.booking_api.model.OperaFiscalChargeMapping;
 import com.stackwizard.booking_api.model.OperaFiscalPaymentMapping;
 import com.stackwizard.booking_api.model.OperaFiscalTaxMapping;
-import com.stackwizard.booking_api.model.OperaFiscalUdfMapping;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ReservationRequest;
@@ -41,6 +40,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -68,6 +68,7 @@ public class InvoiceFiscalizationService {
     private static final String DEFAULT_OFIS_ROOM_CHARGE_PAYMENT_TRX_CODE = "9004";
     private static final String INTEGRATION_TYPE_FISCALIZATION = "FISCALIZATION";
     private static final String INTEGRATION_PROVIDER_OFIS = "OFIS";
+    private static final ZoneId DEFAULT_OFIS_TIME_ZONE = ZoneId.of("Europe/Zagreb");
     private static final BigDecimal HUNDRED = new BigDecimal("100");
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
@@ -281,7 +282,9 @@ public class InvoiceFiscalizationService {
         String businessDate = invoice.getInvoiceDate() != null
                 ? invoice.getInvoiceDate().toString()
                 : issuedAt.toLocalDate().toString();
-        String businessDateTime = issuedAt.toLocalDateTime().format(DATE_TIME_FORMATTER);
+        String businessDateTime = issuedAt.atZoneSameInstant(DEFAULT_OFIS_TIME_ZONE)
+                .toLocalDateTime()
+                .format(DATE_TIME_FORMATTER);
         boolean creditBill = isStornoType(invoice.getInvoiceType()) || zeroSafe(invoice.getTotalGross()).compareTo(BigDecimal.ZERO) < 0;
         String defaultDocumentType = creditBill ? DEFAULT_OFIS_DOCUMENT_CREDIT_NOTE : DEFAULT_OFIS_DOCUMENT_INVOICE;
         TenantIntegrationConfig fiscalConfig = tenantIntegrationConfigService
@@ -551,7 +554,7 @@ public class InvoiceFiscalizationService {
         payload.put("AdditionalInfo", request.getAdditionalInfo() != null ? request.getAdditionalInfo() : null);
         payload.put("UserDefinedFields", request.getUserDefinedFields() != null
                 ? request.getUserDefinedFields()
-                : buildMappedUserDefinedFields(invoice.getTenantId()));
+                : buildSystemUserDefinedFields(invoice));
         Map<String, Object> fiscalTerminalInfo = new LinkedHashMap<>();
         fiscalTerminalInfo.put("TerminalAddessAndPort", terminalAddressAndPort);
         fiscalTerminalInfo.put("TerminalID", terminalCode);
@@ -670,17 +673,12 @@ public class InvoiceFiscalizationService {
         }
     }
 
-    private JsonNode buildMappedUserDefinedFields(Long tenantId) {
-        List<OperaFiscalUdfMapping> mappings = operaFiscalMappingService.activeUdfMappings(tenantId);
-        if (mappings.isEmpty()) {
-            return null;
-        }
+    private JsonNode buildSystemUserDefinedFields(Invoice invoice) {
         List<Map<String, Object>> udfEntries = new ArrayList<>();
-        for (OperaFiscalUdfMapping mapping : mappings) {
-            Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("Name", mapping.getUdfName());
-            entry.put("Value", mapping.getUdfValue());
-            udfEntries.add(entry);
+        addUdfEntry(udfEntries, "FLIP_PARTNER_TAX1", normalizeNullable(invoice.getBusinessPremiseCodeSnapshot()));
+        addUdfEntry(udfEntries, "FLIP_PARTNER_TAX2", normalizeNullable(invoice.getCashRegisterCodeSnapshot()));
+        if (udfEntries.isEmpty()) {
+            return null;
         }
         Map<String, Object> character = new LinkedHashMap<>();
         character.put("UDF", udfEntries);
@@ -689,6 +687,16 @@ public class InvoiceFiscalizationService {
         result.put("NumericUDFs", null);
         result.put("DateUDFs", null);
         return objectMapper.valueToTree(result);
+    }
+
+    private void addUdfEntry(List<Map<String, Object>> udfEntries, String name, String value) {
+        if (!StringUtils.hasText(name) || !StringUtils.hasText(value)) {
+            return;
+        }
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("Name", name);
+        entry.put("Value", value);
+        udfEntries.add(entry);
     }
 
     private Map<String, Object> buildDocumentInfo(Map<String, Object> lastSupportingDocumentInfo,
