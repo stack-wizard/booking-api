@@ -30,6 +30,9 @@ public class OperaHotel {
     @Column(name = "hotel_code", nullable = false)
     private String hotelCode;
 
+    @Column(name = "chain_code")
+    private String chainCode;
+
     @Column
     private String name;
 

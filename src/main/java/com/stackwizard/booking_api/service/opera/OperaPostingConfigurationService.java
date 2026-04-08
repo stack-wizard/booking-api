@@ -43,6 +43,7 @@ public class OperaPostingConfigurationService {
             throw new IllegalArgumentException("defaultFolioWindowNo must be greater than zero");
         }
         hotel.setHotelCode(normalizeUpper(hotel.getHotelCode()));
+        hotel.setChainCode(normalizeNullableUpper(hotel.getChainCode()));
         hotel.setName(normalizeNullable(hotel.getName()));
         if (hotel.getActive() == null) {
             hotel.setActive(Boolean.TRUE);
@@ -135,5 +136,10 @@ public class OperaPostingConfigurationService {
         }
         String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String normalizeNullableUpper(String value) {
+        String normalized = normalizeNullable(value);
+        return normalized == null ? null : normalized.toUpperCase(Locale.ROOT);
     }
 }

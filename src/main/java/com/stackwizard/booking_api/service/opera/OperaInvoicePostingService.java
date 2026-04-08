@@ -109,6 +109,7 @@ public class OperaInvoicePostingService {
             JsonNode response = operaPostingClient.postChargesAndPayments(
                     config,
                     prepared.target().hotel().getHotelCode(),
+                    prepared.target().hotel().getChainCode(),
                     prepared.target().reservationId(),
                     prepared.payload()
             );

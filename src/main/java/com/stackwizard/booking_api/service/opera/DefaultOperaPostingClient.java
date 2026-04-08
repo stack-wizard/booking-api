@@ -29,10 +29,11 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
     @Override
     public JsonNode postChargesAndPayments(OperaTenantConfigResolver.OperaResolvedConfig config,
                                            String hotelCode,
+                                           String chainCode,
                                            Long reservationId,
                                            JsonNode payload) {
         String requestUrl = buildChargesAndPaymentsUrl(config.baseUrl(), hotelCode, reservationId);
-        String authorization = resolveAuthorization(config);
+        String authorization = resolveAuthorization(config, chainCode);
         String requestBody = payload == null ? "{}" : payload.toString();
         try {
             String raw = restClient.post()
@@ -53,28 +54,30 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         }
     }
 
-    private String resolveAuthorization(OperaTenantConfigResolver.OperaResolvedConfig config) {
+    private String resolveAuthorization(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
         if (StringUtils.hasText(config.accessToken())) {
             return normalizeAuthorization(config.accessToken());
         }
-        return "Bearer " + fetchAccessToken(config);
+        return "Bearer " + fetchAccessToken(config, chainCode);
     }
 
-    private String fetchAccessToken(OperaTenantConfigResolver.OperaResolvedConfig config) {
+    private String fetchAccessToken(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
         try {
             MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
             body.add("grant_type", "client_credentials");
             body.add("scope", OAUTH_SCOPE);
 
-            String raw = restClient.post()
+            RestClient.RequestBodySpec request = restClient.post()
                     .uri(normalizeUrl(config.baseUrl(), config.oauthPath()))
                     .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                     .header("x-app-key", config.appKey())
                     .header("enterpriseId", config.enterpriseId())
-                    .header("Authorization", basicAuthorization(config.clientId(), config.clientSecret()))
-                    .body(body)
-                    .retrieve()
-                    .body(String.class);
+                    .header("Authorization", basicAuthorization(config.clientId(), config.clientSecret()));
+            if (StringUtils.hasText(chainCode)) {
+                request.header("ChainCode", chainCode.trim());
+            }
+
+            String raw = request.body(body).retrieve().body(String.class);
             JsonNode json = parseJson(raw);
             String accessToken = json.path("access_token").asText(null);
             if (!StringUtils.hasText(accessToken)) {

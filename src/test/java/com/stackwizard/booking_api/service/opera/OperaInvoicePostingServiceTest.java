@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -240,7 +241,7 @@ class OperaInvoicePostingServiceTest {
         when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
         when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq(99001L), any())).thenReturn(response);
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), isNull(), eq(99001L), any())).thenReturn(response);
 
         OperaInvoicePostRequest request = new OperaInvoicePostRequest();
         request.setBaseUrl("https://opera.example");
@@ -371,6 +372,7 @@ class OperaInvoicePostingServiceTest {
                 .id(603L)
                 .tenantId(1L)
                 .hotelCode("DH")
+                .chainCode("SUNHOT")
                 .defaultCashierId(19L)
                 .defaultFolioWindowNo(1)
                 .active(Boolean.TRUE)
@@ -398,10 +400,12 @@ class OperaInvoicePostingServiceTest {
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
         doAnswer(invocation -> {
             OperaTenantConfigResolver.OperaResolvedConfig config = invocation.getArgument(0);
+            String chainCode = invocation.getArgument(2);
             assertThat(config.accessToken()).isNull();
             assertThat(config.clientId()).isEqualTo("client-id");
+            assertThat(chainCode).isEqualTo("SUNHOT");
             return response;
-        }).when(operaPostingClient).postChargesAndPayments(any(), eq("DH"), eq(99003L), any());
+        }).when(operaPostingClient).postChargesAndPayments(any(), eq("DH"), eq("SUNHOT"), eq(99003L), any());
 
         OperaInvoicePostingResult result = service.postInvoice(13L, new OperaInvoicePostRequest());
 
@@ -429,7 +433,7 @@ class OperaInvoicePostingServiceTest {
 
         assertThat(result).isSameAs(invoice);
         verify(invoiceItemRepo, never()).findByInvoiceIdOrderByLineNoAsc(any());
-        verify(operaPostingClient, never()).postChargesAndPayments(any(), any(), any(), any());
+        verify(operaPostingClient, never()).postChargesAndPayments(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -502,7 +506,7 @@ class OperaInvoicePostingServiceTest {
         when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
         when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq(99004L), any()))
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), isNull(), eq(99004L), any()))
                 .thenThrow(new IllegalStateException("OHIP request failed"));
 
         Invoice result = service.tryAutoPostInvoice(15L);
