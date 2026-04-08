@@ -444,9 +444,10 @@ public class ReservationConfirmationEmailRenderer {
     }
 
     private String buildGuestLabel(Reservation reservation) {
-        int adults = safeCount(reservation.getAdults());
-        int children = safeCount(reservation.getChildren());
-        int infants = safeCount(reservation.getInfants());
+        Resource resource = reservation.getRequestedResource();
+        int adults = safeCount(resource != null ? resource.getCapAdults() : null);
+        int children = safeCount(resource != null ? resource.getCapChildren() : null);
+        int infants = safeCount(resource != null ? resource.getCapInfants() : null);
         int guests = adults + children;
         if (guests <= 0) {
             guests = adults + children + infants;
