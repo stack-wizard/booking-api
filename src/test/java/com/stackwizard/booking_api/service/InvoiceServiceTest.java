@@ -2,10 +2,14 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.dto.InvoiceCreateItemRequest;
 import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
+import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
+import com.stackwizard.booking_api.dto.PaymentTransactionDto;
 import com.stackwizard.booking_api.model.Invoice;
+import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoiceItem;
 import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceSequence;
+import com.stackwizard.booking_api.model.InvoiceStatus;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.model.Product;
@@ -324,6 +328,110 @@ class InvoiceServiceTest {
     }
 
     @Test
+    void createCreditNoteDraftCreatesEditableDraftFromSourceInvoice() {
+        Invoice source = Invoice.builder()
+                .id(610L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .currency("EUR")
+                .customerName("John Doe")
+                .subtotalNet(new BigDecimal("24.00"))
+                .discountTotal(BigDecimal.ZERO)
+                .tax1Total(new BigDecimal("6.00"))
+                .tax2Total(BigDecimal.ZERO)
+                .totalGross(new BigDecimal("30.00"))
+                .build();
+        InvoiceItem sourceItem = InvoiceItem.builder()
+                .invoice(source)
+                .lineNo(1)
+                .reservationId(10L)
+                .productId(20L)
+                .productName("Room")
+                .quantity(2)
+                .unitPriceGross(new BigDecimal("15.00"))
+                .discountPercent(BigDecimal.ZERO)
+                .discountAmount(BigDecimal.ZERO)
+                .priceWithoutTax(new BigDecimal("24.00"))
+                .tax1Percent(new BigDecimal("25.0000"))
+                .tax2Percent(BigDecimal.ZERO)
+                .tax1Amount(new BigDecimal("6.00"))
+                .tax2Amount(BigDecimal.ZERO)
+                .nettPrice(new BigDecimal("24.00"))
+                .grossAmount(new BigDecimal("30.00"))
+                .build();
+        InvoiceSequence sequence = InvoiceSequence.builder()
+                .tenantId(1L)
+                .invoiceType("CREDIT_NOTE")
+                .invoiceYear(LocalDate.now().getYear())
+                .lastNumber(0)
+                .build();
+
+        when(invoiceRepo.findById(610L)).thenReturn(Optional.of(source));
+        when(sequenceRepo.findForUpdate(1L, "CREDIT_NOTE", LocalDate.now().getYear()))
+                .thenReturn(Optional.of(sequence));
+        when(sequenceRepo.save(any(InvoiceSequence.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> {
+            Invoice invoice = invocation.getArgument(0);
+            if (invoice.getId() == null) {
+                invoice.setId(611L);
+            }
+            return invoice;
+        });
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(610L)).thenReturn(List.of(sourceItem));
+        when(invoiceItemRepo.save(any(InvoiceItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.sumAllocatedByInvoiceId(611L)).thenReturn(BigDecimal.ZERO);
+
+        Invoice draftCreditNote = service.createCreditNoteDraft(610L);
+
+        assertThat(draftCreditNote.getStatus()).isEqualTo(InvoiceStatus.DRAFT);
+        assertThat(draftCreditNote.getFiscalizationStatus()).isEqualTo(InvoiceFiscalizationStatus.NOT_REQUIRED);
+        assertThat(draftCreditNote.getIssuedAt()).isNull();
+    }
+
+    @Test
+    void updateDraftCreditNoteNormalizesItemSignsToNegative() {
+        Invoice creditNote = Invoice.builder()
+                .id(620L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.DRAFT)
+                .currency("EUR")
+                .build();
+        Product product = Product.builder()
+                .id(20L)
+                .tenantId(1L)
+                .name("Room")
+                .tax1Percent(new BigDecimal("25"))
+                .tax2Percent(BigDecimal.ZERO)
+                .build();
+
+        InvoiceCreateItemRequest item = new InvoiceCreateItemRequest();
+        item.setProductId(20L);
+        item.setQuantity(1);
+        item.setUnitPriceGross(new BigDecimal("50.00"));
+        item.setTax1Percent(new BigDecimal("25.00"));
+        item.setTax2Percent(BigDecimal.ZERO);
+        InvoiceCreateRequest request = new InvoiceCreateRequest();
+        request.setItems(List.of(item));
+
+        when(invoiceRepo.findById(620L)).thenReturn(Optional.of(creditNote));
+        when(productRepo.findByIdAndTenantId(20L, 1L)).thenReturn(Optional.of(product));
+        when(invoiceItemRepo.save(any(InvoiceItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.sumAllocatedByInvoiceId(620L)).thenReturn(BigDecimal.ZERO);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Invoice updated = service.updateDraft(620L, request);
+
+        ArgumentCaptor<InvoiceItem> itemCaptor = ArgumentCaptor.forClass(InvoiceItem.class);
+        verify(invoiceItemRepo).save(itemCaptor.capture());
+        InvoiceItem updatedItem = itemCaptor.getValue();
+        assertThat(updatedItem.getQuantity()).isEqualTo(-1);
+        assertThat(updatedItem.getGrossAmount()).isEqualByComparingTo("-50.00");
+        assertThat(updated.getTotalGross()).isEqualByComparingTo("-50.00");
+    }
+
+    @Test
     void allocateNegativeAmountOnCreditStyleInvoiceReleasesChargeCapacity() {
         Invoice invoice = Invoice.builder()
                 .id(901L)
@@ -359,7 +467,7 @@ class InvoiceServiceTest {
         Invoice invoice = Invoice.builder()
                 .id(902L)
                 .tenantId(1L)
-                .totalGross(new BigDecimal("-50.00"))
+                .totalGross(new BigDecimal("50.00"))
                 .build();
         PaymentTransaction refund = PaymentTransaction.builder()
                 .id(701L)
@@ -374,9 +482,98 @@ class InvoiceServiceTest {
         when(invoiceRepo.findById(902L)).thenReturn(Optional.of(invoice));
         when(paymentTransactionService.requireById(701L)).thenReturn(refund);
 
-        assertThatThrownBy(() -> service.allocatePaymentToInvoice(902L, 701L, new BigDecimal("-50.00"), "refund_release"))
+        assertThatThrownBy(() -> service.allocatePaymentToInvoice(902L, 701L, new BigDecimal("50.00"), "settlement"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("CHARGE");
+                .hasMessageContaining("credit note or negative invoices");
+    }
+
+    @Test
+    void allocateRefundTransactionToCreditNoteUsesRefundCapacity() {
+        Invoice invoice = Invoice.builder()
+                .id(903L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .totalGross(new BigDecimal("-50.00"))
+                .build();
+        PaymentTransaction refund = PaymentTransaction.builder()
+                .id(702L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .status("POSTED")
+                .paymentType("CASH")
+                .currency("EUR")
+                .amount(new BigDecimal("-50.00"))
+                .build();
+
+        when(invoiceRepo.findById(903L)).thenReturn(Optional.of(invoice));
+        when(paymentTransactionService.requireById(702L)).thenReturn(refund);
+        when(allocationRepo.sumAllocatedByPaymentTransactionId(702L)).thenReturn(BigDecimal.ZERO);
+        when(allocationRepo.findByInvoiceIdAndPaymentTransactionId(903L, 702L)).thenReturn(Optional.empty());
+        when(allocationRepo.save(any(InvoicePaymentAllocation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.sumAllocatedByInvoiceId(903L)).thenReturn(new BigDecimal("-50.00"));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoicePaymentAllocation allocation = service.allocatePaymentToInvoice(903L, 702L, new BigDecimal("-50.00"), "refund_release");
+
+        assertThat(allocation.getAllocatedAmount()).isEqualByComparingTo("-50.00");
+        assertThat(allocation.getAllocationType()).isEqualTo("REFUND_RELEASE");
+    }
+
+    @Test
+    void createRefundTransactionAndAllocateToCreditNoteCreatesRefundAndAllocation() {
+        Invoice creditNote = Invoice.builder()
+                .id(904L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .reservationRequestId(77L)
+                .currency("EUR")
+                .totalGross(new BigDecimal("-50.00"))
+                .build();
+        PaymentTransaction sourceCharge = PaymentTransaction.builder()
+                .id(703L)
+                .tenantId(1L)
+                .transactionType("CHARGE")
+                .paymentType("CARD")
+                .cardType("VISA")
+                .status("POSTED")
+                .currency("EUR")
+                .amount(new BigDecimal("50.00"))
+                .build();
+        PaymentTransaction refund = PaymentTransaction.builder()
+                .id(704L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .paymentType("CASH")
+                .status("POSTED")
+                .currency("EUR")
+                .amount(new BigDecimal("-50.00"))
+                .build();
+
+        PaymentTransactionCreateRequest request = new PaymentTransactionCreateRequest();
+        request.setPaymentType("CASH");
+        request.setSourcePaymentTransactionId(703L);
+        request.setNote("manual cash refund");
+
+        when(invoiceRepo.findById(904L)).thenReturn(Optional.of(creditNote));
+        when(paymentTransactionService.requireById(703L)).thenReturn(sourceCharge);
+        when(paymentTransactionService.create(any(PaymentTransactionCreateRequest.class)))
+                .thenReturn(PaymentTransactionDto.builder()
+                        .id(704L)
+                        .amount(new BigDecimal("-50.00"))
+                        .paymentType("CASH")
+                        .build());
+        when(paymentTransactionService.requireById(704L)).thenReturn(refund);
+        when(allocationRepo.sumAllocatedByPaymentTransactionId(704L)).thenReturn(BigDecimal.ZERO);
+        when(allocationRepo.findByInvoiceIdAndPaymentTransactionId(904L, 704L)).thenReturn(Optional.empty());
+        when(allocationRepo.save(any(InvoicePaymentAllocation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(allocationRepo.sumAllocatedByInvoiceId(904L)).thenReturn(new BigDecimal("-50.00"));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var result = service.createRefundTransactionAndAllocateToCreditNote(904L, request);
+
+        assertThat(result.getPaymentTransaction().getId()).isEqualTo(704L);
+        assertThat(result.getPaymentTransaction().getPaymentType()).isEqualTo("CASH");
+        assertThat(result.getAllocation().getAllocatedAmount()).isEqualByComparingTo("-50.00");
     }
 
     @Test

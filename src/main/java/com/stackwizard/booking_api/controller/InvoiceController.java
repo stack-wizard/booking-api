@@ -6,6 +6,8 @@ import com.stackwizard.booking_api.dto.InvoiceSearchCriteria;
 import com.stackwizard.booking_api.dto.InvoiceIssueRequest;
 import com.stackwizard.booking_api.dto.InvoiceFiscalizeRequest;
 import com.stackwizard.booking_api.dto.InvoicePaymentAllocationRequest;
+import com.stackwizard.booking_api.dto.CreditNoteRefundCreateResponse;
+import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
 import com.stackwizard.booking_api.dto.OperaInvoicePostRequest;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
@@ -137,10 +139,22 @@ public class InvoiceController {
         return ResponseEntity.ok(allocation);
     }
 
+    @PostMapping("/{invoiceId}/refund-transaction")
+    public ResponseEntity<CreditNoteRefundCreateResponse> createRefundTransactionAndAllocate(@PathVariable Long invoiceId,
+                                                                                              @RequestBody(required = false) PaymentTransactionCreateRequest request) {
+        return ResponseEntity.ok(invoiceService.createRefundTransactionAndAllocateToCreditNote(invoiceId, request));
+    }
+
     @PostMapping("/{invoiceId}/storno")
     public ResponseEntity<Map<String, Object>> createStorno(@PathVariable Long invoiceId) {
         Invoice storno = invoiceService.createStornoInvoice(invoiceId);
         return toResponse(storno);
+    }
+
+    @PostMapping("/{invoiceId}/credit-note")
+    public ResponseEntity<Map<String, Object>> createCreditNote(@PathVariable Long invoiceId) {
+        Invoice creditNote = invoiceService.createCreditNoteDraft(invoiceId);
+        return toResponse(creditNote);
     }
 
     @PostMapping("/{invoiceId}/issue")

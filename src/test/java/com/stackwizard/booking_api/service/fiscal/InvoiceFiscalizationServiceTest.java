@@ -6,9 +6,12 @@ import com.stackwizard.booking_api.dto.InvoiceFiscalizeRequest;
 import com.stackwizard.booking_api.model.FiscalCashRegister;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
+import com.stackwizard.booking_api.model.InvoiceItem;
+import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceStatus;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.IssuedByMode;
+import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.repository.AppUserRepository;
 import com.stackwizard.booking_api.repository.InvoiceItemRepository;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
@@ -26,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -178,6 +182,123 @@ class InvoiceFiscalizationServiceTest {
         assertThat(payload.at("/ReservationInfo/ConfirmationNo").asText()).isEqualTo("CONF-412+INV-2026-00001");
         assertThat(payload.at("/DocumentInfo/BusinessDateTime").asText()).isEqualTo("2026-04-08T11:37:28");
         verifyNoInteractions(operaFiscalMappingService);
+    }
+
+    @Test
+    void buildFiscalPayloadKeepsNegativeTotalsForCreditNote() {
+        Invoice invoice = baseInvoice();
+        invoice.setInvoiceType(InvoiceType.CREDIT_NOTE);
+        invoice.setInvoiceNumber("CREDIT_NOTE-2026-00001");
+
+        InvoiceItem item = InvoiceItem.builder()
+                .id(299L)
+                .lineNo(1)
+                .productName("DEPOSIT")
+                .quantity(1)
+                .priceWithoutTax(new BigDecimal("-40.00"))
+                .tax1Percent(new BigDecimal("25.00"))
+                .tax2Percent(BigDecimal.ZERO)
+                .tax1Amount(new BigDecimal("-10.00"))
+                .tax2Amount(BigDecimal.ZERO)
+                .nettPrice(new BigDecimal("-40.00"))
+                .grossAmount(new BigDecimal("-50.00"))
+                .build();
+
+        when(invoiceRepo.findById(5L)).thenReturn(Optional.of(invoice));
+        when(invoiceService.issueInvoice(eq(5L), any())).thenReturn(invoice);
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(5L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(5L)).thenReturn(List.of());
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(1L, "FISCALIZATION", "OFIS"))
+                .thenReturn(Optional.empty());
+        when(fiscalCashRegisterService.requireByIdAndTenantId(22L, 1L)).thenReturn(FiscalCashRegister.builder()
+                .id(22L)
+                .tenantId(1L)
+                .businessPremiseId(11L)
+                .code("1")
+                .terminalId("TERM-1")
+                .active(Boolean.TRUE)
+                .build());
+        when(operaFiscalMappingService.resolveChargeMapping(eq(1L), any(), any())).thenReturn(Optional.empty());
+        when(operaFiscalMappingService.resolveTaxMapping(eq(1L), any())).thenReturn(Optional.empty());
+
+        InvoiceFiscalizeRequest request = new InvoiceFiscalizeRequest();
+        request.setHotelCode("SUNHBC");
+        request.setPropertyTaxNumber("29834131149");
+
+        var payload = service.buildFiscalPayload(5L, request);
+
+        assertThat(payload.at("/FolioInfo/TotalInfo/NetAmount").decimalValue()).isEqualByComparingTo("-40.00");
+        assertThat(payload.at("/FolioInfo/TotalInfo/GrossAmount").decimalValue()).isEqualByComparingTo("-50.00");
+        assertThat(payload.at("/FolioInfo/TotalInfo/Taxes/Tax/0/Value").decimalValue()).isEqualByComparingTo("-10.00");
+        assertThat(payload.at("/FolioInfo/TotalInfo/Taxes/Tax/0/NetAmount").decimalValue()).isEqualByComparingTo("-40.00");
+        assertThat(payload.at("/FolioInfo/RevenueBucketInfo/0/BucketCodeTotalGross").decimalValue())
+                .isEqualByComparingTo("-50.00");
+        assertThat(payload.at("/DocumentInfo/Command").asText()).isEqualTo("INVOICE");
+        assertThat(payload.at("/DocumentInfo/DocumentType").asText()).isEqualTo("INVOICE");
+    }
+
+    @Test
+    void buildFiscalPayloadKeepsNegativePostingAmountsForCreditNotePaymentAllocation() {
+        Invoice invoice = baseInvoice();
+        invoice.setInvoiceType(InvoiceType.CREDIT_NOTE);
+        invoice.setInvoiceNumber("CREDIT_NOTE-2026-00001");
+
+        InvoiceItem item = InvoiceItem.builder()
+                .id(299L)
+                .lineNo(1)
+                .productName("DEPOSIT")
+                .quantity(1)
+                .priceWithoutTax(new BigDecimal("-40.00"))
+                .tax1Percent(new BigDecimal("25.00"))
+                .tax2Percent(BigDecimal.ZERO)
+                .tax1Amount(new BigDecimal("-10.00"))
+                .tax2Amount(BigDecimal.ZERO)
+                .nettPrice(new BigDecimal("-40.00"))
+                .grossAmount(new BigDecimal("-50.00"))
+                .build();
+        InvoicePaymentAllocation allocation = InvoicePaymentAllocation.builder()
+                .paymentTransactionId(61L)
+                .allocatedAmount(new BigDecimal("-50.00"))
+                .allocationType("REFUND_RELEASE")
+                .build();
+        PaymentTransaction paymentTransaction = PaymentTransaction.builder()
+                .id(61L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .paymentType("CARD")
+                .status("COMPLETED")
+                .currency("EUR")
+                .amount(new BigDecimal("-50.00"))
+                .build();
+
+        when(invoiceRepo.findById(5L)).thenReturn(Optional.of(invoice));
+        when(invoiceService.issueInvoice(eq(5L), any())).thenReturn(invoice);
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(5L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(5L)).thenReturn(List.of(allocation));
+        when(paymentTransactionService.requireById(61L)).thenReturn(paymentTransaction);
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(1L, "FISCALIZATION", "OFIS"))
+                .thenReturn(Optional.empty());
+        when(fiscalCashRegisterService.requireByIdAndTenantId(22L, 1L)).thenReturn(FiscalCashRegister.builder()
+                .id(22L)
+                .tenantId(1L)
+                .businessPremiseId(11L)
+                .code("1")
+                .terminalId("TERM-1")
+                .active(Boolean.TRUE)
+                .build());
+        when(operaFiscalMappingService.resolveChargeMapping(eq(1L), any(), any())).thenReturn(Optional.empty());
+        when(operaFiscalMappingService.resolveTaxMapping(eq(1L), any())).thenReturn(Optional.empty());
+        when(operaFiscalMappingService.resolvePaymentMapping(eq(1L), eq("CARD"), any())).thenReturn(Optional.empty());
+
+        InvoiceFiscalizeRequest request = new InvoiceFiscalizeRequest();
+        request.setHotelCode("SUNHBC");
+        request.setPropertyTaxNumber("29834131149");
+
+        var payload = service.buildFiscalPayload(5L, request);
+
+        assertThat(payload.at("/FolioInfo/Postings/0/GrossAmount").decimalValue()).isEqualByComparingTo("-50.00");
+        assertThat(payload.at("/FolioInfo/Postings/1/UnitPrice").decimalValue()).isEqualByComparingTo("-50.00");
+        assertThat(payload.at("/FolioInfo/Postings/1/GrossAmount").decimalValue()).isEqualByComparingTo("-50.00");
     }
 
     private Invoice baseInvoice() {

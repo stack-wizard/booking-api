@@ -57,7 +57,6 @@ public class InvoiceFiscalizationService {
     private static final String DEFAULT_OFIS_FOLIO_TYPE = "FISCAL";
     private static final String DEFAULT_OFIS_APPLICATION = "BookingAPI";
     private static final String DEFAULT_OFIS_DOCUMENT_INVOICE = "INVOICE";
-    private static final String DEFAULT_OFIS_DOCUMENT_CREDIT_NOTE = "CREDIT_NOTE";
     private static final String DEFAULT_OFIS_TIMEOUT = "30";
     private static final String DEFAULT_OFIS_CHARGE_TRX_CODE = "3100";
     private static final String DEFAULT_OFIS_TAX1_TRX_CODE = "3";
@@ -286,7 +285,6 @@ public class InvoiceFiscalizationService {
                 .toLocalDateTime()
                 .format(DATE_TIME_FORMATTER);
         boolean creditBill = isStornoType(invoice.getInvoiceType()) || zeroSafe(invoice.getTotalGross()).compareTo(BigDecimal.ZERO) < 0;
-        String defaultDocumentType = creditBill ? DEFAULT_OFIS_DOCUMENT_CREDIT_NOTE : DEFAULT_OFIS_DOCUMENT_INVOICE;
         TenantIntegrationConfig fiscalConfig = tenantIntegrationConfigService
                 .findByTenantIdAndTypeAndProvider(invoice.getTenantId(), INTEGRATION_TYPE_FISCALIZATION, INTEGRATION_PROVIDER_OFIS)
                 .orElse(null);
@@ -320,8 +318,8 @@ public class InvoiceFiscalizationService {
                 fiscalConfig != null ? normalizeNullable(fiscalConfig.getApplicationName()) : null,
                 DEFAULT_OFIS_APPLICATION
         );
-        String command = firstNonBlank(normalizeNullable(request.getCommand()), defaultDocumentType);
-        String documentType = firstNonBlank(normalizeNullable(request.getDocumentType()), defaultDocumentType);
+        String command = DEFAULT_OFIS_DOCUMENT_INVOICE;
+        String documentType = DEFAULT_OFIS_DOCUMENT_INVOICE;
         String fiscalTimeout = firstNonBlank(normalizeNullable(request.getFiscalTimeoutPeriod()), DEFAULT_OFIS_TIMEOUT);
         String window = firstNonBlank(normalizeNullable(request.getWindow()), "1");
         String cashierNumber = firstNonBlank(normalizeNullable(request.getCashierNumber()), "1");
@@ -385,8 +383,8 @@ public class InvoiceFiscalizationService {
             BigDecimal grossAmount = money(zeroSafe(item.getGrossAmount()));
             BigDecimal unitPrice = grossAmount.divide(quantity, 6, RoundingMode.HALF_UP);
             BigDecimal netAmount = money(zeroSafe(item.getNettPrice() != null ? item.getNettPrice() : item.getPriceWithoutTax()));
-            netAmountTotal = netAmountTotal.add(netAmount.abs());
-            grossAmountTotal = grossAmountTotal.add(grossAmount.abs());
+            netAmountTotal = netAmountTotal.add(netAmount);
+            grossAmountTotal = grossAmountTotal.add(grossAmount);
             BigDecimal tax1Amount = resolveTaxAmount(item.getTax1Amount(), item.getTax1Percent(), netAmount, grossAmount);
             BigDecimal tax2Amount = resolveTaxAmount(item.getTax2Amount(), item.getTax2Percent(), netAmount, grossAmount);
 
@@ -412,7 +410,7 @@ public class InvoiceFiscalizationService {
             posting.put("TrxDateTime", businessDateTime);
             posting.put("LocalTrxDateTime", businessDateTime);
             posting.put("NetAmount", netAmount);
-            posting.put("GrossAmount", grossAmount.abs());
+            posting.put("GrossAmount", grossAmount);
             posting.put("GuestAccountDebit", debit);
             posting.put("GuestAccountCredit", credit);
             posting.put("ArrangementCode", null);
@@ -436,7 +434,7 @@ public class InvoiceFiscalizationService {
 
             if (chargeMapping != null) {
                 addBucket(bucketSummaryByKey, chargeMapping.getBucketCode(), chargeMapping.getBucketType(),
-                        chargeMapping.getBucketValue(), chargeMapping.getBucketDescription(), chargeTrxCode, grossAmount.abs());
+                        chargeMapping.getBucketValue(), chargeMapping.getBucketDescription(), chargeTrxCode, grossAmount);
             }
         }
 
@@ -483,7 +481,7 @@ public class InvoiceFiscalizationService {
             paymentPosting.put("TrxCode", paymentTrxCode);
             paymentPosting.put("TrxDate", businessDate);
             paymentPosting.put("TrxType", paymentTrxType);
-            paymentPosting.put("UnitPrice", amount.abs());
+            paymentPosting.put("UnitPrice", amount);
             paymentPosting.put("Quantity", BigDecimal.ONE);
             paymentPosting.put("Currency", invoice.getCurrency());
             paymentPosting.put("TaxInclusive", false);
@@ -491,7 +489,7 @@ public class InvoiceFiscalizationService {
             paymentPosting.put("TrxDateTime", businessDateTime);
             paymentPosting.put("LocalTrxDateTime", businessDateTime);
             paymentPosting.put("NetAmount", BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
-            paymentPosting.put("GrossAmount", amount.abs());
+            paymentPosting.put("GrossAmount", amount);
             paymentPosting.put("GuestAccountDebit", debit);
             paymentPosting.put("GuestAccountCredit", credit);
             paymentPosting.put("ArrangementCode", null);
@@ -515,15 +513,15 @@ public class InvoiceFiscalizationService {
 
             if (paymentMapping != null) {
                 addBucket(bucketSummaryByKey, paymentMapping.getBucketCode(), paymentMapping.getBucketType(),
-                        paymentMapping.getBucketValue(), paymentMapping.getBucketDescription(), paymentTrxCode, amount.abs());
+                        paymentMapping.getBucketValue(), paymentMapping.getBucketDescription(), paymentTrxCode, amount);
             }
         }
 
         for (TaxSummary tax : taxSummaryByKey.values()) {
             Map<String, Object> taxEntry = new LinkedHashMap<>();
             taxEntry.put("Name", tax.taxName);
-            taxEntry.put("Value", money(tax.taxValue.abs()));
-            taxEntry.put("NetAmount", money(tax.netValue.abs()));
+            taxEntry.put("Value", money(tax.taxValue));
+            taxEntry.put("NetAmount", money(tax.netValue));
             taxEntry.put("Percent", tax.percent.setScale(2, RoundingMode.HALF_UP).toPlainString());
             taxEntry.put("Amount", "");
             taxes.add(taxEntry);

@@ -284,13 +284,6 @@ public class CancellationService {
                 }
                 Invoice creditNote = invoiceService.createCreditNoteInvoice(sourceInvoice.getId());
                 cancellationRequest.setCreditNoteInvoiceId(creditNote.getId());
-                publishAutoFiscalizationIfRequired(creditNote);
-                invoiceService.allocatePaymentToInvoice(
-                        creditNote.getId(),
-                        sourceCharge.getId(),
-                        money(abs(sourceInvoice.getTotalGross())).negate(),
-                        "REFUND_RELEASE"
-                );
 
                 boolean automaticRefund = request == null
                         || request.getAutomaticRefund() == null
@@ -327,7 +320,14 @@ public class CancellationService {
                                 ? "Cancellation refund handled manually (no provider payment intent link)"
                                 : "Cancellation refund handled manually by finance"
                 );
+                invoiceService.allocatePaymentToInvoice(
+                        creditNote.getId(),
+                        refundTransaction.getId(),
+                        refundTransaction.getAmount(),
+                        "REFUND_RELEASE"
+                );
                 cancellationRequest.setRefundPaymentTransactionId(refundTransaction.getId());
+                publishAutoFiscalizationIfRequired(creditNote);
             } else if (MODE_CUSTOMER_CREDIT.equals(settlementMode)) {
                 if (sourceInvoice != null) {
                     Invoice stornoInvoice = invoiceService.createStornoInvoice(sourceInvoice.getId());

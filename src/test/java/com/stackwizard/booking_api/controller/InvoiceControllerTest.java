@@ -2,9 +2,13 @@ package com.stackwizard.booking_api.controller;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.stackwizard.booking_api.dto.CreditNoteRefundCreateResponse;
 import com.stackwizard.booking_api.dto.InvoiceIssueRequest;
+import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
+import com.stackwizard.booking_api.dto.PaymentTransactionDto;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
+import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceStatus;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.dto.OperaInvoicePostRequest;
@@ -123,5 +127,68 @@ class InvoiceControllerTest {
         Invoice returnedInvoice = (Invoice) response.getBody().get("invoice");
         assertThat(returnedInvoice.getFiscalizationStatus()).isEqualTo(InvoiceFiscalizationStatus.FAILED);
         assertThat(returnedInvoice.getStatus()).isEqualTo(InvoiceStatus.ISSUED);
+    }
+
+    @Test
+    void createCreditNoteUsesSourceInvoiceFlow() {
+        InvoiceController controller = new InvoiceController(
+                invoiceService,
+                invoicePdfService,
+                invoiceFiscalizationService,
+                operaInvoicePostingService
+        );
+        Invoice creditNote = Invoice.builder()
+                .id(88L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .status(InvoiceStatus.DRAFT)
+                .build();
+
+        when(invoiceService.createCreditNoteDraft(44L)).thenReturn(creditNote);
+        lenient().when(invoiceService.findItems(88L)).thenReturn(java.util.List.of());
+        lenient().when(invoiceService.findAllocations(88L)).thenReturn(java.util.List.of());
+
+        ResponseEntity<Map<String, Object>> response = controller.createCreditNote(44L);
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().get("invoice")).isEqualTo(creditNote);
+        verify(invoiceService).createCreditNoteDraft(44L);
+    }
+
+    @Test
+    void createRefundTransactionAndAllocateReturnsTransactionAndAllocation() {
+        InvoiceController controller = new InvoiceController(
+                invoiceService,
+                invoicePdfService,
+                invoiceFiscalizationService,
+                operaInvoicePostingService
+        );
+
+        CreditNoteRefundCreateResponse payload = CreditNoteRefundCreateResponse.builder()
+                .paymentTransaction(PaymentTransactionDto.builder()
+                        .id(901L)
+                        .transactionType("REFUND")
+                        .paymentType("CASH")
+                        .amount(new BigDecimal("-50.00"))
+                        .build())
+                .allocation(InvoicePaymentAllocation.builder()
+                        .id(801L)
+                        .paymentTransactionId(901L)
+                        .allocatedAmount(new BigDecimal("-50.00"))
+                        .allocationType("REFUND_RELEASE")
+                        .build())
+                .build();
+        when(invoiceService.createRefundTransactionAndAllocateToCreditNote(eq(44L), any(PaymentTransactionCreateRequest.class)))
+                .thenReturn(payload);
+
+        ResponseEntity<CreditNoteRefundCreateResponse> response = controller.createRefundTransactionAndAllocate(
+                44L,
+                new PaymentTransactionCreateRequest()
+        );
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        assertThat(response.getBody()).isEqualTo(payload);
+        verify(invoiceService).createRefundTransactionAndAllocateToCreditNote(eq(44L), any(PaymentTransactionCreateRequest.class));
     }
 }

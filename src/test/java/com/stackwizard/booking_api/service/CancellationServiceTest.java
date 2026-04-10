@@ -206,6 +206,7 @@ class CancellationServiceTest {
         assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("-50.00");
         assertThat(paymentCaptor.getValue().getCreditNoteInvoiceId()).isEqualTo(201L);
         assertThat(paymentCaptor.getValue().getSourcePaymentTransactionId()).isEqualTo(300L);
+        verify(invoiceService).allocatePaymentToInvoice(201L, 301L, new BigDecimal("-50.00"), "REFUND_RELEASE");
         verify(invoiceService, never()).createPenaltyInvoice(10L, new BigDecimal("50.00"), "EUR");
         verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
@@ -313,6 +314,7 @@ class CancellationServiceTest {
         assertThat(paymentCaptor.getValue().getSourcePaymentTransactionId()).isEqualTo(360L);
         assertThat(paymentCaptor.getValue().getExternalRef()).isNull();
         assertThat(paymentCaptor.getValue().getNote()).isEqualTo("Cancellation refund handled manually (no provider payment intent link)");
+        verify(invoiceService).allocatePaymentToInvoice(261L, 361L, new BigDecimal("-50.00"), "REFUND_RELEASE");
         verify(invoiceService, never()).createPenaltyInvoice(16L, new BigDecimal("50.00"), "EUR");
         verify(eventPublisher, times(1)).publishEvent(any(InvoiceAutoFiscalizationRequestedEvent.class));
     }
