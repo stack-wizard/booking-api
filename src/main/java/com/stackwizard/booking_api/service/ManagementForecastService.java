@@ -22,6 +22,12 @@ import java.util.List;
 @Service
 public class ManagementForecastService {
 
+    private static final List<ReservationRequest.Status> FORECAST_CONFIRMED_STATUSES = List.of(
+            ReservationRequest.Status.FINALIZED,
+            ReservationRequest.Status.CHECKED_IN,
+            ReservationRequest.Status.CHECKED_OUT
+    );
+
     private static final int MAX_DAILY_TREND_DAYS = 62;
     private static final DateTimeFormatter LABEL = DateTimeFormatter.ofPattern("d/M");
 
@@ -58,28 +64,28 @@ public class ManagementForecastService {
 
         long requestCount = forecastRepository.countFinalizedRequests(
                 tenantId,
-                ReservationRequest.Status.FINALIZED,
+                FORECAST_CONFIRMED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
 
         long reservationCount = forecastRepository.countForecastReservations(
                 tenantId,
-                ReservationRequest.Status.FINALIZED,
+                FORECAST_CONFIRMED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
 
         BigDecimal grossTotal = toBigDecimal(forecastRepository.sumForecastGross(
                 tenantId,
-                ReservationRequest.Status.FINALIZED,
+                FORECAST_CONFIRMED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to));
 
         List<Object[]> rows = forecastRepository.aggregateReservationsByProduct(
                 tenantId,
-                ReservationRequest.Status.FINALIZED,
+                FORECAST_CONFIRMED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
@@ -143,13 +149,13 @@ public class ManagementForecastService {
 
             long reservationCount = forecastRepository.countForecastReservations(
                     tenantId,
-                    ReservationRequest.Status.FINALIZED,
+                    FORECAST_CONFIRMED_STATUSES,
                     ReservationRequest.Type.INTERNAL,
                     dayStart,
                     dayEnd);
             BigDecimal grossTotal = toBigDecimal(forecastRepository.sumForecastGross(
                     tenantId,
-                    ReservationRequest.Status.FINALIZED,
+                    FORECAST_CONFIRMED_STATUSES,
                     ReservationRequest.Type.INTERNAL,
                     dayStart,
                     dayEnd));

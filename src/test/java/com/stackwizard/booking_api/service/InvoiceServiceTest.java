@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.InvoiceCheckoutGateResult;
 import com.stackwizard.booking_api.dto.InvoiceCreateItemRequest;
 import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
@@ -17,6 +18,7 @@ import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.model.OperaPostingStatus;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
+import com.stackwizard.booking_api.model.IssuedByMode;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.repository.AppUserRepository;
 import com.stackwizard.booking_api.repository.InvoiceItemRepository;
@@ -42,6 +44,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -145,8 +148,8 @@ class InvoiceServiceTest {
                 .amount(new BigDecimal("50.00"))
                 .build();
 
-        when(invoiceRepo.findByReferenceTableAndReferenceId("payment_intent", paymentIntent.getId()))
-                .thenReturn(Optional.empty());
+        when(invoiceRepo.findByReferenceTableAndReferenceIdOrderByIdAsc("payment_intent", paymentIntent.getId()))
+                .thenReturn(List.of());
         when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
         when(reservationRepo.findByRequestId(requestId)).thenReturn(List.of(reservation));
         when(productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(tenantId, "DEPOSIT"))
@@ -238,6 +241,7 @@ class InvoiceServiceTest {
                 .build();
 
         when(invoiceRepo.findById(500L)).thenReturn(Optional.of(source));
+        when(invoiceRepo.findByReferenceTableAndReferenceIdOrderByIdAsc("invoice", 500L)).thenReturn(List.of());
         when(sequenceRepo.findForUpdate(1L, "DEPOSIT_STORNO", LocalDate.now().getYear()))
                 .thenReturn(Optional.of(sequence));
         when(sequenceRepo.save(any(InvoiceSequence.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -261,6 +265,52 @@ class InvoiceServiceTest {
         assertThat(stornoItem.getQuantity()).isEqualTo(-2);
         assertThat(stornoItem.getUnitPriceGross()).isEqualByComparingTo("15.00");
         assertThat(stornoItem.getGrossAmount()).isEqualByComparingTo("-30.00");
+    }
+
+    @Test
+    void createStornoInvoiceThrowsWhenCreditNoteAlreadyReferencesSource() {
+        Invoice source = Invoice.builder()
+                .id(700L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .currency("EUR")
+                .totalGross(new BigDecimal("50.00"))
+                .build();
+        Invoice creditNote = Invoice.builder()
+                .id(701L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .build();
+        when(invoiceRepo.findById(700L)).thenReturn(Optional.of(source));
+        when(invoiceRepo.findByReferenceTableAndReferenceIdOrderByIdAsc("invoice", 700L)).thenReturn(List.of(creditNote));
+
+        assertThatThrownBy(() -> service.createStornoInvoice(700L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("credit note");
+    }
+
+    @Test
+    void createStornoInvoiceReturnsExistingStornoAndLinksSourceWhenOrphanChild() {
+        Invoice source = Invoice.builder()
+                .id(800L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT)
+                .stornoId(null)
+                .build();
+        Invoice existingStorno = Invoice.builder()
+                .id(801L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .build();
+        when(invoiceRepo.findById(800L)).thenReturn(Optional.of(source));
+        when(invoiceRepo.findByReferenceTableAndReferenceIdOrderByIdAsc("invoice", 800L)).thenReturn(List.of(existingStorno));
+        when(invoiceRepo.save(source)).thenAnswer(inv -> inv.getArgument(0));
+
+        Invoice result = service.createStornoInvoice(800L);
+
+        assertThat(result.getId()).isEqualTo(801L);
+        assertThat(source.getStornoId()).isEqualTo(801L);
+        verify(sequenceRepo, never()).findForUpdate(any(), any(), any());
     }
 
     @Test
@@ -632,5 +682,67 @@ class InvoiceServiceTest {
         assertThat(invoice.getOperaReservationId()).isEqualTo(460983L);
         assertThat(invoice.getOperaHotelCode()).isEqualTo("DH");
         assertThat(invoice.getOperaPostingStatus()).isEqualTo(OperaPostingStatus.NOT_POSTED);
+    }
+
+    @Test
+    void evaluateCheckoutGateDraftIsBlocker() {
+        long reqId = 55L;
+        Invoice draft = Invoice.builder()
+                .id(1L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2024-00001")
+                .invoiceDate(LocalDate.now())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .status(InvoiceStatus.DRAFT)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.NOT_REQUIRED)
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .currency("EUR")
+                .subtotalNet(BigDecimal.ZERO.setScale(2))
+                .discountTotal(BigDecimal.ZERO.setScale(2))
+                .tax1Total(BigDecimal.ZERO.setScale(2))
+                .tax2Total(BigDecimal.ZERO.setScale(2))
+                .totalGross(new BigDecimal("10.00"))
+                .build();
+        when(invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reqId)).thenReturn(List.of(draft));
+        when(allocationRepo.sumAllocatedByInvoiceId(1L)).thenReturn(BigDecimal.ZERO);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoiceCheckoutGateResult result = service.evaluateCheckoutGateForReservationRequest(reqId);
+
+        assertThat(result.blockers()).anyMatch(s -> s.contains("draft"));
+    }
+
+    @Test
+    void evaluateCheckoutGateOperaNotPostedIsWarningOnly() {
+        long reqId = 56L;
+        Invoice inv = Invoice.builder()
+                .id(10L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2024-00002")
+                .invoiceDate(LocalDate.now())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.FISCALIZED)
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .currency("EUR")
+                .subtotalNet(new BigDecimal("40.00"))
+                .discountTotal(BigDecimal.ZERO.setScale(2))
+                .tax1Total(new BigDecimal("10.00"))
+                .tax2Total(BigDecimal.ZERO.setScale(2))
+                .totalGross(new BigDecimal("50.00"))
+                .build();
+        when(invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reqId)).thenReturn(List.of(inv));
+        when(allocationRepo.sumAllocatedByInvoiceId(10L)).thenReturn(new BigDecimal("50.00"));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoiceCheckoutGateResult result = service.evaluateCheckoutGateForReservationRequest(reqId);
+
+        assertThat(result.blockers()).isEmpty();
+        assertThat(result.warnings()).hasSize(1);
+        assertThat(result.warnings().get(0).getOperaPostingStatus()).isEqualTo("NOT_POSTED");
     }
 }

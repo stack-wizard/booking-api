@@ -6,6 +6,7 @@ import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
 import com.stackwizard.booking_api.service.ReservationRequestExportService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
+import com.stackwizard.booking_api.service.ReservationStayService;
 import com.stackwizard.booking_api.service.TenantConfigService;
 import com.stackwizard.booking_api.service.CancellationService;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,8 @@ class ReservationRequestControllerTest {
     private CancellationService cancellationService;
     @Mock
     private ReservationRequestExportService exportService;
+    @Mock
+    private ReservationStayService reservationStayService;
 
     @Test
     void createKeepsInternalDraftRequestWithoutExpiry() {
@@ -48,7 +51,8 @@ class ReservationRequestControllerTest {
                 confirmationEmailServiceProvider,
                 tenantConfigService,
                 dtoMapper,
-                exportService
+                exportService,
+                reservationStayService
         );
 
         ReservationRequest request = ReservationRequest.builder()

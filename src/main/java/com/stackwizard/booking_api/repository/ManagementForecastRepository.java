@@ -6,11 +6,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
  * Forecast / management aggregates. Every reservation query joins {@code reservation_request}
- * so rows are restricted to non-INTERNAL types and FINALIZED requests (plus caller-specific
+ * so rows are restricted to non-INTERNAL types and confirmed stay statuses (plus caller-specific
  * predicates such as {@code confirmed_at} range).
  */
 public interface ManagementForecastRepository extends JpaRepository<ReservationRequest, Long> {
@@ -19,7 +20,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             select count(rr)
             from ReservationRequest rr
             where rr.tenantId = :tenantId
-              and rr.status = :finalizedStatus
+              and rr.status in :confirmedStatuses
               and rr.type <> :internalType
               and rr.confirmedAt is not null
               and rr.confirmedAt >= :fromInclusive
@@ -27,7 +28,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             """)
     long countFinalizedRequests(
             @Param("tenantId") Long tenantId,
-            @Param("finalizedStatus") ReservationRequest.Status finalizedStatus,
+            @Param("confirmedStatuses") Collection<ReservationRequest.Status> confirmedStatuses,
             @Param("internalType") ReservationRequest.Type internalType,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toInclusive") OffsetDateTime toInclusive);
@@ -37,7 +38,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             from Reservation r
             join r.request rr
             where rr.tenantId = :tenantId
-              and rr.status = :finalizedStatus
+              and rr.status in :confirmedStatuses
               and rr.type <> :internalType
               and rr.confirmedAt is not null
               and rr.confirmedAt >= :fromInclusive
@@ -46,7 +47,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             """)
     long countForecastReservations(
             @Param("tenantId") Long tenantId,
-            @Param("finalizedStatus") ReservationRequest.Status finalizedStatus,
+            @Param("confirmedStatuses") Collection<ReservationRequest.Status> confirmedStatuses,
             @Param("internalType") ReservationRequest.Type internalType,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toInclusive") OffsetDateTime toInclusive);
@@ -56,7 +57,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             from Reservation r
             join r.request rr
             where rr.tenantId = :tenantId
-              and rr.status = :finalizedStatus
+              and rr.status in :confirmedStatuses
               and rr.type <> :internalType
               and rr.confirmedAt is not null
               and rr.confirmedAt >= :fromInclusive
@@ -65,7 +66,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             """)
     Object sumForecastGross(
             @Param("tenantId") Long tenantId,
-            @Param("finalizedStatus") ReservationRequest.Status finalizedStatus,
+            @Param("confirmedStatuses") Collection<ReservationRequest.Status> confirmedStatuses,
             @Param("internalType") ReservationRequest.Type internalType,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toInclusive") OffsetDateTime toInclusive);
@@ -82,7 +83,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             join r.requestedResource res
             left join Product p on p.id = r.productId
             where rr.tenantId = :tenantId
-              and rr.status = :finalizedStatus
+              and rr.status in :confirmedStatuses
               and rr.type <> :internalType
               and rr.confirmedAt is not null
               and rr.confirmedAt >= :fromInclusive
@@ -93,7 +94,7 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             """)
     List<Object[]> aggregateReservationsByProduct(
             @Param("tenantId") Long tenantId,
-            @Param("finalizedStatus") ReservationRequest.Status finalizedStatus,
+            @Param("confirmedStatuses") Collection<ReservationRequest.Status> confirmedStatuses,
             @Param("internalType") ReservationRequest.Type internalType,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toInclusive") OffsetDateTime toInclusive);

@@ -85,7 +85,16 @@ public class ReservationRequest {
         PENDING_PAYMENT,
         MANUAL_REVIEW,
         FINALIZED,
+        CHECKED_IN,
+        CHECKED_OUT,
         CANCELLED,
-        EXPIRED
+        EXPIRED;
+
+        /**
+         * Guest-facing confirmed booking lifecycle (finalized through end of stay).
+         */
+        public boolean isConfirmedStay() {
+            return this == FINALIZED || this == CHECKED_IN || this == CHECKED_OUT;
+        }
     }
 }

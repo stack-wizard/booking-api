@@ -159,7 +159,7 @@ public class PaymentService {
         ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
         if (reservationRequest.getStatus() == ReservationRequest.Status.CANCELLED
-                || reservationRequest.getStatus() == ReservationRequest.Status.FINALIZED
+                || reservationRequest.getStatus().isConfirmedStay()
                 || reservationRequest.getStatus() == ReservationRequest.Status.MANUAL_REVIEW
                 || reservationRequest.getStatus() == ReservationRequest.Status.EXPIRED) {
             throw new IllegalStateException("Reservation request is not payable in current status");

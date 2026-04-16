@@ -45,7 +45,8 @@ public class ReservationRequestService {
     private static final Set<String> REQUEST_TYPE_VALUES = Arrays.stream(ReservationRequest.Type.values())
             .map(Enum::name)
             .collect(Collectors.toUnmodifiableSet());
-    private static final Set<String> RESERVATION_STATUS_VALUES = Set.of("HOLD", "CONFIRMED", "CANCELLED");
+    private static final Set<String> RESERVATION_STATUS_VALUES = Set.of(
+            "HOLD", "CONFIRMED", "CHECKED_IN", "CHECKED_OUT", "CANCELLED");
     private static final Set<String> PAYMENT_INTENT_STATUS_VALUES = Set.of(
             "CREATED", "PENDING_CUSTOMER", "PROCESSING", "PAID", "FAILED", "CANCELED", "EXPIRED", "SUPERSEDED"
     );
@@ -110,8 +111,7 @@ public class ReservationRequestService {
         ReservationRequestAccessToken accessToken = accessTokenService.requireValidToken(token);
         ReservationRequest request = requestRepo.findById(accessToken.getReservationRequestId())
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
-        if (request.getStatus() != ReservationRequest.Status.FINALIZED
-                && request.getStatus() != ReservationRequest.Status.CANCELLED) {
+        if (!request.getStatus().isConfirmedStay() && request.getStatus() != ReservationRequest.Status.CANCELLED) {
             throw new IllegalStateException("Reservation request is not available for public access");
         }
         return request;
@@ -121,8 +121,7 @@ public class ReservationRequestService {
     public ReservationRequest updateCustomerData(Long requestId, String customerName, String customerEmail, String customerPhone) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
-        if (request.getStatus() == ReservationRequest.Status.CANCELLED
-                || request.getStatus() == ReservationRequest.Status.FINALIZED) {
+        if (request.getStatus() == ReservationRequest.Status.CANCELLED || request.getStatus().isConfirmedStay()) {
             throw new IllegalStateException("Customer data cannot be updated for request in status " + request.getStatus());
         }
 

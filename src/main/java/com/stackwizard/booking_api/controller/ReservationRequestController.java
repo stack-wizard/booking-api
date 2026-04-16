@@ -2,6 +2,10 @@ package com.stackwizard.booking_api.controller;
 
 import com.stackwizard.booking_api.dto.CancellationExecuteRequest;
 import com.stackwizard.booking_api.dto.CancellationRequestDto;
+import com.stackwizard.booking_api.dto.CheckinReadinessDto;
+import com.stackwizard.booking_api.dto.CheckinResultDto;
+import com.stackwizard.booking_api.dto.CheckoutReadinessDto;
+import com.stackwizard.booking_api.dto.CheckoutResultDto;
 import com.stackwizard.booking_api.dto.ReservationRequestCustomerPatchRequest;
 import com.stackwizard.booking_api.dto.ReservationRequestDto;
 import com.stackwizard.booking_api.dto.ReservationRequestSearchCriteria;
@@ -14,6 +18,7 @@ import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
 import com.stackwizard.booking_api.service.CancellationService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
+import com.stackwizard.booking_api.service.ReservationStayService;
 import com.stackwizard.booking_api.service.TenantConfigService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
@@ -43,6 +48,7 @@ public class ReservationRequestController {
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestDtoMapper dtoMapper;
     private final ReservationRequestExportService exportService;
+    private final ReservationStayService reservationStayService;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
@@ -50,7 +56,8 @@ public class ReservationRequestController {
                                         ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider,
                                         TenantConfigService tenantConfigService,
                                         ReservationRequestDtoMapper dtoMapper,
-                                        ReservationRequestExportService exportService) {
+                                        ReservationRequestExportService exportService,
+                                        ReservationStayService reservationStayService) {
         this.service = service;
         this.reservationService = reservationService;
         this.cancellationService = cancellationService;
@@ -58,6 +65,7 @@ public class ReservationRequestController {
         this.tenantConfigService = tenantConfigService;
         this.dtoMapper = dtoMapper;
         this.exportService = exportService;
+        this.reservationStayService = reservationStayService;
     }
 
     @GetMapping
@@ -128,6 +136,26 @@ public class ReservationRequestController {
     public ResponseEntity<Void> finalizeRequest(@PathVariable Long id) {
         reservationService.finalizeRequest(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/{id}/check-in-readiness")
+    public ResponseEntity<CheckinReadinessDto> checkInReadiness(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationStayService.getCheckinReadiness(id));
+    }
+
+    @GetMapping("/{id}/checkout-readiness")
+    public ResponseEntity<CheckoutReadinessDto> checkoutReadiness(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationStayService.getCheckoutReadiness(id));
+    }
+
+    @PostMapping("/{id}/check-in")
+    public ResponseEntity<CheckinResultDto> checkIn(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationStayService.checkIn(id));
+    }
+
+    @PostMapping("/{id}/check-out")
+    public ResponseEntity<CheckoutResultDto> checkOut(@PathVariable Long id) {
+        return ResponseEntity.ok(reservationStayService.checkOut(id));
     }
 
     @PostMapping("/{id}/send-confirmation-email")

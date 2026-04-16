@@ -1,5 +1,7 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.CheckoutInvoiceWarningDto;
+import com.stackwizard.booking_api.dto.InvoiceCheckoutGateResult;
 import com.stackwizard.booking_api.dto.InvoiceCreateItemRequest;
 import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.dto.InvoiceIssueRequest;
@@ -48,7 +50,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -110,7 +115,41 @@ public class InvoiceService {
     }
 
     public Optional<Invoice> findByReference(String referenceTable, Long referenceId) {
-        return invoiceRepo.findByReferenceTableAndReferenceId(referenceTable, referenceId);
+        List<Invoice> rows = listInvoicesByReference(referenceTable, referenceId);
+        if (rows.isEmpty()) {
+            return Optional.empty();
+        }
+        return rows.stream().max(Comparator.comparing(Invoice::getId));
+    }
+
+    /**
+     * All invoices referencing the given pair (e.g. several rows with reference_table {@code invoice}).
+     */
+    public List<Invoice> findAllByReference(String referenceTable, Long referenceId) {
+        return List.copyOf(listInvoicesByReference(referenceTable, referenceId));
+    }
+
+    /**
+     * Whether a deposit or stay invoice already has a reversal document (credit note or storno) as a child.
+     */
+    public boolean hasReversalChildForSourceInvoice(Long sourceInvoiceId, InvoiceType sourceInvoiceType) {
+        List<Invoice> children = listInvoicesByReference(REFERENCE_TABLE_INVOICE, sourceInvoiceId);
+        if (sourceInvoiceType == InvoiceType.DEPOSIT) {
+            return children.stream().anyMatch(c -> c.getInvoiceType() == InvoiceType.CREDIT_NOTE
+                    || c.getInvoiceType() == InvoiceType.DEPOSIT_STORNO);
+        }
+        if (sourceInvoiceType == InvoiceType.INVOICE || sourceInvoiceType == InvoiceType.ROOM_CHARGE) {
+            return children.stream().anyMatch(c -> c.getInvoiceType() == InvoiceType.CREDIT_NOTE
+                    || c.getInvoiceType() == InvoiceType.INVOICE_STORNO);
+        }
+        return false;
+    }
+
+    private List<Invoice> listInvoicesByReference(String referenceTable, Long referenceId) {
+        if (!StringUtils.hasText(referenceTable) || referenceId == null) {
+            return List.of();
+        }
+        return invoiceRepo.findByReferenceTableAndReferenceIdOrderByIdAsc(referenceTable.trim(), referenceId);
     }
 
     @Transactional(readOnly = true)
@@ -162,12 +201,69 @@ public class InvoiceService {
         return invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(requestId);
     }
 
+    /**
+     * Latest INVOICE for this request: prefers the row linked via {@code reservation_request} reference,
+     * otherwise any INVOICE on {@code reservationRequestId} (e.g. supplemental drafts with null reference).
+     */
+    public Optional<Invoice> findPrimaryInvoiceForReservationRequest(Long requestId) {
+        Optional<Invoice> byRef = listInvoicesByReference(REFERENCE_TABLE_RESERVATION_REQUEST, requestId).stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.INVOICE)
+                .max(Comparator.comparing(Invoice::getId));
+        if (byRef.isPresent()) {
+            return byRef;
+        }
+        return invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(requestId).stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.INVOICE)
+                .max(Comparator.comparing(Invoice::getId));
+    }
+
     public List<InvoiceItem> findItems(Long invoiceId) {
         return invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoiceId);
     }
 
     public List<InvoicePaymentAllocation> findAllocations(Long invoiceId) {
         return allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(invoiceId);
+    }
+
+    /**
+     * Refreshes payment status from allocations, then returns checkout blockers (draft / unpaid / fiscal)
+     * and non-blocking Opera posting warnings.
+     */
+    @Transactional
+    public InvoiceCheckoutGateResult evaluateCheckoutGateForReservationRequest(Long reservationRequestId) {
+        List<Invoice> invoices = invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reservationRequestId);
+        for (Invoice invoice : invoices) {
+            refreshInvoicePaymentStatus(invoice);
+        }
+        List<String> blockers = new ArrayList<>();
+        List<CheckoutInvoiceWarningDto> warnings = new ArrayList<>();
+        for (Invoice inv : invoices) {
+            if (inv.getStatus() == InvoiceStatus.DRAFT) {
+                blockers.add("Invoice " + inv.getInvoiceNumber() + " (" + inv.getInvoiceType() + ") is still a draft");
+                continue;
+            }
+            String ps = inv.getPaymentStatus();
+            if (ps == null || !"PAID".equalsIgnoreCase(ps)) {
+                blockers.add("Invoice " + inv.getInvoiceNumber() + " (" + inv.getInvoiceType()
+                        + ") payment status is " + (ps != null ? ps : "null") + " (expected PAID)");
+            }
+            InvoiceFiscalizationStatus fs = inv.getFiscalizationStatus();
+            if (fs == InvoiceFiscalizationStatus.REQUIRED || fs == InvoiceFiscalizationStatus.FAILED) {
+                blockers.add("Invoice " + inv.getInvoiceNumber() + " (" + inv.getInvoiceType()
+                        + ") fiscalization is " + (fs != null ? fs.name() : "null"));
+            }
+            OperaPostingStatus opera = inv.getOperaPostingStatus();
+            if (opera != null && opera != OperaPostingStatus.POSTED) {
+                warnings.add(CheckoutInvoiceWarningDto.builder()
+                        .invoiceId(inv.getId())
+                        .invoiceNumber(inv.getInvoiceNumber())
+                        .invoiceType(inv.getInvoiceType() != null ? inv.getInvoiceType().name() : null)
+                        .operaPostingStatus(opera.name())
+                        .message("Invoice is not posted to Opera (status: " + opera.name() + ")")
+                        .build());
+            }
+        }
+        return new InvoiceCheckoutGateResult(blockers, warnings);
     }
 
     @Transactional
@@ -233,11 +329,16 @@ public class InvoiceService {
 
     @Transactional
     public Invoice createDraftForFinalizedRequest(Long requestId) {
-        Optional<Invoice> existing = invoiceRepo.findByReferenceTableAndReferenceId(
-                REFERENCE_TABLE_RESERVATION_REQUEST, requestId);
-        if (existing.isPresent()) {
-            return existing.get();
+        Optional<Invoice> existingDraft = invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(requestId).stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.INVOICE && inv.getStatus() == InvoiceStatus.DRAFT)
+                .max(Comparator.comparing(Invoice::getId));
+        if (existingDraft.isPresent()) {
+            return existingDraft.get();
         }
+
+        boolean canonicalReservationRequestRefTaken = listInvoicesByReference(REFERENCE_TABLE_RESERVATION_REQUEST, requestId)
+                .stream()
+                .anyMatch(inv -> inv.getInvoiceType() == InvoiceType.INVOICE);
 
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
@@ -282,8 +383,8 @@ public class InvoiceService {
                 .status(InvoiceStatus.DRAFT)
                 .paymentStatus("UNPAID")
                 .fiscalizationStatus(InvoiceFiscalizationStatus.NOT_REQUIRED)
-                .referenceTable(REFERENCE_TABLE_RESERVATION_REQUEST)
-                .referenceId(requestId)
+                .referenceTable(canonicalReservationRequestRefTaken ? null : REFERENCE_TABLE_RESERVATION_REQUEST)
+                .referenceId(canonicalReservationRequestRefTaken ? null : requestId)
                 .reservationRequestId(requestId)
                 .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(currency)
@@ -563,10 +664,11 @@ public class InvoiceService {
             throw new IllegalStateException("Deposit invoice can be created only for PAID payment intents");
         }
 
-        Optional<Invoice> existing = invoiceRepo.findByReferenceTableAndReferenceId(
-                REFERENCE_TABLE_PAYMENT_INTENT, paymentIntent.getId());
-        if (existing.isPresent()) {
-            return existing.get();
+        Optional<Invoice> existingDeposit = listInvoicesByReference(REFERENCE_TABLE_PAYMENT_INTENT, paymentIntent.getId()).stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.DEPOSIT)
+                .findFirst();
+        if (existingDeposit.isPresent()) {
+            return existingDeposit.get();
         }
 
         Long requestId = paymentIntent.getReservationRequestId();
@@ -662,14 +764,34 @@ public class InvoiceService {
             throw new IllegalStateException("Storno cannot be created for storno invoice");
         }
 
-        InvoiceType stornoType = stornoTypeFor(source.getInvoiceType());
+        InvoiceType expectedStorno = stornoTypeFor(source.getInvoiceType());
+        List<Invoice> children = listInvoicesByReference(REFERENCE_TABLE_INVOICE, source.getId());
+        Optional<Invoice> existingSameStorno = children.stream()
+                .filter(c -> c.getInvoiceType() == expectedStorno)
+                .findFirst();
+        if (existingSameStorno.isPresent()) {
+            if (source.getStornoId() == null) {
+                source.setStornoId(existingSameStorno.get().getId());
+                invoiceRepo.save(source);
+            }
+            return existingSameStorno.get();
+        }
+        boolean hasCreditNote = children.stream().anyMatch(c -> c.getInvoiceType() == InvoiceType.CREDIT_NOTE);
+        if (hasCreditNote && (source.getInvoiceType() == InvoiceType.DEPOSIT
+                || source.getInvoiceType() == InvoiceType.INVOICE
+                || source.getInvoiceType() == InvoiceType.ROOM_CHARGE)) {
+            throw new IllegalStateException(
+                    "Cannot create storno for invoice " + source.getId()
+                            + ": a credit note already references this invoice");
+        }
+
         int year = LocalDate.now().getYear();
-        int seq = nextSequence(source.getTenantId(), stornoType, year);
-        String invoiceNumber = buildNumber(stornoType, year, seq);
+        int seq = nextSequence(source.getTenantId(), expectedStorno, year);
+        String invoiceNumber = buildNumber(expectedStorno, year, seq);
 
         Invoice storno = Invoice.builder()
                 .tenantId(source.getTenantId())
-                .invoiceType(stornoType)
+                .invoiceType(expectedStorno)
                 .invoiceNumber(invoiceNumber)
                 .invoiceDate(LocalDate.now())
                 .customerName(source.getCustomerName())
@@ -834,6 +956,10 @@ public class InvoiceService {
         BigDecimal tax1Amount = amount(netAmount.multiply(tax1Percent).divide(HUNDRED, 8, RoundingMode.HALF_UP));
         BigDecimal tax2Amount = amount(netAmount.multiply(tax2Percent).divide(HUNDRED, 8, RoundingMode.HALF_UP));
 
+        boolean canonicalReservationRequestRefTaken = listInvoicesByReference(REFERENCE_TABLE_RESERVATION_REQUEST, reservationRequestId)
+                .stream()
+                .anyMatch(inv -> inv.getInvoiceType() == InvoiceType.INVOICE);
+
         Invoice invoice = Invoice.builder()
                 .tenantId(request.getTenantId())
                 .invoiceType(InvoiceType.INVOICE)
@@ -847,8 +973,8 @@ public class InvoiceService {
                 .status(InvoiceStatus.ISSUED)
                 .paymentStatus("UNPAID")
                 .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
-                .referenceTable(REFERENCE_TABLE_RESERVATION_REQUEST)
-                .referenceId(reservationRequestId)
+                .referenceTable(canonicalReservationRequestRefTaken ? null : REFERENCE_TABLE_RESERVATION_REQUEST)
+                .referenceId(canonicalReservationRequestRefTaken ? null : reservationRequestId)
                 .reservationRequestId(reservationRequestId)
                 .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(normalizeCurrency(currency))
@@ -887,6 +1013,93 @@ public class InvoiceService {
     public Invoice issueSystemFinalInvoiceForRequest(Long requestId) {
         Invoice invoice = createDraftForFinalizedRequest(requestId);
         return issueSystemInvoiceIfNeeded(invoice);
+    }
+
+    /**
+     * After a deposit is storno'd, net allocations on the underlying CHARGE free capacity again.
+     * Applies at most {@code min(unpaid invoice balance, open CHARGE capacity)} per transaction; skips when
+     * nothing is available on the payment or the invoice is already covered.
+     */
+    @Transactional
+    public void allocateReleasedDepositPaymentsToFinalRequestInvoice(Long reservationRequestId) {
+        Optional<Invoice> finalOpt = resolveFinalInvoiceForDepositAllocation(reservationRequestId);
+        if (finalOpt.isEmpty()) {
+            return;
+        }
+        Invoice finalInvoice = finalOpt.get();
+
+        BigDecimal invoiceTotal = money(zeroSafe(finalInvoice.getTotalGross()));
+        if (invoiceTotal.compareTo(BigDecimal.ZERO) <= 0) {
+            refreshInvoicePaymentStatus(finalInvoice);
+            return;
+        }
+
+        BigDecimal covered = money(zeroSafe(allocationRepo.sumAllocatedByInvoiceId(finalInvoice.getId())));
+        BigDecimal remaining = money(invoiceTotal.subtract(covered));
+        if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
+            refreshInvoicePaymentStatus(finalInvoice);
+            return;
+        }
+
+        for (Long paymentTransactionId : collectStornoedDepositChargeTransactionIds(reservationRequestId)) {
+            if (remaining.compareTo(BigDecimal.ZERO) <= 0) {
+                break;
+            }
+            PaymentTransaction pt = paymentTransactionService.requireById(paymentTransactionId);
+            if (!PAYMENT_TRANSACTION_TYPE_CHARGE.equals(normalizePaymentTransactionType(pt.getTransactionType()))) {
+                continue;
+            }
+            if (!"POSTED".equalsIgnoreCase(pt.getStatus())) {
+                continue;
+            }
+            BigDecimal alreadyAllocated = zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(paymentTransactionId));
+            BigDecimal refundedAmount = zeroSafe(
+                    paymentTransactionService.refundedAmountForSourcePaymentTransaction(paymentTransactionId));
+            BigDecimal chargeCapacity = money(zeroSafe(pt.getAmount()).subtract(alreadyAllocated).subtract(refundedAmount));
+            if (chargeCapacity.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            BigDecimal toAllocate = money(remaining.min(chargeCapacity));
+            if (toAllocate.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
+            }
+            allocatePaymentToInvoice(finalInvoice.getId(), paymentTransactionId, toAllocate, ALLOCATION_TYPE_SETTLEMENT);
+            covered = money(zeroSafe(allocationRepo.sumAllocatedByInvoiceId(finalInvoice.getId())));
+            remaining = money(invoiceTotal.subtract(covered));
+        }
+        refreshInvoicePaymentStatus(finalInvoice);
+    }
+
+    /**
+     * Prefer an open INVOICE draft for the request; otherwise the canonical INVOICE linked by
+     * {@code reservation_request} reference (e.g. issued final).
+     */
+    private Optional<Invoice> resolveFinalInvoiceForDepositAllocation(Long reservationRequestId) {
+        List<Invoice> onRequest = invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reservationRequestId);
+        Optional<Invoice> draft = onRequest.stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.INVOICE && inv.getStatus() == InvoiceStatus.DRAFT)
+                .max(Comparator.comparing(Invoice::getId));
+        if (draft.isPresent()) {
+            return draft;
+        }
+        return listInvoicesByReference(REFERENCE_TABLE_RESERVATION_REQUEST, reservationRequestId).stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.INVOICE)
+                .max(Comparator.comparing(Invoice::getId));
+    }
+
+    private List<Long> collectStornoedDepositChargeTransactionIds(Long reservationRequestId) {
+        LinkedHashSet<Long> ordered = new LinkedHashSet<>();
+        for (Invoice inv : invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reservationRequestId)) {
+            if (inv.getInvoiceType() != InvoiceType.DEPOSIT || inv.getStornoId() == null) {
+                continue;
+            }
+            for (InvoicePaymentAllocation a : allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(inv.getId())) {
+                if (a.getAllocatedAmount() != null && a.getAllocatedAmount().compareTo(BigDecimal.ZERO) > 0) {
+                    ordered.add(a.getPaymentTransactionId());
+                }
+            }
+        }
+        return new ArrayList<>(ordered);
     }
 
     @Transactional
