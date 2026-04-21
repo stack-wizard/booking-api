@@ -53,21 +53,20 @@
           "response": []
         },
         {
-          "name": "Signup",
+          "name": "Create user (super admin)",
           "request": {
-            "auth": { "type": "noauth" },
             "method": "POST",
             "header": [
               { "key": "Content-Type", "value": "application/json" }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenantId\": 1,\n  \"username\": \"newstaff\",\n  \"password\": \"staff123\",\n  \"role\": \"STAFF\"\n}"
+              "raw": "{\n  \"tenantId\": 1,\n  \"username\": \"newcashier\",\n  \"password\": \"cashier123\",\n  \"role\": \"CASHIER\",\n  \"employeeNumber\": \"12\"\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/api/auth/signup",
+              "raw": "{{baseUrl}}/api/management/users",
               "host": ["{{baseUrl}}"],
-              "path": ["api","auth","signup"]
+              "path": ["api","management","users"]
             }
           },
           "response": []

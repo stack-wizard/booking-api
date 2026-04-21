@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.model.CancellationRequest;
 import com.stackwizard.booking_api.model.LocationNode;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
@@ -30,6 +31,8 @@ import java.util.regex.Pattern;
 @Component
 public class ReservationConfirmationEmailRenderer {
     private static final String TEMPLATE_PATH = "templates/reservation-confirmation-email.html";
+    private static final String TEMPLATE_AMENDMENT_PATH = "templates/reservation-amendment-email.html";
+    private static final String TEMPLATE_CANCELLATION_PATH = "templates/reservation-cancellation-email.html";
     private static final Pattern BULLET_SPLIT_PATTERN = Pattern.compile("\\r?\\n|\\s*[;]\\s*|\\s*[\\u2022]\\s*");
     private static final String DEFAULT_ARRIVAL_NOTE =
             "Please arrive at the reception desk upon arrival and present this confirmation.";
@@ -88,6 +91,211 @@ public class ReservationConfirmationEmailRenderer {
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to render reservation confirmation email", ex);
         }
+    }
+
+    /**
+     * Amendment email: same financial summary as confirmation, different hero (updated booking lines).
+     */
+    public RenderedEmail renderAmendmentEmail(ReservationRequest request,
+                                              List<Reservation> reservations,
+                                              Map<Long, Product> productsById,
+                                              PaymentService.RequestPaymentSummary paymentSummary,
+                                              TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
+        try {
+            List<Reservation> orderedReservations = reservations.stream()
+                    .sorted(Comparator
+                            .comparing(Reservation::getStartsAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                            .thenComparing(Reservation::getId, Comparator.nullsLast(Long::compareTo)))
+                    .toList();
+            Locale locale = resolveLocale(emailConfig.locale());
+            String template = new ClassPathResource(TEMPLATE_AMENDMENT_PATH).getContentAsString(StandardCharsets.UTF_8);
+            String currency = resolveCurrency(orderedReservations);
+            BigDecimal subtotal = money(paymentSummary != null ? paymentSummary.totalAmount() : null);
+            BigDecimal depositAmount = money(paymentSummary != null ? paymentSummary.dueNowAmount() : null);
+            BigDecimal remainingAtVenue = subtotal.subtract(depositAmount).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+
+            Map<String, String> values = new LinkedHashMap<>();
+            values.put("PREHEADER", esc("Your reservation has been updated."));
+            values.put("BRAND_NAME", esc(firstNonBlank(emailConfig.brandName(), "Booking")));
+            values.put("BRAND_NAME_UPPER", esc(firstNonBlank(emailConfig.brandName(), "Booking").toUpperCase(locale)));
+            values.put("HERO_TITLE", esc("Reservation updated"));
+            values.put("HERO_SUBTITLE", esc("Your booking details have been changed."));
+            values.put("BADGE_TEXT", esc("Updated"));
+            values.put("BOOKING_CARDS", buildBookingCards(orderedReservations, productsById, locale));
+            values.put("PRICE_ROWS", buildPriceRows(orderedReservations, productsById, currency, locale));
+            values.put("SUBTOTAL_AMOUNT", esc(formatMoney(subtotal, currency)));
+            values.put("DEPOSIT_LABEL", esc(resolveDepositLabel(paymentSummary)));
+            values.put("DEPOSIT_AMOUNT", esc(formatMoney(depositAmount, currency)));
+            values.put("REMAINING_AMOUNT", esc(formatMoney(remainingAtVenue, currency)));
+            values.put("INCLUDES_BLOCK", buildIncludesBlock(orderedReservations, productsById));
+            values.put("ARRIVAL_NOTE_BLOCK", buildArrivalNoteBlock(emailConfig));
+            values.put("FOOTER_LOCATION", esc(firstNonBlank(emailConfig.footerLocation(), "")));
+            values.put("CONTACT_LINE", buildContactLine(emailConfig));
+
+            String subject = "Reservation updated - " + firstNonBlank(emailConfig.brandName(), "Booking")
+                    + " #" + (request.getId() != null ? request.getId().toString() : "-");
+            String plainText = buildPlainText(
+                    request,
+                    orderedReservations,
+                    productsById,
+                    paymentSummary,
+                    remainingAtVenue,
+                    currency,
+                    locale,
+                    emailConfig,
+                    null,
+                    null
+            ).replaceFirst("^Reservation Confirmed", "Reservation updated");
+            return new RenderedEmail(subject, plainText, applyTemplate(template, values));
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to render reservation amendment email", ex);
+        }
+    }
+
+    /**
+     * Sent after cancellation completes; lists cancelled lines and settlement summary from the cancellation request.
+     */
+    public RenderedEmail renderCancellationEmail(ReservationRequest request,
+                                                 List<Reservation> reservations,
+                                                 Map<Long, Product> productsById,
+                                                 CancellationRequest cancellation,
+                                                 TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
+        try {
+            List<Reservation> orderedReservations = reservations.stream()
+                    .sorted(Comparator
+                            .comparing(Reservation::getStartsAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                            .thenComparing(Reservation::getId, Comparator.nullsLast(Long::compareTo)))
+                    .toList();
+            Locale locale = resolveLocale(emailConfig.locale());
+            String template = new ClassPathResource(TEMPLATE_CANCELLATION_PATH).getContentAsString(StandardCharsets.UTF_8);
+            String currency = firstNonBlank(cancellation != null ? cancellation.getCurrency() : null,
+                    resolveCurrency(orderedReservations));
+
+            Map<String, String> values = new LinkedHashMap<>();
+            values.put("PREHEADER", esc("Your booking has been cancelled."));
+            values.put("BRAND_NAME_UPPER", esc(firstNonBlank(emailConfig.brandName(), "Booking").toUpperCase(locale)));
+            values.put("BOOKING_CARDS", buildBookingCards(orderedReservations, productsById, locale));
+            values.put("SETTLEMENT_BLOCK", buildCancellationSettlementBlock(cancellation, currency, locale));
+            values.put("INCLUDES_BLOCK", buildIncludesBlock(orderedReservations, productsById));
+            values.put("FOOTER_LOCATION", esc(firstNonBlank(emailConfig.footerLocation(), "")));
+            values.put("CONTACT_LINE", buildContactLine(emailConfig));
+
+            String subject = "Booking cancelled - " + firstNonBlank(emailConfig.brandName(), "Booking")
+                    + " #" + (request.getId() != null ? request.getId().toString() : "-");
+            String plainText = buildCancellationPlainText(request, orderedReservations, productsById, cancellation, currency, locale, emailConfig);
+            return new RenderedEmail(subject, plainText, applyTemplate(template, values));
+        } catch (IOException ex) {
+            throw new IllegalStateException("Failed to render reservation cancellation email", ex);
+        }
+    }
+
+    private String buildCancellationSettlementBlock(CancellationRequest cancellation, String currency, Locale locale) {
+        if (cancellation == null) {
+            return "";
+        }
+        StringBuilder inner = new StringBuilder();
+        BigDecimal refund = money(cancellation.getRefundAmount());
+        BigDecimal penalty = money(cancellation.getPenaltyAmount());
+        BigDecimal credit = money(cancellation.getCreditAmount());
+        String mode = cancellation.getSettlementMode() != null ? cancellation.getSettlementMode().trim().toUpperCase(Locale.ROOT) : "";
+
+        if (refund.compareTo(BigDecimal.ZERO) > 0) {
+            inner.append(settlementRow("Refund", formatMoney(refund, currency)));
+        }
+        if (penalty.compareTo(BigDecimal.ZERO) > 0) {
+            inner.append(settlementRow("Penalty retained", formatMoney(penalty, currency)));
+        }
+        if (credit.compareTo(BigDecimal.ZERO) > 0) {
+            inner.append(settlementRow("Booking credit", formatMoney(credit, currency)));
+        }
+        if (inner.isEmpty()) {
+            String fallback = "NONE".equals(mode)
+                    ? "No refund or credit applies for this cancellation."
+                    : ("Settlement: " + firstNonBlank(mode, "—") + ".");
+            inner.append("<tr><td colspan=\"2\" style=\"padding:18px 20px; color:#f6efe0; font-size:15px; line-height:1.6;\">"
+                    + esc(fallback)
+                    + "</td></tr>");
+        }
+
+        return "<tr><td style=\"padding:12px 32px 0;\">"
+                + "<div style=\"font-size:11px; letter-spacing:4px; text-transform:uppercase; color:#ae9e73; margin-bottom:14px;\">Settlement</div>"
+                + "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" style=\"border:1px solid #2c2b20; background:#0a0b07;\">"
+                + inner
+                + "</table></td></tr>";
+    }
+
+    private String settlementRow(String label, String amountRight) {
+        return "<tr>"
+                + "<td style=\"padding:16px 20px; border-bottom:1px solid #202116; color:#8c886f; font-size:14px;\">"
+                + esc(label)
+                + "</td>"
+                + "<td align=\"right\" style=\"padding:16px 20px; border-bottom:1px solid #202116; color:#f6efe0; font-size:14px; white-space:nowrap;\">"
+                + esc(amountRight)
+                + "</td>"
+                + "</tr>";
+    }
+
+    private String buildCancellationPlainText(ReservationRequest request,
+                                              List<Reservation> reservations,
+                                              Map<Long, Product> productsById,
+                                              CancellationRequest cancellation,
+                                              String currency,
+                                              Locale locale,
+                                              TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
+        StringBuilder text = new StringBuilder();
+        text.append("Booking cancelled").append(System.lineSeparator())
+                .append(firstNonBlank(emailConfig.brandName(), "Booking")).append(System.lineSeparator())
+                .append(System.lineSeparator())
+                .append("Reservation: ")
+                .append(request.getId() != null ? "#" + request.getId() : "-")
+                .append(System.lineSeparator())
+                .append(System.lineSeparator());
+
+        for (Reservation reservation : reservations) {
+            Product product = resolveProduct(reservation, productsById);
+            text.append("- ").append(resolveTitle(reservation, product)).append(System.lineSeparator())
+                    .append("  Date: ").append(formatDate(reservation, locale)).append(System.lineSeparator())
+                    .append("  Hours: ").append(formatTimeRange(reservation)).append(System.lineSeparator())
+                    .append("  Capacity: ").append(buildGuestLabel(reservation)).append(System.lineSeparator())
+                    .append("  Reservation ID: ").append(reservation.getId() != null ? "#" + reservation.getId() : "-").append(System.lineSeparator());
+        }
+
+        if (cancellation != null) {
+            text.append(System.lineSeparator()).append("Settlement").append(System.lineSeparator());
+            if (money(cancellation.getRefundAmount()).compareTo(BigDecimal.ZERO) > 0) {
+                text.append("Refund: ").append(formatMoney(money(cancellation.getRefundAmount()), currency)).append(System.lineSeparator());
+            }
+            if (money(cancellation.getPenaltyAmount()).compareTo(BigDecimal.ZERO) > 0) {
+                text.append("Penalty retained: ").append(formatMoney(money(cancellation.getPenaltyAmount()), currency)).append(System.lineSeparator());
+            }
+            if (money(cancellation.getCreditAmount()).compareTo(BigDecimal.ZERO) > 0) {
+                text.append("Booking credit: ").append(formatMoney(money(cancellation.getCreditAmount()), currency)).append(System.lineSeparator());
+            }
+        }
+
+        List<String> highlights = new ArrayList<>();
+        for (Reservation reservation : reservations) {
+            Product product = resolveProduct(reservation, productsById);
+            for (String item : extractHighlights(product != null ? product.getDescription() : null)) {
+                if (!highlights.contains(item)) {
+                    highlights.add(item);
+                }
+            }
+        }
+        if (!highlights.isEmpty()) {
+            text.append(System.lineSeparator()).append("Includes").append(System.lineSeparator());
+            for (String item : highlights) {
+                text.append("- ").append(item).append(System.lineSeparator());
+            }
+        }
+
+        if (StringUtils.hasText(emailConfig.supportEmail())) {
+            text.append(System.lineSeparator())
+                    .append("Questions? Contact us at ")
+                    .append(emailConfig.supportEmail().trim())
+                    .append(System.lineSeparator());
+        }
+        return text.toString().trim();
     }
 
     private String buildBookingCards(List<Reservation> reservations,

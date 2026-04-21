@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -57,6 +58,19 @@ public class GlobalExceptionHandler {
                                                              HttpServletRequest request) {
         String message = StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : "HTTP method not supported";
         return buildError(HttpStatus.METHOD_NOT_ALLOWED, message, request.getRequestURI());
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiError> handleResponseStatus(ResponseStatusException ex, HttpServletRequest request) {
+        HttpStatus status = HttpStatus.resolve(ex.getStatusCode().value());
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        String message = StringUtils.hasText(ex.getReason()) ? ex.getReason() : status.getReasonPhrase();
+        if (status.is5xxServerError()) {
+            log.error("ResponseStatusException on {}: {}", request.getRequestURI(), message, ex);
+        }
+        return buildError(status, message, request.getRequestURI());
     }
 
     @ExceptionHandler(Exception.class)

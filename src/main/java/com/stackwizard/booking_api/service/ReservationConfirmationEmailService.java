@@ -7,19 +7,14 @@ import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
-import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.mail.javamail.JavaMailSenderImpl;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 import java.util.stream.Collectors;
 
 public class ReservationConfirmationEmailService {
@@ -124,23 +119,14 @@ public class ReservationConfirmationEmailService {
                 renderer.render(request, reservations, productsById, paymentSummary, emailConfig, publicCancellation, publicAccessUrl);
 
         try {
-            JavaMailSenderImpl mailSender = buildMailSender(emailConfig);
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, StandardCharsets.UTF_8.name());
             String customerEmail = request.getCustomerEmail().trim();
-            String senderEmail = emailConfig.emailFrom().trim();
-            helper.setTo(customerEmail);
-            helper.setFrom(emailConfig.emailFrom());
-            if (!senderEmail.equalsIgnoreCase(customerEmail)) {
-                helper.addBcc(senderEmail);
-            }
-            if (StringUtils.hasText(emailConfig.emailReplyTo())) {
-                helper.setReplyTo(emailConfig.emailReplyTo());
-            }
-            helper.setSubject(rendered.subject());
-            helper.setText(rendered.plainText(), rendered.html());
-
-            mailSender.send(message);
+            ReservationEmailDispatchHelper.sendMime(
+                    emailConfig,
+                    customerEmail,
+                    rendered.subject(),
+                    rendered.plainText(),
+                    rendered.html()
+            );
             OffsetDateTime sentAt = OffsetDateTime.now();
             request.setConfirmationEmailSentAt(sentAt);
             reservationRequestRepository.save(request);
@@ -153,25 +139,6 @@ public class ReservationConfirmationEmailService {
                     ex
             );
         }
-    }
-
-    private JavaMailSenderImpl buildMailSender(TenantEmailConfigResolver.EmailResolvedConfig emailConfig) {
-        JavaMailSenderImpl mailSender = new JavaMailSenderImpl();
-        mailSender.setHost(emailConfig.smtpHost());
-        mailSender.setPort(emailConfig.smtpPort());
-        if (StringUtils.hasText(emailConfig.smtpUsername())) {
-            mailSender.setUsername(emailConfig.smtpUsername());
-        }
-        if (StringUtils.hasText(emailConfig.smtpPassword())) {
-            mailSender.setPassword(emailConfig.smtpPassword());
-        }
-
-        Properties props = mailSender.getJavaMailProperties();
-        props.setProperty("mail.transport.protocol", "smtp");
-        props.setProperty("mail.smtp.auth", String.valueOf(emailConfig.smtpAuth()));
-        props.setProperty("mail.smtp.starttls.enable", String.valueOf(emailConfig.smtpStarttlsEnabled()));
-        props.setProperty("mail.smtp.ssl.enable", String.valueOf(emailConfig.smtpSslEnabled()));
-        return mailSender;
     }
 
     private String rootCauseMessage(Throwable throwable) {

@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.PublicCancellationPreviewDto;
+import com.stackwizard.booking_api.model.CancellationRequest;
 import com.stackwizard.booking_api.model.LocationNode;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
@@ -101,5 +102,115 @@ class ReservationConfirmationEmailRendererTest {
         assertThat(rendered.plainText()).contains("Reservation: #285");
         assertThat(rendered.plainText()).contains("Remaining at venue: 147.50 EUR");
         assertThat(rendered.plainText()).contains("If you cancel now, 147.50 EUR will be refunded.");
+    }
+
+    @Test
+    void rendersCancellationEmailWithSettlement() {
+        ReservationConfirmationEmailRenderer renderer = new ReservationConfirmationEmailRenderer();
+        TenantEmailConfigResolver.EmailResolvedConfig emailConfig = new TenantEmailConfigResolver.EmailResolvedConfig(
+                "smtp.example.com",
+                587,
+                "u",
+                "secret",
+                true,
+                true,
+                false,
+                "info@beachhvar.com",
+                "info@beachhvar.com",
+                "Beach Club Hvar",
+                "info@beachhvar.com",
+                "Hvar",
+                "Arrive at reception.",
+                "en"
+        );
+
+        Product product = Product.builder().id(10L).name("Luxury Sunbed").description("Water").build();
+        Reservation reservation = Reservation.builder()
+                .id(1L)
+                .productId(10L)
+                .requestedResource(Resource.builder().name("Spot").product(product).build())
+                .startsAt(LocalDateTime.of(2026, 5, 15, 10, 0))
+                .endsAt(LocalDateTime.of(2026, 5, 15, 19, 0))
+                .adults(2)
+                .children(0)
+                .infants(0)
+                .currency("EUR")
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+
+        CancellationRequest cancellation = CancellationRequest.builder()
+                .refundAmount(new BigDecimal("50.00"))
+                .penaltyAmount(new BigDecimal("10.00"))
+                .creditAmount(BigDecimal.ZERO)
+                .currency("EUR")
+                .settlementMode("CASH_REFUND")
+                .build();
+
+        ReservationConfirmationEmailRenderer.RenderedEmail rendered = renderer.renderCancellationEmail(
+                ReservationRequest.builder().id(99L).build(),
+                List.of(reservation),
+                Map.of(product.getId(), product),
+                cancellation,
+                emailConfig
+        );
+
+        assertThat(rendered.subject()).isEqualTo("Booking cancelled - Beach Club Hvar #99");
+        assertThat(rendered.html()).contains("Booking cancelled");
+        assertThat(rendered.html()).contains("Refund");
+        assertThat(rendered.plainText()).contains("Booking cancelled");
+        assertThat(rendered.plainText()).contains("Refund: 50.00 EUR");
+    }
+
+    @Test
+    void rendersAmendmentEmail() {
+        ReservationConfirmationEmailRenderer renderer = new ReservationConfirmationEmailRenderer();
+        TenantEmailConfigResolver.EmailResolvedConfig emailConfig = new TenantEmailConfigResolver.EmailResolvedConfig(
+                "smtp.example.com",
+                587,
+                "u",
+                "secret",
+                true,
+                true,
+                false,
+                "info@beachhvar.com",
+                "info@beachhvar.com",
+                "Beach Club Hvar",
+                "info@beachhvar.com",
+                "Hvar",
+                "Arrive at reception.",
+                "en"
+        );
+
+        Product product = Product.builder().id(10L).name("Luxury Sunbed").build();
+        Reservation reservation = Reservation.builder()
+                .id(1L)
+                .productId(10L)
+                .requestedResource(Resource.builder().name("Spot").product(product).build())
+                .startsAt(LocalDateTime.of(2026, 5, 15, 10, 0))
+                .endsAt(LocalDateTime.of(2026, 5, 15, 19, 0))
+                .adults(2)
+                .children(0)
+                .infants(0)
+                .currency("EUR")
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+
+        ReservationConfirmationEmailRenderer.RenderedEmail rendered = renderer.renderAmendmentEmail(
+                ReservationRequest.builder().id(88L).build(),
+                List.of(reservation),
+                Map.of(product.getId(), product),
+                new PaymentService.RequestPaymentSummary(
+                        new BigDecimal("100.00"),
+                        new BigDecimal("50.00"),
+                        new BigDecimal("50.00"),
+                        BigDecimal.ZERO,
+                        "PAID"
+                ),
+                emailConfig
+        );
+
+        assertThat(rendered.subject()).isEqualTo("Reservation updated - Beach Club Hvar #88");
+        assertThat(rendered.html()).contains("Reservation updated");
+        assertThat(rendered.html()).doesNotContain("[[HERO_TITLE]]");
     }
 }

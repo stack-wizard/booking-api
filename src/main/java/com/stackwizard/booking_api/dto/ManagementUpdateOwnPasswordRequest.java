@@ -1,0 +1,9 @@
+package com.stackwizard.booking_api.dto;
+
+import lombok.Data;
+
+@Data
+public class ManagementUpdateOwnPasswordRequest {
+    private String currentPassword;
+    private String newPassword;
+}

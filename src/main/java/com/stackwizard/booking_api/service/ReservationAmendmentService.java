@@ -20,6 +20,7 @@ import com.stackwizard.booking_api.repository.ReservationRequestAmendmentReposit
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.repository.ResourceCompositionRepository;
 import com.stackwizard.booking_api.repository.ResourceRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +47,7 @@ public class ReservationAmendmentService {
     private final ProductRepository productRepo;
     private final ResourceCompositionRepository compositionRepo;
     private final ReservationRequestAmendmentRepository amendmentRepo;
+    private final ApplicationEventPublisher eventPublisher;
     /** Same pattern as {@link PaymentService}: no Jackson {@code ObjectMapper} bean in this app. */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -56,7 +58,8 @@ public class ReservationAmendmentService {
             ResourceRepository resourceRepo,
             ProductRepository productRepo,
             ResourceCompositionRepository compositionRepo,
-            ReservationRequestAmendmentRepository amendmentRepo) {
+            ReservationRequestAmendmentRepository amendmentRepo,
+            ApplicationEventPublisher eventPublisher) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.allocationRepo = allocationRepo;
@@ -64,6 +67,7 @@ public class ReservationAmendmentService {
         this.productRepo = productRepo;
         this.compositionRepo = compositionRepo;
         this.amendmentRepo = amendmentRepo;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional(readOnly = true)
@@ -151,6 +155,8 @@ public class ReservationAmendmentService {
                 .requestPayload(payload)
                 .failureReason(null)
                 .build());
+
+        eventPublisher.publishEvent(new ReservationRequestAmendedEvent(reservationRequestId));
 
         return ReservationRequestAmendmentApplyResponse.builder()
                 .amendmentId(amendment.getId())

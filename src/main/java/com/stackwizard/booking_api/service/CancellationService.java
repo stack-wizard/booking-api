@@ -135,9 +135,9 @@ public class CancellationService {
             return unavailablePreview(reservationRequest, "Reservation is not eligible for online cancellation.");
         }
 
-        List<Reservation> reservations = reservationRepo.findByRequestId(reservationRequestId);
+        List<Reservation> reservations = activeReservationsOnly(reservationRepo.findByRequestId(reservationRequestId));
         if (reservations.isEmpty()) {
-            return unavailablePreview(reservationRequest, "Reservation has no booked items to cancel.");
+            return unavailablePreview(reservationRequest, "No active booked items to cancel (lines may already be cancelled).");
         }
 
         try {
@@ -211,9 +211,10 @@ public class CancellationService {
             throw new IllegalStateException("Only FINALIZED reservation requests can be cancelled");
         }
 
-        List<Reservation> reservations = reservationRepo.findByRequestId(reservationRequestId);
+        List<Reservation> reservations = activeReservationsOnly(reservationRepo.findByRequestId(reservationRequestId));
         if (reservations.isEmpty()) {
-            throw new IllegalStateException("Reservation request has no reservations");
+            throw new IllegalStateException(
+                    "No active reservations to cancel; all lines are already cancelled (e.g. after amendments).");
         }
 
         Invoice sourceInvoice = invoiceService.findCancellationSourceInvoiceByRequestId(reservationRequestId).orElse(null);
@@ -223,6 +224,12 @@ public class CancellationService {
                 .map(Reservation::getGrossAmount)
                 .map(this::zeroSafe)
                 .reduce(BigDecimal.ZERO, BigDecimal::add));
+
+        BigDecimal paidBaseAmount = sourceInvoice != null
+                ? money(abs(sourceInvoice.getTotalGross()))
+                : sourceCharge != null
+                ? money(abs(sourceCharge.getAmount()))
+                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
 
         String requestedSettlementMode = request != null ? normalizeSettlementMode(request.getSettlementMode()) : null;
         String policyEvaluationSettlementMode = allowSettlementOverride ? null : requestedSettlementMode;
@@ -235,15 +242,22 @@ public class CancellationService {
                 .map(CancellationPolicyService.ReservationCancellationEvaluation::releasedAmount)
                 .map(this::zeroSafe)
                 .reduce(BigDecimal.ZERO, BigDecimal::add));
+        // Admin cancellation: when policy releases 0 (e.g. after cutoff, NONE release) but the guest still paid a
+        // deposit, allow refund/credit up to min(paid, active booking gross). Deposit-only lines (gross sum 0)
+        // still use the paid deposit as the cap.
+        if (allowSettlementOverride
+                && (MODE_CASH_REFUND.equals(requestedSettlementMode) || MODE_CUSTOMER_CREDIT.equals(requestedSettlementMode))
+                && releasedByPolicy.compareTo(BigDecimal.ZERO) <= 0
+                && paidBaseAmount.compareTo(BigDecimal.ZERO) > 0) {
+            if (cancelledAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                releasedByPolicy = paidBaseAmount;
+            } else {
+                releasedByPolicy = money(min(paidBaseAmount, cancelledAmount));
+            }
+        }
         String settlementMode = requestedSettlementMode != null
                 ? requestedSettlementMode
                 : resolveOverallSettlementMode(evaluations, null);
-
-        BigDecimal paidBaseAmount = sourceInvoice != null
-                ? money(abs(sourceInvoice.getTotalGross()))
-                : sourceCharge != null
-                ? money(abs(sourceCharge.getAmount()))
-                : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         BigDecimal releasedAmount = MODE_NONE.equals(settlementMode)
                 ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
                 : money(min(paidBaseAmount, releasedByPolicy));
@@ -251,7 +265,10 @@ public class CancellationService {
             throw new IllegalArgumentException("Settlement mode NONE is not allowed when cancellation policy releases value");
         }
         if (!MODE_NONE.equals(settlementMode) && releasedByPolicy.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new IllegalArgumentException("Selected settlement mode requires releasable amount by cancellation policy");
+            throw new IllegalArgumentException(
+                    "Refund or credit requires a non-zero amount released by the cancellation policy "
+                            + "(released total is 0 at current cutoff/rules). "
+                            + "Use settlement mode NONE for a penalty-only cancellation, or check policy and reservation amounts.");
         }
 
         BigDecimal refundAmount = MODE_CASH_REFUND.equals(settlementMode) ? releasedAmount : amountZero();
@@ -371,6 +388,7 @@ public class CancellationService {
             cancellationRequest.setCompletedAt(OffsetDateTime.now());
             cancellationRequest.setFailureReason(null);
             cancellationRequest = cancellationRequestRepo.save(cancellationRequest);
+            eventPublisher.publishEvent(new ReservationRequestCancelledEvent(reservationRequestId, cancellationRequest.getId()));
             return toDto(cancellationRequest);
         } catch (RuntimeException ex) {
             cancellationRequest.setStatus(STATUS_FAILED);
@@ -485,6 +503,16 @@ public class CancellationService {
             throw new IllegalArgumentException("Cancellation request contains reservations with different default settlement modes; specify settlementMode");
         }
         return resolvedModes.getFirst();
+    }
+
+    /**
+     * Amendment flows leave replaced reservation rows in {@code CANCELLED} status; request-level cancellation
+     * must only consider and update still-active lines.
+     */
+    private static List<Reservation> activeReservationsOnly(List<Reservation> reservations) {
+        return reservations.stream()
+                .filter(r -> r.getStatus() == null || !"CANCELLED".equalsIgnoreCase(r.getStatus().trim()))
+                .toList();
     }
 
     private void markRequestCancelled(ReservationRequest request, List<Reservation> reservations) {

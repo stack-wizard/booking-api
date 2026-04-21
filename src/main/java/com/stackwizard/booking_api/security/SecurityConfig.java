@@ -53,9 +53,11 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH).permitAll()
                 .requestMatchers(HttpMethod.POST, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, "/api/auth/login").permitAll()
+                .requestMatchers(HttpMethod.POST, "/booking-api/api/auth/login").permitAll()
+                .requestMatchers(HttpMethod.OPTIONS, "/booking-api/api/auth/login").permitAll()
                 .requestMatchers(
-                    "/api/auth/**",
-                    "/booking-api/api/auth/**",
                     "/api/public/reservation-requests/**",
                     "/booking-api/api/public/reservation-requests/**",
                     "/actuator/health",
