@@ -128,11 +128,12 @@ public class PaymentService {
     }
 
     public RequestPaymentSummary summarizeReservationRequest(Long reservationRequestId, Long tenantId, List<Reservation> reservations) {
-        BigDecimal totalAmount = reservations.stream()
+        List<Reservation> billable = reservationsExcludingCancelled(reservations);
+        BigDecimal totalAmount = billable.stream()
                 .map(this::reservationTotal)
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal dueNow = calculateDueNow(tenantId, reservations).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal dueNow = calculateDueNow(tenantId, billable).setScale(2, RoundingMode.HALF_UP);
         BigDecimal paidAmount = paymentIntentRepo.findByReservationRequestId(reservationRequestId).stream()
                 .filter(i -> STATUS_PAID.equalsIgnoreCase(i.getStatus()))
                 .map(PaymentIntent::getAmount)
@@ -144,14 +145,41 @@ public class PaymentService {
             remaining = BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
         }
 
-        String status = "UNPAID";
-        if (paidAmount.compareTo(BigDecimal.ZERO) > 0 && paidAmount.compareTo(dueNow) < 0) {
-            status = "PARTIALLY_PAID";
-        } else if (dueNow.compareTo(BigDecimal.ZERO) > 0 && paidAmount.compareTo(dueNow) >= 0) {
-            status = "PAID";
-        }
+        String status = resolveRequestPaymentStatus(dueNow, paidAmount);
 
         return new RequestPaymentSummary(totalAmount, dueNow, paidAmount, remaining, status);
+    }
+
+    /**
+     * Cancelled lines remain on the request for history but must not affect totals, deposit due, or payment status.
+     */
+    private static List<Reservation> reservationsExcludingCancelled(List<Reservation> reservations) {
+        return reservations.stream()
+                .filter(PaymentService::isReservationActiveForPayment)
+                .toList();
+    }
+
+    private static boolean isReservationActiveForPayment(Reservation r) {
+        if (r == null || !StringUtils.hasText(r.getStatus())) {
+            return true;
+        }
+        return !"CANCELLED".equalsIgnoreCase(r.getStatus().trim());
+    }
+
+    /**
+     * When nothing is due (e.g. all lines cancelled) but payments were captured, treat as paid for display.
+     */
+    private static String resolveRequestPaymentStatus(BigDecimal dueNow, BigDecimal paidAmount) {
+        if (dueNow.compareTo(BigDecimal.ZERO) <= 0) {
+            return paidAmount.compareTo(BigDecimal.ZERO) > 0 ? "PAID" : "UNPAID";
+        }
+        if (paidAmount.compareTo(BigDecimal.ZERO) > 0 && paidAmount.compareTo(dueNow) < 0) {
+            return "PARTIALLY_PAID";
+        }
+        if (paidAmount.compareTo(dueNow) >= 0) {
+            return "PAID";
+        }
+        return "UNPAID";
     }
 
     @Transactional
@@ -178,9 +206,13 @@ public class PaymentService {
         if (reservations.isEmpty()) {
             throw new IllegalStateException("Reservation request has no reservations");
         }
+        List<Reservation> billable = reservationsExcludingCancelled(reservations);
+        if (billable.isEmpty()) {
+            throw new IllegalStateException("Reservation request has no active reservations to pay for");
+        }
 
-        String currency = resolveCurrency(reservations);
-        BigDecimal dueNowAmount = calculateDueNow(reservationRequest.getTenantId(), reservations);
+        String currency = resolveCurrency(billable);
+        BigDecimal dueNowAmount = calculateDueNow(reservationRequest.getTenantId(), billable);
         if (dueNowAmount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new IllegalStateException("Computed due amount must be greater than zero");
         }

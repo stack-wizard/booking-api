@@ -34,12 +34,15 @@ public class ReservationRequestDtoMapper {
 
     public ReservationRequestDto toDto(ReservationRequest request) {
         List<Reservation> reservations = reservationService.findByRequestId(request.getId());
-        LocalDateTime reservationStartsAt = reservations.stream()
+        List<Reservation> forStayWindow = reservations.stream()
+                .filter(r -> r.getStatus() == null || !"CANCELLED".equalsIgnoreCase(r.getStatus().trim()))
+                .toList();
+        LocalDateTime reservationStartsAt = forStayWindow.stream()
                 .map(Reservation::getStartsAt)
                 .filter(Objects::nonNull)
                 .min(LocalDateTime::compareTo)
                 .orElse(null);
-        LocalDateTime reservationEndsAt = reservations.stream()
+        LocalDateTime reservationEndsAt = forStayWindow.stream()
                 .map(Reservation::getEndsAt)
                 .filter(Objects::nonNull)
                 .max(LocalDateTime::compareTo)

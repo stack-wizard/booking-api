@@ -68,8 +68,14 @@ public class ReservationRequestController {
         this.reservationStayService = reservationStayService;
     }
 
+    /**
+     * Full list for admin (e.g. Payments page). Uses {@link ReservationRequestDto} so payment totals and status match
+     * {@link #search} and {@link #get} (including rules such as excluding cancelled reservation lines from amounts).
+     */
     @GetMapping
-    public List<ReservationRequest> all() { return service.findAll(); }
+    public List<ReservationRequestDto> all() {
+        return service.findAll().stream().map(dtoMapper::toDto).toList();
+    }
 
     @GetMapping("/search")
     public Page<ReservationRequestDto> search(ReservationRequestSearchCriteria criteria,
