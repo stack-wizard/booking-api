@@ -11,6 +11,7 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
@@ -50,16 +51,28 @@ public class CancellationPolicyService {
     }
 
     public PolicySnapshot resolveBookingSnapshot(Long tenantId, Long productId, LocalDateTime serviceStart) {
+        return resolveBookingSnapshotInternal(tenantId, productId, serviceStart, OffsetDateTime.now());
+    }
+
+    public PolicySnapshot resolveBookingSnapshotForPeriod(Long tenantId, Long productId, LocalDateTime serviceStart) {
+        return resolveBookingSnapshotInternal(tenantId, productId, serviceStart, toOffsetDateTime(serviceStart));
+    }
+
+    private PolicySnapshot resolveBookingSnapshotInternal(Long tenantId,
+                                                          Long productId,
+                                                          LocalDateTime serviceStart,
+                                                          OffsetDateTime policyEvaluationTime) {
         if (tenantId == null || serviceStart == null) {
             return null;
         }
-        CancellationPolicy policy = findApplicablePolicy(tenantId, productId).orElse(null);
+        OffsetDateTime evaluationTime = policyEvaluationTime != null ? policyEvaluationTime : OffsetDateTime.now();
+        CancellationPolicy policy = findApplicablePolicy(tenantId, productId, evaluationTime).orElse(null);
         if (policy == null) {
             return null;
         }
 
         LocalDateTime cutoffAt = serviceStart.minusDays(cutoffDays(policy));
-        boolean beforeCutoff = !LocalDateTime.now().isAfter(cutoffAt);
+        boolean beforeCutoff = !evaluationTime.toLocalDateTime().isAfter(cutoffAt);
         String releaseType = beforeCutoff ? policy.getBeforeCutoffReleaseType() : policy.getAfterCutoffReleaseType();
         BigDecimal releaseValue = beforeCutoff ? valueOrZero(policy.getBeforeCutoffReleaseValue()) : valueOrZero(policy.getAfterCutoffReleaseValue());
         boolean allowCashRefund = beforeCutoff ? Boolean.TRUE.equals(policy.getBeforeCutoffAllowCashRefund()) : Boolean.TRUE.equals(policy.getAfterCutoffAllowCashRefund());
@@ -100,9 +113,13 @@ public class CancellationPolicyService {
     }
 
     private Optional<CancellationPolicy> findApplicablePolicy(Long tenantId, Long productId) {
-        OffsetDateTime now = OffsetDateTime.now();
+        return findApplicablePolicy(tenantId, productId, OffsetDateTime.now());
+    }
+
+    private Optional<CancellationPolicy> findApplicablePolicy(Long tenantId, Long productId, OffsetDateTime effectiveAt) {
+        OffsetDateTime evaluationPoint = effectiveAt != null ? effectiveAt : OffsetDateTime.now();
         return repo.findByTenantIdAndActiveTrueOrderByPriorityDescIdDesc(tenantId).stream()
-                .filter(policy -> isEffective(policy, now))
+                .filter(policy -> isEffective(policy, evaluationPoint))
                 .filter(policy -> appliesToProduct(policy, productId))
                 .sorted(Comparator
                         .comparing((CancellationPolicy policy) -> isProductScope(policy, productId)).reversed()
@@ -480,6 +497,13 @@ public class CancellationPolicyService {
 
     private BigDecimal money(BigDecimal value) {
         return valueOrZero(value).setScale(2, java.math.RoundingMode.HALF_UP);
+    }
+
+    private OffsetDateTime toOffsetDateTime(LocalDateTime localDateTime) {
+        if (localDateTime == null) {
+            return OffsetDateTime.now();
+        }
+        return localDateTime.atZone(ZoneId.systemDefault()).toOffsetDateTime();
     }
 
     public record PolicySnapshot(Long policyId,

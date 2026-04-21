@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.AvailabilityMapDto;
 import com.stackwizard.booking_api.dto.AvailabilityMapPositionDto;
 import com.stackwizard.booking_api.dto.AvailabilityPriceDto;
+import com.stackwizard.booking_api.dto.AvailabilityCancellationPolicyDto;
 import com.stackwizard.booking_api.dto.AvailabilityProductDto;
 import com.stackwizard.booking_api.dto.AvailabilityResourceDto;
 import com.stackwizard.booking_api.dto.AvailabilityResourceRefDto;
@@ -251,7 +252,7 @@ public class AvailabilityService {
 
             Product resolvedProduct = resolveProduct(resource, productsByResourceId, productById);
             CancellationPolicyService.PolicySnapshot policySnapshot = resolvedProduct != null
-                    ? cancellationPolicyService.resolveBookingSnapshot(tenantId, resolvedProduct.getId(), window != null ? window.open() : date.atStartOfDay())
+                    ? cancellationPolicyService.resolveBookingSnapshotForPeriod(tenantId, resolvedProduct.getId(), window != null ? window.open() : date.atStartOfDay())
                     : null;
             AvailabilityProductDto productDto = toAvailabilityProductDto(resolvedProduct, policySnapshot);
             List<AvailabilityPriceDto> priceDtos = buildPrices(resource, productsByResourceId, pricesByProductId, productById, uomNameByCode);
@@ -305,11 +306,25 @@ public class AvailabilityService {
                         .build())
                 .toList();
 
+        LocalDateTime availabilityStart = windowByLocation.values().stream()
+                .map(ServiceCalendarService.ServiceWindow::open)
+                .min(LocalDateTime::compareTo)
+                .orElse(date.atStartOfDay());
+        CancellationPolicyService.PolicySnapshot tenantPolicySnapshot =
+                cancellationPolicyService.resolveBookingSnapshotForPeriod(tenantId, null, availabilityStart);
+        AvailabilityCancellationPolicyDto cancellationPolicyDto = tenantPolicySnapshot == null ? null
+                : AvailabilityCancellationPolicyDto.builder()
+                        .policyId(tenantPolicySnapshot.policyId())
+                        .cancellationPolicyText(tenantPolicySnapshot.genericPolicyText())
+                        .cancellationFreeUntil(tenantPolicySnapshot.cutoffAt())
+                        .build();
+
         Integer gridMinutes = gridMinutesByLocation.values().stream().filter(Objects::nonNull).findFirst().orElse(null);
         return AvailabilityResponse.builder()
                 .tenantId(tenantId)
                 .date(date)
                 .gridMinutes(gridMinutes)
+                .cancellationPolicy(cancellationPolicyDto)
                 .maps(mapDtos)
                 .resources(resourceDtos)
                 .build();

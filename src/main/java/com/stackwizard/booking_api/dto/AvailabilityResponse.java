@@ -12,6 +12,7 @@ public class AvailabilityResponse {
     private Long tenantId;
     private LocalDate date;
     private Integer gridMinutes;
+    private AvailabilityCancellationPolicyDto cancellationPolicy;
     private List<AvailabilityMapDto> maps;
     private List<AvailabilityResourceDto> resources;
 }

@@ -1,8 +1,10 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.AvailabilityResponse;
 import com.stackwizard.booking_api.dto.AvailabilityResourceDto;
 import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.BookingCalendar;
+import com.stackwizard.booking_api.model.CancellationPolicy;
 import com.stackwizard.booking_api.model.LocationNode;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
@@ -21,6 +23,7 @@ import java.lang.reflect.Proxy;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +31,130 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AvailabilityServiceTest {
+
+    @Test
+    void returnsTopLevelTenantCancellationPolicyForRequestedPeriod() {
+        Long tenantId = 1L;
+        Long locationId = 9L;
+        LocalDate date = LocalDate.of(2031, 6, 10);
+        LocalDateTime open = LocalDateTime.of(date, LocalTime.of(10, 0));
+        LocalDateTime close = LocalDateTime.of(date, LocalTime.of(19, 0));
+
+        LocationNode location = LocationNode.builder()
+                .id(locationId)
+                .tenantId(tenantId)
+                .name("Beach Club")
+                .nodeType("AREA")
+                .sortOrder(1)
+                .build();
+        ResourceType exactType = ResourceType.builder()
+                .id(2L)
+                .tenantId(tenantId)
+                .code("EXACT")
+                .name("Exact")
+                .build();
+        Resource sunbed = resource(194L, tenantId, "L3", "Luxury Sunbed 3", true, exactType, location, 1);
+
+        BookingCalendar calendar = BookingCalendar.builder()
+                .id(1L)
+                .tenantId(tenantId)
+                .locationNode(location)
+                .openTime(open.toLocalTime())
+                .closeTime(close.toLocalTime())
+                .gridMinutes(60)
+                .minDurationMinutes(60)
+                .maxDurationMinutes(540)
+                .zone("Europe/Zagreb")
+                .build();
+
+        CancellationPolicy tenantPolicy = CancellationPolicy.builder()
+                .id(55L)
+                .tenantId(tenantId)
+                .name("Future tenant policy")
+                .active(true)
+                .priority(100)
+                .scopeType("TENANT")
+                .cutoffDaysBeforeStart(5)
+                .beforeCutoffReleaseType("FULL")
+                .beforeCutoffReleaseValue(java.math.BigDecimal.ZERO)
+                .beforeCutoffAllowCashRefund(true)
+                .beforeCutoffAllowCustomerCredit(false)
+                .beforeCutoffDefaultSettlementMode("CASH_REFUND")
+                .afterCutoffReleaseType("NONE")
+                .afterCutoffReleaseValue(java.math.BigDecimal.ZERO)
+                .afterCutoffAllowCashRefund(false)
+                .afterCutoffAllowCustomerCredit(false)
+                .effectiveFrom(OffsetDateTime.parse("2030-01-01T00:00:00Z"))
+                .build();
+
+        ResourceRepository resourceRepo = stub(ResourceRepository.class, Map.of(
+                "findByTenantIdAndLocationId", args -> List.of(sunbed)
+        ));
+        ResourceCompositionRepository compositionRepo = stub(ResourceCompositionRepository.class, Map.of(
+                "findByParentResourceIdIn", args -> List.of(),
+                "findByMemberResourceIdIn", args -> List.of()
+        ));
+        AllocationRepository allocationRepo = stub(AllocationRepository.class, Map.of(
+                "findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan", args -> List.of()
+        ));
+        ProductRepository productRepo = stub(ProductRepository.class, Map.of(
+                "findByTenantIdOrderByDisplayOrderAscNameAscIdAsc", args -> List.of()
+        ));
+        PriceListEntryRepository priceListRepo = stub(PriceListEntryRepository.class, Map.of(
+                "findForProductsOnDate", args -> List.of()
+        ));
+        ResourceMapRepository mapRepo = stub(ResourceMapRepository.class, Map.of(
+                "findByTenantId", args -> List.of()
+        ));
+        ResourceMapResourceRepository mapResourceRepo = stub(ResourceMapResourceRepository.class, Map.of(
+                "findByResourceMapIdIn", args -> List.of()
+        ));
+        UomRepository uomRepo = stub(UomRepository.class, Map.of(
+                "findByActiveTrue", args -> List.of()
+        ));
+        CancellationPolicyService cancellationPolicyService = new CancellationPolicyService(
+                stub(com.stackwizard.booking_api.repository.CancellationPolicyRepository.class, Map.of(
+                        "findByTenantIdAndActiveTrueOrderByPriorityDescIdDesc", args -> List.of(tenantPolicy)
+                ))
+        );
+
+        ServiceCalendarService calendarService = new ServiceCalendarService(null, null) {
+            @Override
+            public BookingCalendar calendarFor(Long requestedTenantId, Long requestedLocationNodeId) {
+                assertThat(requestedTenantId).isEqualTo(tenantId);
+                assertThat(requestedLocationNodeId).isEqualTo(locationId);
+                return calendar;
+            }
+
+            @Override
+            public ServiceWindow windowFor(BookingCalendar requestedCalendar, LocalDate requestedDate) {
+                assertThat(requestedCalendar).isSameAs(calendar);
+                assertThat(requestedDate).isEqualTo(date);
+                return new ServiceWindow(open, close);
+            }
+        };
+
+        AvailabilityService service = new AvailabilityService(
+                resourceRepo,
+                compositionRepo,
+                allocationRepo,
+                productRepo,
+                priceListRepo,
+                calendarService,
+                mapRepo,
+                mapResourceRepo,
+                uomRepo,
+                cancellationPolicyService
+        );
+
+        AvailabilityResponse response = service.getAvailability(tenantId, date, locationId);
+
+        assertThat(response.getCancellationPolicy()).isNotNull();
+        assertThat(response.getCancellationPolicy().getPolicyId()).isEqualTo(55L);
+        assertThat(response.getCancellationPolicy().getCancellationPolicyText())
+                .contains("Cancellation up to 5 days before start");
+        assertThat(response.getCancellationPolicy().getCancellationFreeUntil()).isEqualTo(open.minusDays(5));
+    }
 
     @Test
     void keepsStandaloneMemberAvailableWhenParentPackageIsBlockedBySiblingAllocation() {
