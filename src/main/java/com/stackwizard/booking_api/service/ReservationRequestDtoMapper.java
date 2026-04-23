@@ -104,6 +104,7 @@ public class ReservationRequestDtoMapper {
                 .customerName(request.getCustomerName())
                 .customerEmail(request.getCustomerEmail())
                 .customerPhone(request.getCustomerPhone())
+                .customerCountry(request.getCustomerCountry())
                 .cancellationPolicyText(request.getCancellationPolicyText())
                 .notes(request.getNotes())
                 .externalReservation(request.getExternalReservation())

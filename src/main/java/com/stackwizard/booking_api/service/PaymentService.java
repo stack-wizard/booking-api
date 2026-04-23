@@ -70,6 +70,8 @@ public class PaymentService {
     );
     private static final String MONRI_CALLBACK_SCHEME = "WP3-callback";
     private static final Pattern HEX_512_PATTERN = Pattern.compile("^[0-9a-fA-F]{128}$");
+    /** Monri {@code issuer} is {@code bank_code-country_code}; ISO 3166-1 alpha-2 suffix after the last hyphen. */
+    private static final Pattern MONRI_ISSUER_COUNTRY_SUFFIX = Pattern.compile("^[a-zA-Z]{2}$");
 
     private final PaymentIntentRepository paymentIntentRepo;
     private final PaymentEventRepository paymentEventRepo;
@@ -310,6 +312,8 @@ public class PaymentService {
             paymentIntent.setProviderPaymentId(webhook.providerPaymentId());
         }
 
+        mergeCustomerCountryFromMonriIfMissing(paymentIntent, monriTransactionData(payloadNode));
+
         String normalized = normalizeProviderStatus(webhook.paymentStatus());
         applyMonriStatusTransition(paymentIntent, normalized);
     }
@@ -335,7 +339,7 @@ public class PaymentService {
             );
         }
         JsonNode payloadNode = parsePayloadNode(payload);
-        JsonNode data = payloadNode.path("payload").isObject() ? payloadNode.path("payload") : payloadNode;
+        JsonNode data = monriTransactionData(payloadNode);
 
         String orderNumber = firstText(data, "order_number", "order_info.order_number", "order_info");
         String providerPaymentId = firstText(data, "id", "payment_id", "transaction_uuid", "uuid");
@@ -371,6 +375,8 @@ public class PaymentService {
         if (StringUtils.hasText(providerPaymentId) && !StringUtils.hasText(paymentIntent.getProviderPaymentId())) {
             paymentIntent.setProviderPaymentId(providerPaymentId);
         }
+
+        mergeCustomerCountryFromMonriIfMissing(paymentIntent, data);
 
         applyMonriStatusTransition(paymentIntent, STATUS_PAID);
     }
@@ -659,6 +665,56 @@ public class PaymentService {
             }
         }
         return null;
+    }
+
+    private static JsonNode monriTransactionData(JsonNode payloadNode) {
+        if (payloadNode == null) {
+            return null;
+        }
+        JsonNode nested = payloadNode.path("payload");
+        return nested.isObject() ? nested : payloadNode;
+    }
+
+    private void mergeCustomerCountryFromMonriIfMissing(PaymentIntent paymentIntent, JsonNode data) {
+        String country = countryFromMonriIssuer(data);
+        if (!StringUtils.hasText(country)) {
+            return;
+        }
+        ReservationRequest request = requestRepo.findById(paymentIntent.getReservationRequestId()).orElse(null);
+        if (request == null) {
+            return;
+        }
+        if (StringUtils.hasText(request.getCustomerCountry())) {
+            return;
+        }
+        request.setCustomerCountry(country);
+        requestRepo.save(request);
+    }
+
+    /**
+     * Parses ISO 3166-1 alpha-2 from Monri {@code issuer} when shaped as {@code bank_code-country_code}.
+     */
+    private static String countryFromMonriIssuer(JsonNode data) {
+        if (data == null) {
+            return null;
+        }
+        JsonNode issuerNode = data.path("issuer");
+        if (issuerNode == null || issuerNode.isMissingNode() || issuerNode.isNull()) {
+            return null;
+        }
+        String issuer = issuerNode.asText();
+        if (!StringUtils.hasText(issuer)) {
+            return null;
+        }
+        int lastHyphen = issuer.lastIndexOf('-');
+        if (lastHyphen < 0 || lastHyphen >= issuer.length() - 1) {
+            return null;
+        }
+        String suffix = issuer.substring(lastHyphen + 1).trim();
+        if (!MONRI_ISSUER_COUNTRY_SUFFIX.matcher(suffix).matches()) {
+            return null;
+        }
+        return suffix.toUpperCase(Locale.ROOT);
     }
 
     private List<PaymentIntent> expireStaleActiveIntents(Long reservationRequestId, OffsetDateTime now) {

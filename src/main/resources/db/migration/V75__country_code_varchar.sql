@@ -1,0 +1,2 @@
+ALTER TABLE country
+    ALTER COLUMN code TYPE VARCHAR(2);

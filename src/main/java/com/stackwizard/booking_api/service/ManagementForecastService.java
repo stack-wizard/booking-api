@@ -1,15 +1,20 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.ManagementForecastCountryRow;
 import com.stackwizard.booking_api.dto.ManagementForecastDailyTrendPoint;
 import com.stackwizard.booking_api.dto.ManagementForecastDailyTrendResponse;
 import com.stackwizard.booking_api.dto.ManagementForecastProductRow;
 import com.stackwizard.booking_api.dto.ManagementForecastResponse;
+import com.stackwizard.booking_api.model.Country;
 import com.stackwizard.booking_api.model.ReservationRequest;
+import com.stackwizard.booking_api.repository.CountryRepository;
 import com.stackwizard.booking_api.repository.ManagementForecastRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -17,7 +22,11 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class ManagementForecastService {
@@ -30,6 +39,7 @@ public class ManagementForecastService {
 
     private static final int MAX_DAILY_TREND_DAYS = 62;
     private static final DateTimeFormatter LABEL = DateTimeFormatter.ofPattern("d/M");
+    private static final String UNKNOWN_COUNTRY_LABEL = "Unknown";
 
     private static BigDecimal toBigDecimal(Object value) {
         if (value == null) {
@@ -45,9 +55,12 @@ public class ManagementForecastService {
     }
 
     private final ManagementForecastRepository forecastRepository;
+    private final CountryRepository countryRepository;
 
-    public ManagementForecastService(ManagementForecastRepository forecastRepository) {
+    public ManagementForecastService(ManagementForecastRepository forecastRepository,
+                                     CountryRepository countryRepository) {
         this.forecastRepository = forecastRepository;
+        this.countryRepository = countryRepository;
     }
 
     @Transactional(readOnly = true)
@@ -106,6 +119,9 @@ public class ManagementForecastService {
                     .build());
         }
 
+        List<ManagementForecastCountryRow> byCountry = buildByCountry(
+                tenantId, from, to);
+
         return ManagementForecastResponse.builder()
                 .from(from)
                 .to(to)
@@ -113,6 +129,7 @@ public class ManagementForecastService {
                 .reservationCount(reservationCount)
                 .grossTotal(grossTotal)
                 .byProduct(byProduct)
+                .byCountry(byCountry)
                 .build();
     }
 
@@ -171,5 +188,55 @@ public class ManagementForecastService {
         return ManagementForecastDailyTrendResponse.builder()
                 .days(days)
                 .build();
+    }
+
+    private List<ManagementForecastCountryRow> buildByCountry(Long tenantId,
+                                                               OffsetDateTime from,
+                                                               OffsetDateTime to) {
+        List<Object[]> rows = forecastRepository.aggregateReservationsByCountry(
+                tenantId,
+                FORECAST_CONFIRMED_STATUSES,
+                ReservationRequest.Type.INTERNAL,
+                from,
+                to);
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+        List<String> codes = rows.stream()
+                .map(r -> r[0] != null ? r[0].toString().trim().toUpperCase(Locale.ROOT) : "")
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        Map<String, String> names = codes.isEmpty()
+                ? Map.of()
+                : countryRepository.findAllById(codes).stream()
+                        .collect(Collectors.toMap(Country::getCode, Country::getName));
+
+        List<ManagementForecastCountryRow> out = new ArrayList<>();
+        for (Object[] row : rows) {
+            String key = row[0] == null || !StringUtils.hasText(row[0].toString())
+                    ? ""
+                    : row[0].toString().trim().toUpperCase(Locale.ROOT);
+            long resCount = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+            long requestCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            long quantitySum = row[3] != null ? ((Number) row[3]).longValue() : 0L;
+            BigDecimal grossSum = toBigDecimal(row[4]);
+            long personCount = row[5] != null ? ((Number) row[5]).longValue() : 0L;
+            String code = key.isEmpty() ? null : key;
+            String name = key.isEmpty() ? UNKNOWN_COUNTRY_LABEL : names.getOrDefault(key, key + " (unlisted)");
+            out.add(ManagementForecastCountryRow.builder()
+                    .countryCode(code)
+                    .countryName(name)
+                    .reservationCount(resCount)
+                    .reservationRequestCount(requestCount)
+                    .quantitySum(quantitySum)
+                    .personCount(personCount)
+                    .grossSum(grossSum.setScale(2, RoundingMode.HALF_UP))
+                    .build());
+        }
+        out.sort(Comparator
+                .comparing((ManagementForecastCountryRow r) -> r.getCountryCode() == null)
+                .thenComparing(ManagementForecastCountryRow::getCountryName, String.CASE_INSENSITIVE_ORDER));
+        return out;
     }
 }

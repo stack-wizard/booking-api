@@ -59,7 +59,8 @@ public interface ManagementStayDashboardRepository extends JpaRepository<Reserva
             where i.tenantId = :tenantId
               and i.reservationRequestId is not null
               and i.status = 'ISSUED'
-              and i.invoiceType not in ('DEPOSIT', 'DEPOSIT_STORNO')
+              and i.invoiceType not in (com.stackwizard.booking_api.model.InvoiceType.DEPOSIT,
+                                        com.stackwizard.booking_api.model.InvoiceType.DEPOSIT_STORNO)
               and i.invoiceDate >= :fromDate
               and i.invoiceDate <= :toDate
             """)
@@ -76,13 +77,40 @@ public interface ManagementStayDashboardRepository extends JpaRepository<Reserva
             where i.tenantId = :tenantId
               and i.reservationRequestId is not null
               and i.status = 'ISSUED'
-              and i.invoiceType not in ('DEPOSIT', 'DEPOSIT_STORNO')
+              and i.invoiceType not in (com.stackwizard.booking_api.model.InvoiceType.DEPOSIT,
+                                        com.stackwizard.booking_api.model.InvoiceType.DEPOSIT_STORNO)
               and i.invoiceDate >= :fromDate
               and i.invoiceDate <= :toDate
             group by ii.productId
             order by min(ii.productName) asc
             """)
     List<Object[]> aggregateInvoiceLinesByProduct(
+            @Param("tenantId") Long tenantId,
+            @Param("fromDate") LocalDate fromDate,
+            @Param("toDate") LocalDate toDate);
+
+    /**
+     * Same invoice line filters as {@link #aggregateInvoiceLinesByProduct}, grouped by guest country on the invoice's
+     * reservation request.
+     */
+    @Query(value = """
+            select rr.customer_country,
+                   count(ii.id),
+                   coalesce(sum(ii.gross_amount), 0),
+                   coalesce(sum(ii.quantity), 0)
+            from invoice_item ii
+            join invoice i on i.id = ii.invoice_id
+            join reservation_request rr on rr.id = i.reservation_request_id
+            where i.tenant_id = :tenantId
+              and i.reservation_request_id is not null
+              and i.status = 'ISSUED'
+              and i.invoice_type not in ('DEPOSIT', 'DEPOSIT_STORNO')
+              and i.invoice_date >= :fromDate
+              and i.invoice_date <= :toDate
+            group by rr.customer_country
+            order by rr.customer_country
+            """, nativeQuery = true)
+    List<Object[]> aggregateInvoiceLinesByCountry(
             @Param("tenantId") Long tenantId,
             @Param("fromDate") LocalDate fromDate,
             @Param("toDate") LocalDate toDate);

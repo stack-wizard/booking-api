@@ -98,4 +98,34 @@ public interface ManagementForecastRepository extends JpaRepository<ReservationR
             @Param("internalType") ReservationRequest.Type internalType,
             @Param("fromInclusive") OffsetDateTime fromInclusive,
             @Param("toInclusive") OffsetDateTime toInclusive);
+
+    @Query("""
+            select rr.customerCountry,
+                   count(r),
+                   count(distinct rr.id),
+                   coalesce(sum(case when r.qty is null or r.qty = 0 then 1 else r.qty end), 0),
+                   coalesce(sum(coalesce(r.grossAmount, r.unitPrice * coalesce(r.qty, 1))), 0),
+                   coalesce(sum(
+                       coalesce(res.capTotal, 1)
+                       * (case when r.qty is null or r.qty = 0 then 1 else r.qty end)
+                   ), 0)
+            from Reservation r
+            join r.request rr
+            join r.requestedResource res
+            where rr.tenantId = :tenantId
+              and rr.status in :confirmedStatuses
+              and rr.type <> :internalType
+              and rr.confirmedAt is not null
+              and rr.confirmedAt >= :fromInclusive
+              and rr.confirmedAt <= :toInclusive
+              and (r.status is null or upper(r.status) <> 'CANCELLED')
+            group by rr.customerCountry
+            order by rr.customerCountry
+            """)
+    List<Object[]> aggregateReservationsByCountry(
+            @Param("tenantId") Long tenantId,
+            @Param("confirmedStatuses") Collection<ReservationRequest.Status> confirmedStatuses,
+            @Param("internalType") ReservationRequest.Type internalType,
+            @Param("fromInclusive") OffsetDateTime fromInclusive,
+            @Param("toInclusive") OffsetDateTime toInclusive);
 }

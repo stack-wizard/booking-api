@@ -30,4 +30,5 @@ public class ManagementStayDashboardResponse {
     /** Sum of {@code invoice_item.gross_amount} for issued, non-deposit invoices in date range. */
     private BigDecimal invoiceLineGrossTotal;
     private List<ManagementStayDashboardProductRow> byProduct;
+    private List<ManagementStayDashboardCountryRow> byCountry;
 }

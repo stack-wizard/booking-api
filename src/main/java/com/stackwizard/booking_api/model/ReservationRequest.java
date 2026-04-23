@@ -49,6 +49,9 @@ public class ReservationRequest {
     @Column(name = "customer_phone")
     private String customerPhone;
 
+    @Column(name = "customer_country", length = 2)
+    private String customerCountry;
+
     @Column(name = "notes")
     private String notes;
 

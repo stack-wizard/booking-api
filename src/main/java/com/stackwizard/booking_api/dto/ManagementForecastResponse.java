@@ -20,4 +20,5 @@ public class ManagementForecastResponse {
     private long reservationCount;
     private BigDecimal grossTotal;
     private List<ManagementForecastProductRow> byProduct;
+    private List<ManagementForecastCountryRow> byCountry;
 }

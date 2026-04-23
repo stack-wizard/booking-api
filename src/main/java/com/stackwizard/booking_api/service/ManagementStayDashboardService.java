@@ -1,15 +1,20 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.dto.ManagementStayDashboardCountryRow;
 import com.stackwizard.booking_api.dto.ManagementStayDashboardDailyTrendPoint;
 import com.stackwizard.booking_api.dto.ManagementStayDashboardDailyTrendResponse;
 import com.stackwizard.booking_api.dto.ManagementStayDashboardProductRow;
 import com.stackwizard.booking_api.dto.ManagementStayDashboardResponse;
+import com.stackwizard.booking_api.model.Country;
 import com.stackwizard.booking_api.model.ReservationRequest;
+import com.stackwizard.booking_api.repository.CountryRepository;
 import com.stackwizard.booking_api.repository.ManagementStayDashboardRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -18,13 +23,19 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class ManagementStayDashboardService {
 
     private static final int MAX_DAILY_TREND_DAYS = 62;
     private static final DateTimeFormatter LABEL = DateTimeFormatter.ofPattern("d/M");
+    private static final String UNKNOWN_COUNTRY_LABEL = "Unknown";
 
     private static BigDecimal toBigDecimal(Object value) {
         if (value == null) {
@@ -40,9 +51,12 @@ public class ManagementStayDashboardService {
     }
 
     private final ManagementStayDashboardRepository stayDashboardRepository;
+    private final CountryRepository countryRepository;
 
-    public ManagementStayDashboardService(ManagementStayDashboardRepository stayDashboardRepository) {
+    public ManagementStayDashboardService(ManagementStayDashboardRepository stayDashboardRepository,
+                                          CountryRepository countryRepository) {
         this.stayDashboardRepository = stayDashboardRepository;
+        this.countryRepository = countryRepository;
     }
 
     @Transactional(readOnly = true)
@@ -99,6 +113,8 @@ public class ManagementStayDashboardService {
                     .build());
         }
 
+        List<ManagementStayDashboardCountryRow> byCountry = buildByCountry(tenantId, fromDate, toDate);
+
         return ManagementStayDashboardResponse.builder()
                 .from(from)
                 .to(to)
@@ -108,6 +124,7 @@ public class ManagementStayDashboardService {
                 .checkedOutReservationCount(checkedOutReservations)
                 .invoiceLineGrossTotal(invoiceGross)
                 .byProduct(byProduct)
+                .byCountry(byCountry)
                 .build();
     }
 
@@ -166,4 +183,63 @@ public class ManagementStayDashboardService {
             }
         }
     }
+
+    private List<ManagementStayDashboardCountryRow> buildByCountry(Long tenantId,
+                                                                   LocalDate fromDate,
+                                                                   LocalDate toDate) {
+        List<Object[]> invoiceRows = stayDashboardRepository.aggregateInvoiceLinesByCountry(
+                tenantId, fromDate, toDate);
+        if (invoiceRows.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, String> names = resolveCountryNames(
+                invoiceRows.stream()
+                        .map(r -> countryBucketKey(r[0] != null ? r[0].toString() : null))
+                        .filter(StringUtils::hasText)
+                        .collect(Collectors.toSet()));
+
+        List<ManagementStayDashboardCountryRow> rows = new ArrayList<>();
+        for (Object[] row : invoiceRows) {
+            String key = countryBucketKey(row[0] != null ? row[0].toString() : null);
+            long lineCount = row[1] != null ? ((Number) row[1]).longValue() : 0L;
+            BigDecimal grossSum = toBigDecimal(row[2]);
+            long qtySum = row[3] != null ? ((Number) row[3]).longValue() : 0L;
+            String code = key.isEmpty() ? null : key;
+            String name = key.isEmpty() ? UNKNOWN_COUNTRY_LABEL : names.getOrDefault(key, key + " (unlisted)");
+            rows.add(ManagementStayDashboardCountryRow.builder()
+                    .countryCode(code)
+                    .countryName(name)
+                    .invoiceLineCount(lineCount)
+                    .quantitySum(qtySum)
+                    .grossSum(money(grossSum))
+                    .build());
+        }
+        rows.sort(Comparator
+                .comparing((ManagementStayDashboardCountryRow r) -> r.getCountryCode() == null)
+                .thenComparing(ManagementStayDashboardCountryRow::getCountryName, String.CASE_INSENSITIVE_ORDER));
+        return rows;
+    }
+
+    private Map<String, String> resolveCountryNames(Set<String> keys) {
+        List<String> codes = keys.stream().filter(StringUtils::hasText).distinct().toList();
+        if (codes.isEmpty()) {
+            return Map.of();
+        }
+        return countryRepository.findAllById(codes).stream()
+                .collect(Collectors.toMap(Country::getCode, Country::getName));
+    }
+
+    private static String countryBucketKey(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        return raw.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private static BigDecimal money(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+                : v.setScale(2, RoundingMode.HALF_UP);
+    }
+
 }

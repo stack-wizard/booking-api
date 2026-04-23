@@ -34,6 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
@@ -232,6 +233,59 @@ class PaymentServiceTest {
         assertThat(paymentIntent.getStatus()).isEqualTo("PAID");
         verify(reservationService, never()).finalizeRequest(any());
         verify(invoiceService, never()).createDepositInvoiceForPaymentIntent(any());
+    }
+
+    @Test
+    void processMonriCallbackSetsCustomerCountryFromMonriIssuer() {
+        Long tenantId = 8L;
+        PaymentIntent paymentIntent = PaymentIntent.builder()
+                .id(55L)
+                .tenantId(tenantId)
+                .reservationRequestId(77L)
+                .provider("MONRI")
+                .providerOrderNumber("RR-77-AAAA1111")
+                .status("PROCESSING")
+                .build();
+        ReservationRequest reservationRequest = ReservationRequest.builder()
+                .id(77L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.PENDING_PAYMENT)
+                .build();
+        MonriTenantConfigResolver.MonriResolvedConfig config = new MonriTenantConfigResolver.MonriResolvedConfig(
+                "https://example.test",
+                "/oauth",
+                "/request",
+                "/refund",
+                "client-id",
+                "client-secret",
+                "auth-token",
+                "callback-token"
+        );
+
+        when(environment.getActiveProfiles()).thenReturn(new String[]{"local"});
+        when(monriTenantConfigResolver.resolve(tenantId)).thenReturn(config);
+        when(paymentIntentRepo.findLockedByProviderAndProviderOrderNumber("MONRI", paymentIntent.getProviderOrderNumber()))
+                .thenReturn(Optional.of(paymentIntent));
+        when(paymentEventRepo.findByProviderAndProviderEventId(eq("MONRI"), any())).thenReturn(Optional.empty());
+        when(paymentEventRepo.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(requestRepo.findById(paymentIntent.getReservationRequestId())).thenReturn(Optional.of(reservationRequest));
+        when(paymentIntentRepo.save(any(PaymentIntent.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceService.createDepositInvoiceForPaymentIntent(paymentIntent)).thenReturn(Invoice.builder().id(1L).build());
+
+        service.processMonriCallback(
+                tenantId,
+                "{\"order_number\":\"RR-77-AAAA1111\",\"id\":\"provider-1\",\"issuer\":\"off-us\"}",
+                "callback-token",
+                null,
+                null
+        );
+
+        ArgumentCaptor<ReservationRequest> requestCaptor = ArgumentCaptor.forClass(ReservationRequest.class);
+        verify(requestRepo, atLeastOnce()).save(requestCaptor.capture());
+        assertThat(requestCaptor.getAllValues()).anyMatch(r -> "US".equals(r.getCustomerCountry()));
+        verify(reservationService).finalizeRequest(77L);
     }
 
     @Test
