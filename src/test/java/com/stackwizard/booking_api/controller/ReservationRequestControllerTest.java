@@ -7,6 +7,7 @@ import com.stackwizard.booking_api.service.ReservationRequestExportService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.ReservationStayService;
+import com.stackwizard.booking_api.service.ReservationNotificationEmailService;
 import com.stackwizard.booking_api.service.TenantConfigService;
 import com.stackwizard.booking_api.service.CancellationService;
 import org.junit.jupiter.api.Test;
@@ -32,6 +33,8 @@ class ReservationRequestControllerTest {
     @Mock
     private ObjectProvider<ReservationConfirmationEmailService> confirmationEmailServiceProvider;
     @Mock
+    private ObjectProvider<ReservationNotificationEmailService> notificationEmailServiceProvider;
+    @Mock
     private TenantConfigService tenantConfigService;
     @Mock
     private ReservationRequestDtoMapper dtoMapper;
@@ -49,6 +52,7 @@ class ReservationRequestControllerTest {
                 reservationService,
                 cancellationService,
                 confirmationEmailServiceProvider,
+                notificationEmailServiceProvider,
                 tenantConfigService,
                 dtoMapper,
                 exportService,

@@ -15,6 +15,7 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.ReservationRequestDtoMapper;
 import com.stackwizard.booking_api.service.ReservationRequestExportService;
 import com.stackwizard.booking_api.service.ReservationConfirmationEmailService;
+import com.stackwizard.booking_api.service.ReservationNotificationEmailService;
 import com.stackwizard.booking_api.service.CancellationService;
 import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
@@ -35,6 +36,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/reservation-requests")
@@ -45,6 +47,7 @@ public class ReservationRequestController {
     private final ReservationService reservationService;
     private final CancellationService cancellationService;
     private final ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider;
+    private final ObjectProvider<ReservationNotificationEmailService> reservationNotificationEmailServiceProvider;
     private final TenantConfigService tenantConfigService;
     private final ReservationRequestDtoMapper dtoMapper;
     private final ReservationRequestExportService exportService;
@@ -54,6 +57,7 @@ public class ReservationRequestController {
                                         ReservationService reservationService,
                                         CancellationService cancellationService,
                                         ObjectProvider<ReservationConfirmationEmailService> reservationConfirmationEmailServiceProvider,
+                                        ObjectProvider<ReservationNotificationEmailService> reservationNotificationEmailServiceProvider,
                                         TenantConfigService tenantConfigService,
                                         ReservationRequestDtoMapper dtoMapper,
                                         ReservationRequestExportService exportService,
@@ -62,6 +66,7 @@ public class ReservationRequestController {
         this.reservationService = reservationService;
         this.cancellationService = cancellationService;
         this.reservationConfirmationEmailServiceProvider = reservationConfirmationEmailServiceProvider;
+        this.reservationNotificationEmailServiceProvider = reservationNotificationEmailServiceProvider;
         this.tenantConfigService = tenantConfigService;
         this.dtoMapper = dtoMapper;
         this.exportService = exportService;
@@ -179,6 +184,36 @@ public class ReservationRequestController {
             throw new IllegalStateException("Reservation confirmation email feature is not available");
         }
         return ResponseEntity.ok(service.sendForDebug(id, force));
+    }
+
+    /**
+     * Resend guest cancellation email using settlement data from a completed cancellation.
+     * If {@code cancellationRequestId} is omitted, the latest {@code COMPLETED} cancellation for the request is used.
+     */
+    @PostMapping("/{id}/send-cancellation-email")
+    public ResponseEntity<Void> sendCancellationEmail(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long cancellationRequestId) {
+        ReservationNotificationEmailService notificationService =
+                reservationNotificationEmailServiceProvider.getIfAvailable();
+        if (notificationService == null) {
+            throw new IllegalStateException("Reservation email notification feature is not available");
+        }
+        Long cancellationId = cancellationRequestId;
+        if (cancellationId == null) {
+            cancellationId = cancellationService.findByReservationRequestId(id).stream()
+                    .filter(c -> "COMPLETED".equalsIgnoreCase(String.valueOf(c.getStatus())))
+                    .map(CancellationRequestDto::getId)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (cancellationId == null) {
+            throw new IllegalArgumentException(
+                    "No completed cancellation found for this request; pass cancellationRequestId");
+        }
+        notificationService.sendCancellationEmail(id, cancellationId);
+        return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/{id}/customer")
