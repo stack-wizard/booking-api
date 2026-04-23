@@ -23,6 +23,7 @@ import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -78,6 +79,77 @@ public class ReservationRequestService {
     public List<ReservationRequest> findAll() { return requestRepo.findAll(); }
     public Optional<ReservationRequest> findById(Long id) { return requestRepo.findById(id); }
     public ReservationRequest save(ReservationRequest request) { return requestRepo.save(request); }
+
+    /**
+     * Replaces editable fields on a draft request from an admin payload (booking-admin sends all keys explicitly).
+     */
+    @Transactional
+    public ReservationRequest replaceDraftReservationRequest(Long id, ReservationRequest incoming) {
+        if (incoming == null) {
+            throw new IllegalArgumentException("Request body is required");
+        }
+        ReservationRequest existing = requestRepo.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (existing.getStatus() != ReservationRequest.Status.DRAFT) {
+            throw new IllegalStateException("Only draft reservation requests can be updated");
+        }
+        Long resolvedTenantId = TenantResolver.requireTenantId(
+                incoming.getTenantId() != null ? incoming.getTenantId() : existing.getTenantId());
+        if (!existing.getTenantId().equals(resolvedTenantId)) {
+            throw new IllegalArgumentException("tenantId does not match request");
+        }
+
+        String previousName = existing.getCustomerName();
+        String previousEmail = existing.getCustomerEmail();
+        String previousPhone = existing.getCustomerPhone();
+
+        if (incoming.getType() != null) {
+            existing.setType(incoming.getType());
+        }
+        if (incoming.getStatus() != null) {
+            existing.setStatus(incoming.getStatus());
+        }
+        existing.setExpiresAt(incoming.getExpiresAt());
+        existing.setNotes(normalizeNullable(incoming.getNotes()));
+        existing.setExternalReservation(normalizeNullable(incoming.getExternalReservation()));
+        existing.setCustomerName(normalizeNullable(incoming.getCustomerName()));
+        existing.setCustomerEmail(normalizeNullable(incoming.getCustomerEmail()));
+        existing.setCustomerPhone(normalizeNullable(incoming.getCustomerPhone()));
+        existing.setCustomerCountry(normalizeCustomerCountry(incoming.getCustomerCountry()));
+
+        ReservationRequest saved = requestRepo.save(existing);
+
+        boolean touchReservations = !Objects.equals(previousName, saved.getCustomerName())
+                || !Objects.equals(previousEmail, saved.getCustomerEmail())
+                || !Objects.equals(previousPhone, saved.getCustomerPhone());
+        if (touchReservations) {
+            List<Reservation> reservations = reservationRepo.findByRequestId(id);
+            if (!reservations.isEmpty()) {
+                for (Reservation reservation : reservations) {
+                    reservation.setCustomerName(saved.getCustomerName());
+                    reservation.setCustomerEmail(saved.getCustomerEmail());
+                    reservation.setCustomerPhone(saved.getCustomerPhone());
+                }
+                reservationRepo.saveAll(reservations);
+            }
+        }
+        return saved;
+    }
+
+    private String normalizeCustomerCountry(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String trimmed = raw.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        String upper = trimmed.toUpperCase(Locale.ROOT);
+        if (upper.length() != 2) {
+            throw new IllegalArgumentException("customerCountry must be a 2-letter ISO 3166-1 alpha-2 code");
+        }
+        return upper;
+    }
 
     @Scheduled(fixedDelayString = "${reservation-requests.expiry-scan-ms:60000}")
     @Transactional

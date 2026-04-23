@@ -130,6 +130,12 @@ public class ReservationRequestController {
         return ResponseEntity.created(URI.create("/api/reservation-requests/" + saved.getId())).body(saved);
     }
 
+    @PutMapping("/{id}")
+    public ResponseEntity<ReservationRequestDto> replaceDraft(@PathVariable Long id, @RequestBody ReservationRequest body) {
+        ReservationRequest updated = service.replaceDraftReservationRequest(id, body);
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
     @PostMapping("/{id}/extend")
     public ResponseEntity<ReservationRequestDto> extendRequest(@PathVariable Long id,
                                                                @RequestBody(required = false) ReservationTtlExtendRequest body) {
