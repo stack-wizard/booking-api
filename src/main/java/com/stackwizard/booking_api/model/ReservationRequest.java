@@ -73,6 +73,19 @@ public class ReservationRequest {
     @Column(name = "extension_count", nullable = false)
     private Integer extensionCount;
 
+    @Column(name = "opera_profile_id")
+    private String operaProfileId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "opera_deposit_post_status")
+    private OperaDepositPostStatus operaDepositPostStatus;
+
+    @Column(name = "opera_deposit_post_at")
+    private OffsetDateTime operaDepositPostAt;
+
+    @Column(name = "opera_deposit_post_error")
+    private String operaDepositPostError;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 

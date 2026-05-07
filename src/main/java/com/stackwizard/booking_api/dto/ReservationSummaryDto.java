@@ -10,6 +10,8 @@ import java.time.OffsetDateTime;
 @Data
 @Builder
 public class ReservationSummaryDto {
+    /** Same as {@link #id}; explicit name for admin/API clients. */
+    private Long reservationId;
     private Long id;
     private Long tenantId;
     private Long productId;
@@ -19,6 +21,10 @@ public class ReservationSummaryDto {
     private Long requestedResourceId;
     private String requestedResourceCode;
     private String requestedResourceName;
+    /** OHIP/Opera room id on the requested resource (for PMS check-in). */
+    private String operaRoomId;
+    /** OHIP reservation id after create reservation. */
+    private Long operaReservationId;
     private LocalDateTime startsAt;
     private LocalDateTime endsAt;
     private String status;

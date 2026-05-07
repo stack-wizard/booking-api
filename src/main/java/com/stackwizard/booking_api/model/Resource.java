@@ -43,6 +43,9 @@ public class Resource {
 
     private String code;
 
+    @Column(name = "opera_room_id")
+    private String operaRoomId;
+
     @Column(nullable = false)
     private String name;
 

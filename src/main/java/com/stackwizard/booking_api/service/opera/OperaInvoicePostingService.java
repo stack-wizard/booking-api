@@ -2,11 +2,14 @@ package com.stackwizard.booking_api.service.opera;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.dto.OperaInvoicePostRequest;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceItem;
 import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.InvoiceStatus;
+import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.OperaFiscalChargeMapping;
 import com.stackwizard.booking_api.model.OperaFiscalPaymentMapping;
 import com.stackwizard.booking_api.model.OperaHotel;
@@ -15,10 +18,12 @@ import com.stackwizard.booking_api.model.OperaPostingStatus;
 import com.stackwizard.booking_api.model.OperaPostingTarget;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.model.Product;
+import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.repository.InvoiceItemRepository;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
 import com.stackwizard.booking_api.repository.InvoiceRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.service.PaymentTransactionService;
 import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
 import org.slf4j.Logger;
@@ -31,11 +36,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class OperaInvoicePostingService {
@@ -50,6 +57,7 @@ public class OperaInvoicePostingService {
     private final OperaPostingConfigurationService configurationService;
     private final OperaTenantConfigResolver tenantConfigResolver;
     private final OperaPostingClient operaPostingClient;
+    private final ReservationRepository reservationRepo;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OperaInvoicePostingService(InvoiceRepository invoiceRepo,
@@ -60,7 +68,8 @@ public class OperaInvoicePostingService {
                                       OperaFiscalMappingService operaFiscalMappingService,
                                       OperaPostingConfigurationService configurationService,
                                       OperaTenantConfigResolver tenantConfigResolver,
-                                      OperaPostingClient operaPostingClient) {
+                                      OperaPostingClient operaPostingClient,
+                                      ReservationRepository reservationRepo) {
         this.invoiceRepo = invoiceRepo;
         this.invoiceItemRepo = invoiceItemRepo;
         this.allocationRepo = allocationRepo;
@@ -70,10 +79,18 @@ public class OperaInvoicePostingService {
         this.configurationService = configurationService;
         this.tenantConfigResolver = tenantConfigResolver;
         this.operaPostingClient = operaPostingClient;
+        this.reservationRepo = reservationRepo;
     }
 
     @Transactional(readOnly = true)
     public OperaInvoicePostingPreview previewInvoice(Long invoiceId, OperaInvoicePostRequest request) {
+        Invoice invoice = invoiceRepo.findById(invoiceId)
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        List<InvoiceItem> items = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoiceId);
+        if (isFinalStayOperaInvoice(invoice, items)) {
+            List<InvoiceItem> linked = linkInvoiceItemsToStaysForOpera(invoice, items);
+            return previewFinalStayPerReservation(invoice, linked, request);
+        }
         PreparedPosting prepared = preparePosting(invoiceId, request, false);
         return new OperaInvoicePostingPreview(
                 prepared.invoice(),
@@ -88,11 +105,26 @@ public class OperaInvoicePostingService {
 
     @Transactional(readOnly = true)
     public JsonNode previewPayload(Long invoiceId, OperaInvoicePostRequest request) {
+        Invoice invoice = invoiceRepo.findById(invoiceId)
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        List<InvoiceItem> items = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoiceId);
+        if (isFinalStayOperaInvoice(invoice, items)) {
+            List<InvoiceItem> linked = linkInvoiceItemsToStaysForOpera(invoice, items);
+            return previewFinalStayPerReservation(invoice, linked, request).payload();
+        }
         return preparePosting(invoiceId, request, false).payload();
     }
 
     @Transactional(noRollbackFor = Exception.class)
     public OperaInvoicePostingResult postInvoice(Long invoiceId, OperaInvoicePostRequest request) {
+        Invoice invoiceEarly = invoiceRepo.findById(invoiceId)
+                .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
+        List<InvoiceItem> itemsEarly = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoiceId);
+        if (isFinalStayOperaInvoice(invoiceEarly, itemsEarly)) {
+            List<InvoiceItem> linked = linkInvoiceItemsToStaysForOpera(invoiceEarly, itemsEarly);
+            return postFinalStayPerReservation(invoiceEarly, linked, request);
+        }
+
         PreparedPosting prepared = preparePosting(invoiceId, request, true);
         Invoice invoice = prepared.invoice();
         if (effectivePostingStatus(invoice) == OperaPostingStatus.POSTED
@@ -156,6 +188,284 @@ public class OperaInvoicePostingService {
         }
     }
 
+    private static boolean isFinalStayOperaInvoice(Invoice invoice, List<InvoiceItem> items) {
+        return invoice.getInvoiceType() == InvoiceType.INVOICE && !items.isEmpty();
+    }
+
+    /**
+     * For final invoices, every Opera charge post must target a stay's {@code operaReservationId}.
+     * Lines may omit {@link InvoiceItem#getReservationId()} if the invoice has {@link Invoice#getReservationRequestId()},
+     * in which case stays on that request are mapped by line count (same order as lineNo) or by matching {@code productId}.
+     */
+    private List<InvoiceItem> linkInvoiceItemsToStaysForOpera(Invoice invoice, List<InvoiceItem> items) {
+        long withReservation = items.stream().filter(i -> i.getReservationId() != null).count();
+        if (withReservation == items.size()) {
+            return items;
+        }
+        if (withReservation > 0) {
+            throw new IllegalStateException(
+                    "Final stay invoice mixes lines with and without reservationId; all lines need a stay link for Opera");
+        }
+        return inferReservationIdsFromRequest(invoice, items);
+    }
+
+    private List<InvoiceItem> inferReservationIdsFromRequest(Invoice invoice, List<InvoiceItem> items) {
+        Long reqId = invoice.getReservationRequestId();
+        if (reqId == null) {
+            throw new IllegalStateException(
+                    "Final invoice (INVOICE) must have every line linked to a reservation stay (reservationId) "
+                            + "so charges post to Opera reservations created at check-in; payment was posted at check-in only. "
+                            + "Set reservationRequestId on the invoice to map lines from the request's stays, or set reservationId on each line.");
+        }
+        List<Reservation> stays = reservationRepo.findByRequestId(reqId).stream()
+                .filter(r -> r.getStatus() == null || !"CANCELLED".equalsIgnoreCase(r.getStatus().trim()))
+                .sorted(Comparator.comparing(Reservation::getId))
+                .toList();
+        if (stays.isEmpty()) {
+            throw new IllegalStateException("Reservation request " + reqId + " has no active stays to map invoice lines to");
+        }
+        List<InvoiceItem> ordered = items.stream()
+                .sorted(Comparator.comparing(InvoiceItem::getLineNo, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList();
+
+        if (ordered.size() == stays.size()) {
+            List<InvoiceItem> linked = new ArrayList<>(ordered.size());
+            for (int i = 0; i < ordered.size(); i++) {
+                linked.add(copyItemWithReservation(ordered.get(i), stays.get(i).getId()));
+            }
+            return linked;
+        }
+
+        List<Reservation> available = new ArrayList<>(stays);
+        List<InvoiceItem> linked = new ArrayList<>();
+        for (InvoiceItem item : ordered) {
+            Long pid = item.getProductId();
+            Reservation match = null;
+            if (pid != null) {
+                for (Reservation r : available) {
+                    if (pid.equals(r.getProductId())) {
+                        match = r;
+                        break;
+                    }
+                }
+            }
+            if (match == null) {
+                throw new IllegalStateException(
+                        "Cannot map invoice line " + item.getLineNo() + " to a stay on reservation request " + reqId
+                                + " (line count differs from stay count; align productId per stay or add reservationId on each line)");
+            }
+            available.remove(match);
+            linked.add(copyItemWithReservation(item, match.getId()));
+        }
+        return linked;
+    }
+
+    private static InvoiceItem copyItemWithReservation(InvoiceItem item, Long reservationId) {
+        return InvoiceItem.builder()
+                .id(item.getId())
+                .invoice(item.getInvoice())
+                .lineNo(item.getLineNo())
+                .reservationId(reservationId)
+                .productId(item.getProductId())
+                .productName(item.getProductName())
+                .quantity(item.getQuantity())
+                .unitPriceGross(item.getUnitPriceGross())
+                .discountPercent(item.getDiscountPercent())
+                .discountAmount(item.getDiscountAmount())
+                .priceWithoutTax(item.getPriceWithoutTax())
+                .tax1Percent(item.getTax1Percent())
+                .tax2Percent(item.getTax2Percent())
+                .tax1Amount(item.getTax1Amount())
+                .tax2Amount(item.getTax2Amount())
+                .nettPrice(item.getNettPrice())
+                .grossAmount(item.getGrossAmount())
+                .createdAt(item.getCreatedAt())
+                .build();
+    }
+
+    private void persistInferredReservationLinks(List<InvoiceItem> linkedItems) {
+        for (InvoiceItem linked : linkedItems) {
+            if (linked.getId() == null || linked.getReservationId() == null) {
+                continue;
+            }
+            invoiceItemRepo.findById(linked.getId()).ifPresent(persisted -> {
+                if (persisted.getReservationId() == null) {
+                    persisted.setReservationId(linked.getReservationId());
+                    invoiceItemRepo.save(persisted);
+                }
+            });
+        }
+    }
+
+    /**
+     * Final stay invoices mirror only charges to OHIP; deposit (and its payment) is posted at check-in via
+     * {@code /reservations/{id}/payments}. Other invoice types may still include payment rows when configured.
+     */
+    private static boolean shouldIncludeOperaPayments(Invoice invoice) {
+        return invoice.getInvoiceType() != InvoiceType.INVOICE;
+    }
+
+    private OperaInvoicePostingPreview previewFinalStayPerReservation(Invoice invoice,
+                                                                      List<InvoiceItem> items,
+                                                                      OperaInvoicePostRequest request) {
+        if (items.isEmpty()) {
+            throw new IllegalStateException("Invoice has no items to post");
+        }
+        OperaHotel hotel = resolveHotelForStayInvoice(invoice, request);
+        Long cashierId = resolveCashierId(request, hotel);
+        Integer folioWindowNo = resolveFolioWindowNo(request, hotel);
+        Map<Long, List<InvoiceItem>> byReservation = items.stream()
+                .collect(Collectors.groupingBy(InvoiceItem::getReservationId, LinkedHashMap::new, Collectors.toList()));
+
+        ArrayNode posts = objectMapper.createArrayNode();
+        Long firstOhId = null;
+        for (Map.Entry<Long, List<InvoiceItem>> e : byReservation.entrySet()) {
+            Reservation stay = reservationRepo.findById(e.getKey())
+                    .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + e.getKey()));
+            if (!invoice.getTenantId().equals(stay.getTenantId())) {
+                throw new IllegalStateException("Reservation " + stay.getId() + " tenant mismatch for invoice");
+            }
+            Long ohId = stay.getOperaReservationId();
+            if (ohId == null || ohId <= 0) {
+                throw new IllegalStateException(
+                        "Reservation " + stay.getId() + " has no operaReservationId; check in on OHIP first");
+            }
+            if (firstOhId == null) {
+                firstOhId = ohId;
+            }
+            ResolvedTarget target = new ResolvedTarget(
+                    OperaPostingTarget.RESERVATION, hotel, ohId, cashierId, folioWindowNo);
+            posts.add(buildPayload(invoice, e.getValue(), List.of(), target, request, false));
+        }
+        ObjectNode wrapper = objectMapper.createObjectNode();
+        wrapper.set("perReservationChargePosts", posts);
+        return new OperaInvoicePostingPreview(
+                invoice,
+                OperaPostingTarget.RESERVATION,
+                hotel.getHotelCode(),
+                firstOhId,
+                cashierId,
+                folioWindowNo,
+                wrapper
+        );
+    }
+
+    private OperaInvoicePostingResult postFinalStayPerReservation(Invoice invoice,
+                                                                   List<InvoiceItem> items,
+                                                                   OperaInvoicePostRequest request) {
+        if (effectivePostingStatus(invoice) == OperaPostingStatus.POSTED
+                && !Boolean.TRUE.equals(request != null ? request.getForce() : null)) {
+            throw new IllegalStateException("Invoice is already posted to Opera; use force=true to repost");
+        }
+
+        OperaTenantConfigResolver.OperaResolvedConfig config = resolveConfig(invoice.getTenantId(), request);
+        OperaHotel hotel = resolveHotelForStayInvoice(invoice, request);
+        Long cashierId = resolveCashierId(request, hotel);
+        Integer folioWindowNo = resolveFolioWindowNo(request, hotel);
+        String chain = postingChainCode(hotel);
+
+        Map<Long, List<InvoiceItem>> byReservation = items.stream()
+                .collect(Collectors.groupingBy(InvoiceItem::getReservationId, LinkedHashMap::new, Collectors.toList()));
+
+        ArrayNode requestPosts = objectMapper.createArrayNode();
+        JsonNode lastResponse = null;
+        try {
+            invoice.setOperaErrorMessage(null);
+            invoiceRepo.save(invoice);
+
+            for (Map.Entry<Long, List<InvoiceItem>> e : byReservation.entrySet()) {
+                Reservation stay = reservationRepo.findById(e.getKey())
+                        .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + e.getKey()));
+                if (!invoice.getTenantId().equals(stay.getTenantId())) {
+                    throw new IllegalStateException("Reservation " + stay.getId() + " tenant mismatch for invoice");
+                }
+                Long ohId = stay.getOperaReservationId();
+                if (ohId == null || ohId <= 0) {
+                    throw new IllegalStateException(
+                            "Reservation " + stay.getId() + " has no operaReservationId; check in on OHIP first");
+                }
+                ResolvedTarget target = new ResolvedTarget(
+                        OperaPostingTarget.RESERVATION, hotel, ohId, cashierId, folioWindowNo);
+                JsonNode payload = buildPayload(invoice, e.getValue(), List.of(), target, request, false);
+                requestPosts.add(payload);
+                invoice.setOperaLastRequestPayload(payload);
+                invoiceRepo.save(invoice);
+                lastResponse = operaPostingClient.postChargesAndPayments(
+                        config, hotel.getHotelCode(), chain, ohId, payload);
+            }
+
+            invoice.setOperaPostingStatus(OperaPostingStatus.POSTED);
+            invoice.setOperaPostedAt(OffsetDateTime.now());
+            invoice.setOperaHotelCode(hotel.getHotelCode());
+            if (byReservation.size() == 1) {
+                Long onlyOh = reservationRepo.findById(byReservation.keySet().iterator().next())
+                        .map(Reservation::getOperaReservationId)
+                        .orElse(null);
+                invoice.setOperaReservationId(onlyOh);
+            } else {
+                invoice.setOperaReservationId(null);
+            }
+            ObjectNode wrap = objectMapper.createObjectNode();
+            wrap.set("perReservationChargePosts", requestPosts);
+            invoice.setOperaLastRequestPayload(wrap);
+            invoice.setOperaLastResponsePayload(lastResponse);
+            invoice.setOperaErrorMessage(null);
+            Invoice saved = invoiceRepo.save(invoice);
+            persistInferredReservationLinks(items);
+            return new OperaInvoicePostingResult(
+                    saved,
+                    OperaPostingTarget.RESERVATION,
+                    hotel.getHotelCode(),
+                    saved.getOperaReservationId(),
+                    cashierId,
+                    folioWindowNo,
+                    wrap,
+                    lastResponse
+            );
+        } catch (Exception ex) {
+            invoice.setOperaPostingStatus(OperaPostingStatus.FAILED);
+            invoice.setOperaErrorMessage(ex.getMessage());
+            invoiceRepo.save(invoice);
+            throw ex;
+        }
+    }
+
+    private OperaHotel resolveHotelForStayInvoice(Invoice invoice, OperaInvoicePostRequest request) {
+        String overrideHotelCode = normalizeHotelCode(request != null ? request.getHotelCode() : null);
+        String invoiceHotelCode = normalizeHotelCode(invoice.getOperaHotelCode());
+        String defaultHotelCode = tenantConfigResolver.findDefaultHotelCode(invoice.getTenantId()).orElse(null);
+        String resolvedHotelCode = firstNonBlank(overrideHotelCode, invoiceHotelCode, defaultHotelCode);
+        if (!StringUtils.hasText(resolvedHotelCode)) {
+            throw new IllegalArgumentException("hotelCode is required for Opera final stay posting");
+        }
+        return configurationService.requireActiveHotel(invoice.getTenantId(), resolvedHotelCode);
+    }
+
+    private static String postingChainCode(OperaHotel hotel) {
+        if (hotel == null || !StringUtils.hasText(hotel.getChainCode())) {
+            return "";
+        }
+        return hotel.getChainCode().trim();
+    }
+
+    private boolean canAutoPostFinalStayPerReservation(Invoice invoice, List<InvoiceItem> items) {
+        OperaHotel hotel = resolveHotelForStayInvoice(invoice, null);
+        configurationService.requireActiveHotel(invoice.getTenantId(), hotel.getHotelCode());
+        Map<Long, List<InvoiceItem>> byReservation = items.stream()
+                .collect(Collectors.groupingBy(InvoiceItem::getReservationId));
+        for (Long reservationId : byReservation.keySet()) {
+            Reservation stay = reservationRepo.findById(reservationId)
+                    .orElseThrow(() -> new IllegalStateException("Reservation not found: " + reservationId));
+            if (stay.getOperaReservationId() == null || stay.getOperaReservationId() <= 0) {
+                return false;
+            }
+            if (!invoice.getTenantId().equals(stay.getTenantId())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private PreparedPosting preparePosting(Long invoiceId, OperaInvoicePostRequest request, boolean requireIssuedInvoice) {
         Invoice invoice = invoiceRepo.findById(invoiceId)
                 .orElseThrow(() -> new IllegalArgumentException("Invoice not found"));
@@ -169,7 +479,8 @@ public class OperaInvoicePostingService {
         }
         List<InvoicePaymentAllocation> allocations = allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(invoiceId);
         ResolvedTarget target = resolveTarget(invoice, request);
-        JsonNode payload = buildPayload(invoice, items, allocations, target, request);
+        JsonNode payload = buildPayload(
+                invoice, items, allocations, target, request, shouldIncludeOperaPayments(invoice));
         return new PreparedPosting(invoice, target, payload);
     }
 
@@ -184,6 +495,16 @@ public class OperaInvoicePostingService {
             return false;
         }
         if (!hasResolvedOperaConfig(invoice.getTenantId())) {
+            return false;
+        }
+
+        List<InvoiceItem> items = invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(invoice.getId());
+        try {
+            if (isFinalStayOperaInvoice(invoice, items)) {
+                List<InvoiceItem> linked = linkInvoiceItemsToStaysForOpera(invoice, items);
+                return canAutoPostFinalStayPerReservation(invoice, linked);
+            }
+        } catch (RuntimeException ex) {
             return false;
         }
 
@@ -281,11 +602,24 @@ public class OperaInvoicePostingService {
         return new ResolvedTarget(postingTarget, hotel, resolvedReservationId, cashierId, folioWindowNo);
     }
 
+    private static String missingOperaChargeMappingMessage(Long tenantId, InvoiceItem item, String productType) {
+        Long itemId = item != null ? item.getId() : null;
+        Long productId = item != null ? item.getProductId() : null;
+        Integer lineNo = item != null ? item.getLineNo() : null;
+        String typeLabel = productType != null && !productType.isBlank() ? productType : "unknown";
+        return "Opera charge mapping is missing for invoice item "
+                + itemId + " (line " + lineNo + ", tenantId=" + tenantId
+                + ", productId=" + productId + ", productType=" + typeLabel
+                + "). Add an active opera_fiscal_charge_mapping for this product, product_type " + typeLabel
+                + ", or a tenant default (product_id and product_type both null).";
+    }
+
     private JsonNode buildPayload(Invoice invoice,
                                   List<InvoiceItem> items,
                                   List<InvoicePaymentAllocation> allocations,
                                   ResolvedTarget target,
-                                  OperaInvoicePostRequest request) {
+                                  OperaInvoicePostRequest request,
+                                  boolean includePayments) {
         Map<Long, Product> productsById = new HashMap<>();
         List<Long> productIds = items.stream()
                 .map(InvoiceItem::getProductId)
@@ -314,7 +648,8 @@ public class OperaInvoicePostingService {
                             item.getProductId(),
                             product != null ? product.getProductType() : null
                     )
-                    .orElseThrow(() -> new IllegalStateException("Opera charge mapping is missing for invoice item " + item.getId()));
+                    .orElseThrow(() -> new IllegalStateException(missingOperaChargeMappingMessage(
+                            invoice.getTenantId(), item, product != null ? product.getProductType() : null)));
 
             int postingQuantity = item.getQuantity() != null && item.getQuantity() != 0 ? Math.abs(item.getQuantity()) : 1;
             BigDecimal quantity = BigDecimal.valueOf(postingQuantity);
@@ -338,42 +673,44 @@ public class OperaInvoicePostingService {
         }
 
         List<Map<String, Object>> payments = new ArrayList<>();
-        for (InvoicePaymentAllocation allocation : allocations) {
-            BigDecimal postingAmount = money(zeroSafe(allocation.getAllocatedAmount()));
-            if (postingAmount.compareTo(BigDecimal.ZERO) == 0) {
-                continue;
+        if (includePayments) {
+            for (InvoicePaymentAllocation allocation : allocations) {
+                BigDecimal postingAmount = money(zeroSafe(allocation.getAllocatedAmount()));
+                if (postingAmount.compareTo(BigDecimal.ZERO) == 0) {
+                    continue;
+                }
+
+                PaymentTransaction paymentTransaction = paymentTransactionService.requireById(allocation.getPaymentTransactionId());
+                OperaFiscalPaymentMapping paymentMapping = operaFiscalMappingService.resolvePaymentMapping(
+                                invoice.getTenantId(),
+                                paymentTransaction.getPaymentType(),
+                                paymentTransaction.getCardType()
+                        )
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Opera payment mapping is missing for payment type " + paymentTransaction.getPaymentType()
+                        ));
+
+                String paymentMethodCode = normalizeNullable(paymentMapping.getPaymentMethodCode());
+                if (!StringUtils.hasText(paymentMethodCode)) {
+                    throw new IllegalStateException("Opera payment method code is missing for payment mapping " + paymentMapping.getId());
+                }
+
+                Map<String, Object> paymentMethod = new LinkedHashMap<>();
+                paymentMethod.put("paymentMethod", paymentMethodCode);
+                paymentMethod.put("folioView", target.folioWindowNo());
+
+                Map<String, Object> payment = new LinkedHashMap<>();
+                payment.put("hotelId", target.hotel().getHotelCode());
+                payment.put("paymentMethod", paymentMethod);
+                payment.put("postingAmount", amountPayload(postingAmount, invoice.getCurrency()));
+                payment.put("postingReference", postingReference);
+                payment.put("postingRemark", paymentPostingRemark);
+                payment.put("comments", comments);
+                payment.put("action", paymentAction);
+                payment.put("folioWindowNo", target.folioWindowNo());
+                payment.put("cashierId", target.cashierId());
+                payments.add(payment);
             }
-
-            PaymentTransaction paymentTransaction = paymentTransactionService.requireById(allocation.getPaymentTransactionId());
-            OperaFiscalPaymentMapping paymentMapping = operaFiscalMappingService.resolvePaymentMapping(
-                            invoice.getTenantId(),
-                            paymentTransaction.getPaymentType(),
-                            paymentTransaction.getCardType()
-                    )
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Opera payment mapping is missing for payment type " + paymentTransaction.getPaymentType()
-                    ));
-
-            String paymentMethodCode = normalizeNullable(paymentMapping.getPaymentMethodCode());
-            if (!StringUtils.hasText(paymentMethodCode)) {
-                throw new IllegalStateException("Opera payment method code is missing for payment mapping " + paymentMapping.getId());
-            }
-
-            Map<String, Object> paymentMethod = new LinkedHashMap<>();
-            paymentMethod.put("paymentMethod", paymentMethodCode);
-            paymentMethod.put("folioView", target.folioWindowNo());
-
-            Map<String, Object> payment = new LinkedHashMap<>();
-            payment.put("hotelId", target.hotel().getHotelCode());
-            payment.put("paymentMethod", paymentMethod);
-            payment.put("postingAmount", amountPayload(postingAmount, invoice.getCurrency()));
-            payment.put("postingReference", postingReference);
-            payment.put("postingRemark", paymentPostingRemark);
-            payment.put("comments", comments);
-            payment.put("action", paymentAction);
-            payment.put("folioWindowNo", target.folioWindowNo());
-            payment.put("cashierId", target.cashierId());
-            payments.add(payment);
         }
 
         Map<String, Object> payload = new LinkedHashMap<>();

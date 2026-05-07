@@ -8,13 +8,21 @@ import com.stackwizard.booking_api.dto.InvoiceCheckoutGateResult;
 import com.stackwizard.booking_api.exception.CheckoutBlockedException;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceType;
+import com.stackwizard.booking_api.config.BookingOperaProperties;
+import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
+import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.security.TenantContext;
+import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
+import com.stackwizard.booking_api.service.opera.OperaCheckInOrchestrator;
+import com.stackwizard.booking_api.service.opera.OperaInvoicePostingService;
+import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -26,13 +34,31 @@ public class ReservationStayService {
     private final ReservationRequestRepository requestRepo;
     private final ReservationRepository reservationRepo;
     private final InvoiceService invoiceService;
+    private final BookingOperaProperties bookingOperaProperties;
+    private final OperaCheckInOrchestrator operaCheckInOrchestrator;
+    private final OperaInvoicePostingService operaInvoicePostingService;
+    private final ProductRepository productRepo;
+    private final OperaFiscalMappingService operaFiscalMappingService;
+    private final EntityManager entityManager;
 
     public ReservationStayService(ReservationRequestRepository requestRepo,
                                     ReservationRepository reservationRepo,
-                                    InvoiceService invoiceService) {
+                                    InvoiceService invoiceService,
+                                    BookingOperaProperties bookingOperaProperties,
+                                    OperaCheckInOrchestrator operaCheckInOrchestrator,
+                                    OperaInvoicePostingService operaInvoicePostingService,
+                                    ProductRepository productRepo,
+                                    OperaFiscalMappingService operaFiscalMappingService,
+                                    EntityManager entityManager) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.invoiceService = invoiceService;
+        this.bookingOperaProperties = bookingOperaProperties;
+        this.operaCheckInOrchestrator = operaCheckInOrchestrator;
+        this.operaInvoicePostingService = operaInvoicePostingService;
+        this.productRepo = productRepo;
+        this.operaFiscalMappingService = operaFiscalMappingService;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -67,7 +93,7 @@ public class ReservationStayService {
             return CheckinReadinessDto.builder().eligible(false).issues(issues).build();
         }
 
-        List<Reservation> reservations = reservationRepo.findByRequestId(requestId);
+        List<Reservation> reservations = reservationRepo.findByRequestIdWithDetails(requestId);
         if (reservations.isEmpty()) {
             issues.add("Reservation request has no reservations");
             return CheckinReadinessDto.builder().eligible(false).issues(issues).build();
@@ -80,6 +106,19 @@ public class ReservationStayService {
                 issues.add("Non-cancelled reservation " + reservation.getId() + " must be CONFIRMED (found: "
                         + reservation.getStatus() + ")");
             }
+        }
+        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+            for (Reservation reservation : reservations) {
+                if ("CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                    continue;
+                }
+                if (reservation.getRequestedResource() == null
+                        || !StringUtils.hasText(reservation.getRequestedResource().getOperaRoomId())) {
+                    issues.add("Opera check-in requires OHIP room id on resource for reservation line "
+                            + reservation.getId());
+                }
+            }
+            addOperaChargeMappingIssues(request.getTenantId(), reservations, issues);
         }
 
         return CheckinReadinessDto.builder().eligible(issues.isEmpty()).issues(issues).build();
@@ -142,7 +181,7 @@ public class ReservationStayService {
             throw new IllegalStateException("Reservation request expired");
         }
 
-        List<Reservation> reservations = reservationRepo.findByRequestId(requestId);
+        List<Reservation> reservations = reservationRepo.findByRequestIdWithDetails(requestId);
         if (reservations.isEmpty()) {
             throw new IllegalStateException("Reservation request has no reservations");
         }
@@ -157,6 +196,27 @@ public class ReservationStayService {
             }
         }
 
+        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+            List<String> chargeMappingBlockers = new ArrayList<>();
+            addOperaChargeMappingIssues(request.getTenantId(), reservations, chargeMappingBlockers);
+            if (!chargeMappingBlockers.isEmpty()) {
+                throw new IllegalStateException(String.join("; ", chargeMappingBlockers));
+            }
+        }
+
+        operaCheckInOrchestrator.runIfEnabled(request, reservations);
+
+        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+            request = requestRepo.findById(requestId)
+                    .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+            reservations = reservationRepo.findByRequestIdWithDetails(requestId);
+            // Opera progress is persisted in REQUIRES_NEW transactions; same check-in transaction may still hold
+            // stale Reservation entities. Reload OHIP ids from DB before final invoice + posting.
+            for (Reservation r : reservations) {
+                entityManager.refresh(r);
+            }
+        }
+
         for (Invoice inv : invoiceService.findByRequestId(requestId)) {
             if (inv.getInvoiceType() == InvoiceType.DEPOSIT && inv.getStornoId() == null) {
                 if (!invoiceService.hasReversalChildForSourceInvoice(inv.getId(), InvoiceType.DEPOSIT)) {
@@ -167,6 +227,10 @@ public class ReservationStayService {
 
         invoiceService.createDraftForFinalizedRequest(requestId);
         invoiceService.allocateReleasedDepositPaymentsToFinalRequestInvoice(requestId);
+        Invoice finalInvoice = invoiceService.issueSystemFinalInvoiceForRequest(requestId);
+        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+            operaInvoicePostingService.postInvoice(finalInvoice.getId(), null);
+        }
 
         request.setStatus(ReservationRequest.Status.CHECKED_IN);
         requestRepo.save(request);
@@ -217,6 +281,31 @@ public class ReservationStayService {
                 .status(ReservationRequest.Status.CHECKED_OUT.name())
                 .warnings(gate.warnings() != null ? gate.warnings() : List.of())
                 .build();
+    }
+
+    private void addOperaChargeMappingIssues(Long tenantId, List<Reservation> reservations, List<String> issues) {
+        if (tenantId == null) {
+            return;
+        }
+        for (Reservation r : reservations) {
+            if (r.getStatus() != null && "CANCELLED".equalsIgnoreCase(r.getStatus().trim())) {
+                continue;
+            }
+            Long productId = r.getProductId();
+            String productType = null;
+            if (productId != null) {
+                productType = productRepo.findById(productId)
+                        .map(Product::getProductType)
+                        .orElse(null);
+            }
+            if (operaFiscalMappingService.resolveChargeMapping(tenantId, productId, productType).isEmpty()) {
+                String typeLabel = productType != null ? productType : "unknown";
+                issues.add("Opera charge mapping is missing for reservation line " + r.getId()
+                        + " (productId=" + productId + ", productType=" + typeLabel
+                        + "). Configure an active opera_fiscal_charge_mapping for this product, for product_type "
+                        + typeLabel + ", or a tenant default row with product_id and product_type both null.");
+            }
+        }
     }
 
     private CheckinResultDto buildCheckinResult(Long requestId) {

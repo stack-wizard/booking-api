@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
+import com.stackwizard.booking_api.config.BookingDevProperties;
+import com.stackwizard.booking_api.config.BookingOperaProperties;
 import com.stackwizard.booking_api.config.MediaS3Properties;
 import com.stackwizard.booking_api.config.PaymentsProperties;
 import com.stackwizard.booking_api.security.JwtProperties;
@@ -14,7 +16,9 @@ import com.stackwizard.booking_api.security.JwtProperties;
 @EnableConfigurationProperties({
 		JwtProperties.class,
 		MediaS3Properties.class,
-		PaymentsProperties.class
+		PaymentsProperties.class,
+		BookingOperaProperties.class,
+		BookingDevProperties.class
 })
 @EnableAsync
 @EnableScheduling

@@ -1,3 +1,5 @@
+# Requires: --spring.profiles.active=local (or include "local" with other profiles)
+# so booking.dev.reference-date is honored (see BookingDevTimeSupport).
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/booking_db
@@ -17,3 +19,8 @@ media:
     secret-key: ${MEDIA_S3_SECRET_KEY:minioadmin}
     path-style-access: ${MEDIA_S3_PATH_STYLE_ACCESS:true}
     public-prefix: ${MEDIA_S3_PUBLIC_PREFIX:public}
+
+# Pretend "today" for map /periods (overrides client fromDate when profile is dev/local).
+booking:
+  dev:
+    reference-date: 2026-04-01

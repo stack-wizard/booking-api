@@ -5,6 +5,7 @@ import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.MediaStorageService;
 import com.stackwizard.booking_api.service.ResourceMapService;
+import com.stackwizard.booking_api.support.BookingDevTimeSupport;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -19,10 +20,14 @@ import java.util.List;
 public class ResourceMapController {
     private final ResourceMapService service;
     private final MediaStorageService mediaStorageService;
+    private final BookingDevTimeSupport devTimeSupport;
 
-    public ResourceMapController(ResourceMapService service, MediaStorageService mediaStorageService) {
+    public ResourceMapController(ResourceMapService service,
+                                MediaStorageService mediaStorageService,
+                                BookingDevTimeSupport devTimeSupport) {
         this.service = service;
         this.mediaStorageService = mediaStorageService;
+        this.devTimeSupport = devTimeSupport;
     }
 
     @GetMapping
@@ -39,7 +44,7 @@ public class ResourceMapController {
                                               @RequestParam(required = false) Long locationId,
                                               @RequestParam(required = false) LocalDate fromDate) {
         Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
-        LocalDate effectiveFromDate = fromDate != null ? fromDate : LocalDate.now();
+        LocalDate effectiveFromDate = devTimeSupport.resolvePeriodsFromDate(fromDate);
         return service.getMapPeriods(resolvedTenantId, locationId, effectiveFromDate);
     }
 

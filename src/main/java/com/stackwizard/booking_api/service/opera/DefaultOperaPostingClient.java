@@ -17,6 +17,9 @@ import java.util.Base64;
 @Component
 public class DefaultOperaPostingClient implements OperaPostingClient {
     private static final String CHARGES_AND_PAYMENTS_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/chargesAndPayments";
+    private static final String CREATE_RESERVATION_PATH = "/rsv/v1/hotels/{hotelCode}/reservations";
+    private static final String CHECK_IN_PATH = "/fof/v1/hotels/{hotelCode}/reservations/{reservationId}/checkIns";
+    private static final String PAYMENT_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/payments";
     private static final String OAUTH_SCOPE = "urn:opc:hgbu:ws:__myscopes__";
 
     private final RestClient restClient;
@@ -35,6 +38,57 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = buildChargesAndPaymentsUrl(config.baseUrl(), hotelCode, reservationId);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = payload == null ? "{}" : payload.toString();
+        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    @Override
+    public JsonNode postCreateReservation(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                          String chainCode,
+                                          String hotelCode,
+                                          JsonNode body) {
+        String path = CREATE_RESERVATION_PATH.replace("{hotelCode}", hotelCode);
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = body == null ? "{}" : body.toString();
+        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    @Override
+    public JsonNode postCheckIn(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                String chainCode,
+                                String hotelCode,
+                                Long reservationId,
+                                JsonNode body) {
+        String path = CHECK_IN_PATH
+                .replace("{hotelCode}", hotelCode)
+                .replace("{reservationId}", reservationId != null ? reservationId.toString() : "");
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = body == null ? "{}" : body.toString();
+        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    @Override
+    public JsonNode postPayment(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                String chainCode,
+                                String hotelCode,
+                                Long reservationId,
+                                JsonNode body) {
+        String path = PAYMENT_PATH
+                .replace("{hotelCode}", hotelCode)
+                .replace("{reservationId}", reservationId != null ? reservationId.toString() : "");
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = body == null ? "{}" : body.toString();
+        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    private JsonNode postJson(OperaTenantConfigResolver.OperaResolvedConfig config,
+                              String chainCode,
+                              String hotelCode,
+                              String requestUrl,
+                              String authorization,
+                              String requestBody) {
         try {
             String raw = restClient.post()
                     .uri(requestUrl)

@@ -47,3 +47,6 @@ payments:
 
 booking:
   public-base-url: ${BOOKING_PUBLIC_BASE_URL:}
+  opera:
+    check-in:
+      enabled: ${BOOKING_OPERA_CHECKIN_ENABLED:true}

@@ -37,6 +37,8 @@ public class ReservationRequestDto {
     private String paymentStatus;
     private LocalDateTime reservationStartsAt;
     private LocalDateTime reservationEndsAt;
+    /** OHIP guest profile id after first successful Opera check-in. */
+    private String operaProfileId;
     private List<ReservationSummaryDto> reservations;
     private PublicCancellationPreviewDto publicCancellation;
 }

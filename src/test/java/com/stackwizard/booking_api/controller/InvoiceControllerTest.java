@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -85,11 +86,11 @@ class InvoiceControllerTest {
         Invoice issued = Invoice.builder()
                 .id(44L)
                 .tenantId(1L)
-                .invoiceType(InvoiceType.INVOICE)
-                .invoiceNumber("INV-1")
+                .invoiceType(InvoiceType.DEPOSIT)
+                .invoiceNumber("DEP-1")
                 .invoiceDate(LocalDate.of(2026, 4, 1))
                 .status(InvoiceStatus.ISSUED)
-                .paymentStatus("UNPAID")
+                .paymentStatus("PAID")
                 .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
                 .currency("EUR")
                 .subtotalNet(new BigDecimal("80.00"))
@@ -101,11 +102,11 @@ class InvoiceControllerTest {
         Invoice failedFiscalization = Invoice.builder()
                 .id(44L)
                 .tenantId(1L)
-                .invoiceType(InvoiceType.INVOICE)
-                .invoiceNumber("INV-1")
+                .invoiceType(InvoiceType.DEPOSIT)
+                .invoiceNumber("DEP-1")
                 .invoiceDate(LocalDate.of(2026, 4, 1))
                 .status(InvoiceStatus.ISSUED)
-                .paymentStatus("UNPAID")
+                .paymentStatus("PAID")
                 .fiscalizationStatus(InvoiceFiscalizationStatus.FAILED)
                 .currency("EUR")
                 .subtotalNet(new BigDecimal("80.00"))
@@ -127,6 +128,44 @@ class InvoiceControllerTest {
         Invoice returnedInvoice = (Invoice) response.getBody().get("invoice");
         assertThat(returnedInvoice.getFiscalizationStatus()).isEqualTo(InvoiceFiscalizationStatus.FAILED);
         assertThat(returnedInvoice.getStatus()).isEqualTo(InvoiceStatus.ISSUED);
+    }
+
+    @Test
+    void issueInvoiceSkipsLocalFiscalizationForFinalInvoice() {
+        InvoiceController controller = new InvoiceController(
+                invoiceService,
+                invoicePdfService,
+                invoiceFiscalizationService,
+                operaInvoicePostingService
+        );
+
+        Invoice issued = Invoice.builder()
+                .id(45L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-1")
+                .invoiceDate(LocalDate.of(2026, 4, 1))
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.NOT_REQUIRED)
+                .currency("EUR")
+                .subtotalNet(new BigDecimal("80.00"))
+                .discountTotal(BigDecimal.ZERO)
+                .tax1Total(new BigDecimal("20.00"))
+                .tax2Total(BigDecimal.ZERO)
+                .totalGross(new BigDecimal("100.00"))
+                .build();
+
+        when(invoiceService.issueInvoice(eq(45L), any(InvoiceIssueRequest.class))).thenReturn(issued);
+        lenient().when(invoiceService.findItems(45L)).thenReturn(java.util.List.of());
+        lenient().when(invoiceService.findAllocations(45L)).thenReturn(java.util.List.of());
+
+        ResponseEntity<Map<String, Object>> response = controller.issueInvoice(45L, new InvoiceIssueRequest());
+
+        assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
+        Invoice returnedInvoice = (Invoice) response.getBody().get("invoice");
+        assertThat(returnedInvoice.getFiscalizationStatus()).isEqualTo(InvoiceFiscalizationStatus.NOT_REQUIRED);
+        verify(invoiceFiscalizationService, never()).tryFiscalizeInvoice(any(), any());
     }
 
     @Test

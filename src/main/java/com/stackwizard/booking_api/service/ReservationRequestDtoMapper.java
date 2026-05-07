@@ -59,6 +59,7 @@ public class ReservationRequestDtoMapper {
 
         List<ReservationSummaryDto> reservationDtos = reservations.stream()
                 .map(reservation -> ReservationSummaryDto.builder()
+                        .reservationId(reservation.getId())
                         .id(reservation.getId())
                         .tenantId(reservation.getTenantId())
                         .productId(reservation.getProductId())
@@ -68,6 +69,8 @@ public class ReservationRequestDtoMapper {
                         .requestedResourceId(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getId() : null)
                         .requestedResourceCode(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getCode() : null)
                         .requestedResourceName(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getName() : null)
+                        .operaRoomId(reservation.getRequestedResource() != null ? reservation.getRequestedResource().getOperaRoomId() : null)
+                        .operaReservationId(reservation.getOperaReservationId())
                         .startsAt(reservation.getStartsAt())
                         .endsAt(reservation.getEndsAt())
                         .status(reservation.getStatus())
@@ -121,6 +124,7 @@ public class ReservationRequestDtoMapper {
                 .paymentStatus(paymentSummary.paymentStatus())
                 .reservationStartsAt(reservationStartsAt)
                 .reservationEndsAt(reservationEndsAt)
+                .operaProfileId(request.getOperaProfileId())
                 .reservations(reservationDtos)
                 .build();
     }

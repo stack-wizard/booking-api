@@ -94,6 +94,18 @@ public class Reservation {
     @Column(name = "expires_at")
     private OffsetDateTime expiresAt;
 
+    @Column(name = "opera_reservation_id")
+    private Long operaReservationId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "opera_check_in_status")
+    private OperaCheckInLineStatus operaCheckInStatus;
+
+    @Column(name = "opera_check_in_error")
+    private String operaCheckInError;
+
+    @Column(name = "opera_check_in_at")
+    private OffsetDateTime operaCheckInAt;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

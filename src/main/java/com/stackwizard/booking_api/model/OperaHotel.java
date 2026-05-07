@@ -42,6 +42,12 @@ public class OperaHotel {
     @Column(name = "default_folio_window_no")
     private Integer defaultFolioWindowNo;
 
+    @Column(name = "checkin_deposit_payment_trx_code")
+    private String checkinDepositPaymentTrxCode;
+
+    @Column(name = "checkin_deposit_payment_method_code")
+    private String checkinDepositPaymentMethodCode;
+
     @Column(nullable = false)
     private Boolean active;
 

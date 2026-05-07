@@ -132,7 +132,14 @@ public class OperaFiscalMappingService {
             throw new IllegalArgumentException("trxCode is required");
         }
         mapping.setTrxCode(normalizeUpper(mapping.getTrxCode()));
-        mapping.setTrxType(normalizeUpperDefault(mapping.getTrxType(), "C"));
+        String trxType = normalizeUpperDefault(mapping.getTrxType(), "C");
+        if (!"C".equals(trxType) && !"FC".equals(trxType)) {
+            throw new IllegalArgumentException(
+                    "trxType for charge mappings must be 'C' or 'FC' (OHIP transaction category), not '"
+                            + trxType + "'. Put the OHIP posting code in trxCode only; trxCodeType is separate "
+                            + "(often 'L').");
+        }
+        mapping.setTrxType(trxType);
         mapping.setTrxCodeType(normalizeUpperDefault(mapping.getTrxCodeType(), "L"));
         mapping.setTrxGroup(normalizeNullable(mapping.getTrxGroup()));
         mapping.setTrxSubGroup(normalizeNullable(mapping.getTrxSubGroup()));
@@ -169,7 +176,13 @@ public class OperaFiscalMappingService {
         }
         mapping.setTrxCode(normalizeUpper(mapping.getTrxCode()));
         mapping.setPaymentMethodCode(normalizeNullableUpper(mapping.getPaymentMethodCode()));
-        mapping.setTrxType(normalizeUpperDefault(mapping.getTrxType(), "FC"));
+        String trxType = normalizeUpperDefault(mapping.getTrxType(), "FC");
+        if (!"C".equals(trxType) && !"FC".equals(trxType)) {
+            throw new IllegalArgumentException(
+                    "trxType for payment mappings must be 'C' or 'FC', not '" + trxType
+                            + "'. Put the OHIP transaction code in trxCode.");
+        }
+        mapping.setTrxType(trxType);
         mapping.setTrxCodeType(normalizeUpperDefault(mapping.getTrxCodeType(), "O"));
         mapping.setTrxGroup(normalizeNullable(mapping.getTrxGroup()));
         mapping.setTrxSubGroup(normalizeNullable(mapping.getTrxSubGroup()));

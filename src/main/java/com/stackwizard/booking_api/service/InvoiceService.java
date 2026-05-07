@@ -317,7 +317,7 @@ public class InvoiceService {
             invoice.setIssuedAt(OffsetDateTime.now());
         }
         if (invoice.getFiscalizationStatus() != InvoiceFiscalizationStatus.FISCALIZED) {
-            if (invoice.getInvoiceType() == InvoiceType.ROOM_CHARGE) {
+            if (isLocalFiscalizationNotRequiredForInvoiceType(invoice.getInvoiceType())) {
                 invoice.setFiscalizationStatus(InvoiceFiscalizationStatus.NOT_REQUIRED);
             } else {
                 invoice.setFiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED);
@@ -404,6 +404,9 @@ public class InvoiceService {
 
         int lineNo = 1;
         for (Reservation reservation : reservations) {
+            if (reservation.getStatus() != null && "CANCELLED".equalsIgnoreCase(reservation.getStatus().trim())) {
+                continue;
+            }
             Product product = reservation.getProductId() != null ? productById.get(reservation.getProductId()) : null;
             BigDecimal grossAmount = amount(
                     reservation.getGrossAmount() != null
@@ -443,6 +446,11 @@ public class InvoiceService {
             tax1Total = tax1Total.add(tax1Amount);
             tax2Total = tax2Total.add(tax2Amount);
             totalGross = totalGross.add(grossAmount);
+        }
+
+        if (lineNo == 1) {
+            throw new IllegalStateException(
+                    "Cannot create final invoice: request has no non-cancelled reservations to bill");
         }
 
         invoice.setSubtotalNet(money(subtotalNet));
@@ -1512,6 +1520,14 @@ public class InvoiceService {
         throw new IllegalArgumentException("Unsupported invoice type for storno: " + sourceType);
     }
 
+    /**
+     * Final stay invoices ({@link InvoiceType#INVOICE}) are mirrored in Opera/PMS; local OFIS fiscalization is not required.
+     * Same for {@link InvoiceType#ROOM_CHARGE}.
+     */
+    private static boolean isLocalFiscalizationNotRequiredForInvoiceType(InvoiceType invoiceType) {
+        return invoiceType == InvoiceType.ROOM_CHARGE || invoiceType == InvoiceType.INVOICE;
+    }
+
     private Invoice issueSystemInvoiceIfNeeded(Invoice invoice) {
         if (invoice.getStatus() == InvoiceStatus.ISSUED) {
             return invoice;
@@ -1525,7 +1541,7 @@ public class InvoiceService {
         }
         if (invoice.getFiscalizationStatus() != InvoiceFiscalizationStatus.FISCALIZED) {
             invoice.setFiscalizationStatus(
-                    invoice.getInvoiceType() == InvoiceType.ROOM_CHARGE
+                    isLocalFiscalizationNotRequiredForInvoiceType(invoice.getInvoiceType())
                             ? InvoiceFiscalizationStatus.NOT_REQUIRED
                             : InvoiceFiscalizationStatus.REQUIRED
             );

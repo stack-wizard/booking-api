@@ -15,10 +15,12 @@ import com.stackwizard.booking_api.model.OperaInvoiceTypeRouting;
 import com.stackwizard.booking_api.model.OperaPostingStatus;
 import com.stackwizard.booking_api.model.PaymentTransaction;
 import com.stackwizard.booking_api.model.Product;
+import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.repository.InvoiceItemRepository;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
 import com.stackwizard.booking_api.repository.InvoiceRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.service.PaymentTransactionService;
 import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,10 +37,12 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyIterable;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -63,6 +67,8 @@ class OperaInvoicePostingServiceTest {
     private OperaTenantConfigResolver tenantConfigResolver;
     @Mock
     private OperaPostingClient operaPostingClient;
+    @Mock
+    private ReservationRepository reservationRepo;
 
     private OperaInvoicePostingService service;
 
@@ -77,7 +83,8 @@ class OperaInvoicePostingServiceTest {
                 operaFiscalMappingService,
                 configurationService,
                 tenantConfigResolver,
-                operaPostingClient
+                operaPostingClient,
+                reservationRepo
         );
     }
 
@@ -513,5 +520,284 @@ class OperaInvoicePostingServiceTest {
 
         assertThat(result.getOperaPostingStatus()).isEqualTo(OperaPostingStatus.FAILED);
         assertThat(result.getOperaErrorMessage()).isEqualTo("OHIP request failed");
+    }
+
+    @Test
+    void postFinalStayInvoicePostsChargesOnlyForEachReservationLine() {
+        Invoice invoice = Invoice.builder()
+                .id(50L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2026-00050")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("200.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem itemA = InvoiceItem.builder()
+                .id(501L)
+                .invoice(invoice)
+                .lineNo(1)
+                .reservationId(301L)
+                .productId(77L)
+                .productName("Stay A")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        InvoiceItem itemB = InvoiceItem.builder()
+                .id(502L)
+                .invoice(invoice)
+                .lineNo(2)
+                .reservationId(302L)
+                .productId(77L)
+                .productName("Stay B")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        Product product = Product.builder()
+                .id(77L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(801L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(901L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .chainCode("SUN")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        Reservation stayA = Reservation.builder()
+                .id(301L)
+                .tenantId(1L)
+                .operaReservationId(91001L)
+                .build();
+        Reservation stayB = Reservation.builder()
+                .id(302L)
+                .tenantId(1L)
+                .operaReservationId(91002L)
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+        JsonNode response = new ObjectMapper().createObjectNode().put("status", "ok");
+
+        when(invoiceRepo.findById(50L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(50L)).thenReturn(List.of(itemA, itemB));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 77L, "ROOM")).thenReturn(Optional.of(chargeMapping));
+        when(reservationRepo.findById(301L)).thenReturn(Optional.of(stayA));
+        when(reservationRepo.findById(302L)).thenReturn(Optional.of(stayB));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq("SUN"), anyLong(), any()))
+                .thenReturn(response);
+
+        OperaInvoicePostingResult result = service.postInvoice(50L, new OperaInvoicePostRequest());
+
+        assertThat(result.invoice().getOperaPostingStatus()).isEqualTo(OperaPostingStatus.POSTED);
+        assertThat(result.invoice().getOperaReservationId()).isNull();
+        org.mockito.ArgumentCaptor<JsonNode> payloadCaptor = org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+        verify(operaPostingClient, times(2)).postChargesAndPayments(
+                any(), eq("DH"), eq("SUN"), anyLong(), payloadCaptor.capture());
+        for (JsonNode posted : payloadCaptor.getAllValues()) {
+            assertThat(posted.path("payments").isArray()).isTrue();
+            assertThat(posted.path("payments")).isEmpty();
+            assertThat(posted.path("charges").isArray()).isTrue();
+            assertThat(posted.path("charges")).isNotEmpty();
+        }
+    }
+
+    @Test
+    void postFinalStayInvoiceInfersStayLinksFromReservationRequestWhenLineReservationIdMissing() {
+        Invoice invoice = Invoice.builder()
+                .id(51L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .reservationRequestId(600L)
+                .invoiceNumber("INV-2026-00051")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("200.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem itemA = InvoiceItem.builder()
+                .id(511L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(77L)
+                .productName("Stay A")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        InvoiceItem itemB = InvoiceItem.builder()
+                .id(512L)
+                .invoice(invoice)
+                .lineNo(2)
+                .productId(78L)
+                .productName("Stay B")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        Product product = Product.builder()
+                .id(77L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build();
+        Product productB = Product.builder()
+                .id(78L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(801L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(901L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .chainCode("SUN")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        Reservation stayA = Reservation.builder()
+                .id(301L)
+                .tenantId(1L)
+                .productId(77L)
+                .status("CONFIRMED")
+                .operaReservationId(91001L)
+                .build();
+        Reservation stayB = Reservation.builder()
+                .id(302L)
+                .tenantId(1L)
+                .productId(78L)
+                .status("CONFIRMED")
+                .operaReservationId(91002L)
+                .build();
+        InvoiceItem persistedRowA = InvoiceItem.builder()
+                .id(511L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(77L)
+                .productName("Stay A")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        InvoiceItem persistedRowB = InvoiceItem.builder()
+                .id(512L)
+                .invoice(invoice)
+                .lineNo(2)
+                .productId(78L)
+                .productName("Stay B")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+        JsonNode response = new ObjectMapper().createObjectNode().put("status", "ok");
+
+        when(invoiceRepo.findById(51L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(51L)).thenReturn(List.of(itemA, itemB));
+        when(reservationRepo.findByRequestId(600L)).thenReturn(List.of(stayA, stayB));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product, productB));
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 77L, "ROOM")).thenReturn(Optional.of(chargeMapping));
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 78L, "ROOM")).thenReturn(Optional.of(chargeMapping));
+        when(reservationRepo.findById(301L)).thenReturn(Optional.of(stayA));
+        when(reservationRepo.findById(302L)).thenReturn(Optional.of(stayB));
+        when(invoiceItemRepo.findById(511L)).thenReturn(Optional.of(persistedRowA));
+        when(invoiceItemRepo.findById(512L)).thenReturn(Optional.of(persistedRowB));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(invoiceItemRepo.save(any(InvoiceItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq("SUN"), anyLong(), any()))
+                .thenReturn(response);
+
+        OperaInvoicePostingResult result = service.postInvoice(51L, new OperaInvoicePostRequest());
+
+        assertThat(result.invoice().getOperaPostingStatus()).isEqualTo(OperaPostingStatus.POSTED);
+        org.mockito.ArgumentCaptor<InvoiceItem> savedItem = org.mockito.ArgumentCaptor.forClass(InvoiceItem.class);
+        verify(invoiceItemRepo, times(2)).save(savedItem.capture());
+        assertThat(savedItem.getAllValues()).extracting(InvoiceItem::getReservationId).containsExactlyInAnyOrder(301L, 302L);
+    }
+
+    @Test
+    void postFinalStayInvoiceRejectsMixedReservationAndMissingStayLinks() {
+        Invoice invoice = Invoice.builder()
+                .id(52L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2026-00052")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem withStay = InvoiceItem.builder()
+                .id(521L)
+                .invoice(invoice)
+                .lineNo(1)
+                .reservationId(301L)
+                .productId(77L)
+                .productName("A")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("50.00"))
+                .grossAmount(new BigDecimal("50.00"))
+                .build();
+        InvoiceItem missingStay = InvoiceItem.builder()
+                .id(522L)
+                .invoice(invoice)
+                .lineNo(2)
+                .productId(77L)
+                .productName("B")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("50.00"))
+                .grossAmount(new BigDecimal("50.00"))
+                .build();
+
+        when(invoiceRepo.findById(52L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(52L)).thenReturn(List.of(withStay, missingStay));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.postInvoice(52L, new OperaInvoicePostRequest()),
+                "Expected mix of reservationId null/non-null to fail");
+        verify(operaPostingClient, never()).postChargesAndPayments(any(), any(), any(), any(), any());
     }
 }
