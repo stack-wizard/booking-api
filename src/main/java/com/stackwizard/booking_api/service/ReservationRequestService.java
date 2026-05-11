@@ -78,7 +78,19 @@ public class ReservationRequestService {
 
     public List<ReservationRequest> findAll() { return requestRepo.findAll(); }
     public Optional<ReservationRequest> findById(Long id) { return requestRepo.findById(id); }
-    public ReservationRequest save(ReservationRequest request) { return requestRepo.save(request); }
+    public ReservationRequest save(ReservationRequest request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Reservation request is required");
+        }
+        normalizeOperaLinkFields(request);
+        request.setNotes(normalizeNullable(request.getNotes()));
+        request.setExternalReservation(normalizeNullable(request.getExternalReservation()));
+        request.setCustomerName(normalizeNullable(request.getCustomerName()));
+        request.setCustomerEmail(normalizeNullable(request.getCustomerEmail()));
+        request.setCustomerPhone(normalizeNullable(request.getCustomerPhone()));
+        request.setCustomerCountry(normalizeCustomerCountry(request.getCustomerCountry()));
+        return requestRepo.save(request);
+    }
 
     /**
      * Replaces editable fields on a draft request from an admin payload (booking-admin sends all keys explicitly).
@@ -116,6 +128,9 @@ public class ReservationRequestService {
         existing.setCustomerEmail(normalizeNullable(incoming.getCustomerEmail()));
         existing.setCustomerPhone(normalizeNullable(incoming.getCustomerPhone()));
         existing.setCustomerCountry(normalizeCustomerCountry(incoming.getCustomerCountry()));
+        existing.setOperaHotelCode(normalizeOperaHotelCode(incoming.getOperaHotelCode()));
+        existing.setLinkedOperaReservationId(normalizePositiveLong(incoming.getLinkedOperaReservationId()));
+        normalizeOperaLinkFields(existing);
 
         ReservationRequest saved = requestRepo.save(existing);
 
@@ -136,6 +151,49 @@ public class ReservationRequestService {
         return saved;
     }
 
+    @Transactional
+    public ReservationRequest attachOperaReservation(Long requestId,
+                                                     String operaHotelCode,
+                                                     Long linkedOperaReservationId,
+                                                     String operaProfileId,
+                                                     String externalReservation,
+                                                     String customerName,
+                                                     String customerEmail,
+                                                     String customerPhone) {
+        ReservationRequest request = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (request.getStatus() == ReservationRequest.Status.CANCELLED
+                || request.getStatus() == ReservationRequest.Status.CHECKED_IN
+                || request.getStatus() == ReservationRequest.Status.CHECKED_OUT
+                || request.getStatus() == ReservationRequest.Status.EXPIRED) {
+            throw new IllegalStateException("Opera reservation cannot be attached in status " + request.getStatus());
+        }
+
+        request.setOperaHotelCode(normalizeOperaHotelCode(operaHotelCode));
+        request.setLinkedOperaReservationId(normalizePositiveLong(linkedOperaReservationId));
+        request.setOperaProfileId(normalizeNullable(operaProfileId));
+        request.setExternalReservation(normalizeNullable(externalReservation));
+        request.setCustomerName(normalizeNullable(customerName));
+        request.setCustomerEmail(normalizeNullable(customerEmail));
+        request.setCustomerPhone(normalizeNullable(customerPhone));
+        normalizeOperaLinkFields(request);
+        ReservationRequest saved = requestRepo.save(request);
+
+        List<Reservation> reservations = reservationRepo.findByRequestId(requestId);
+        if (!reservations.isEmpty()) {
+            for (Reservation reservation : reservations) {
+                reservation.setCustomerName(saved.getCustomerName());
+                reservation.setCustomerEmail(saved.getCustomerEmail());
+                reservation.setCustomerPhone(saved.getCustomerPhone());
+                if (saved.getLinkedOperaReservationId() != null) {
+                    reservation.setOperaReservationId(saved.getLinkedOperaReservationId());
+                }
+            }
+            reservationRepo.saveAll(reservations);
+        }
+        return saved;
+    }
+
     private String normalizeCustomerCountry(String raw) {
         if (raw == null) {
             return null;
@@ -149,6 +207,32 @@ public class ReservationRequestService {
             throw new IllegalArgumentException("customerCountry must be a 2-letter ISO 3166-1 alpha-2 code");
         }
         return upper;
+    }
+
+    private void normalizeOperaLinkFields(ReservationRequest request) {
+        if (request == null) {
+            return;
+        }
+        request.setOperaHotelCode(normalizeOperaHotelCode(request.getOperaHotelCode()));
+        request.setLinkedOperaReservationId(normalizePositiveLong(request.getLinkedOperaReservationId()));
+        request.setOperaProfileId(normalizeNullable(request.getOperaProfileId()));
+        if (request.getLinkedOperaReservationId() == null) {
+            request.setOperaHotelCode(null);
+        }
+    }
+
+    private String normalizeOperaHotelCode(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        return raw.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private Long normalizePositiveLong(Long value) {
+        if (value == null || value <= 0) {
+            return null;
+        }
+        return value;
     }
 
     @Scheduled(fixedDelayString = "${reservation-requests.expiry-scan-ms:60000}")
@@ -231,6 +315,18 @@ public class ReservationRequestService {
             reservationRepo.saveAll(reservations);
         }
         return saved;
+    }
+
+    @Transactional
+    public ReservationRequest updateNotes(Long requestId, String notes) {
+        ReservationRequest request = requestRepo.findById(requestId)
+                .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        if (request.getStatus() == ReservationRequest.Status.CANCELLED
+                || request.getStatus() == ReservationRequest.Status.EXPIRED) {
+            throw new IllegalStateException("Notes cannot be updated for request in status " + request.getStatus());
+        }
+        request.setNotes(normalizeNullable(notes));
+        return requestRepo.save(request);
     }
 
     @Transactional

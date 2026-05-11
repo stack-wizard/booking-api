@@ -26,8 +26,10 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -120,6 +122,8 @@ public class ReservationService {
                 r.setRequestType(request.getType());
             }
         }
+        applyDefaultOperaReservationLink(r, request);
+        applyPricingForHoldReservation(r, request);
         if (isOpenEndedDraftRequest(request)) {
             r.setExpiresAt(null);
         } else if (r.getExpiresAt() == null) {
@@ -307,6 +311,7 @@ public class ReservationService {
                 .unitPrice(unitPrice)
                 .grossAmount(grossAmount)
                 .build();
+        applyDefaultOperaReservationLink(reservation, reservationRequest);
 
         Reservation saved = repo.save(reservation);
 
@@ -522,6 +527,151 @@ public class ReservationService {
             }
         }
         throw new IllegalArgumentException("UOM not allowed for product");
+    }
+
+    private void applyPricingForHoldReservation(Reservation reservation, ReservationRequest request) {
+        ReservationRequest.Type requestType = reservation.getRequestType() != null
+                ? reservation.getRequestType()
+                : request != null ? request.getType() : null;
+        if (requestType == ReservationRequest.Type.INTERNAL) {
+            reservation.setCurrency(null);
+            reservation.setQty(null);
+            reservation.setUnitPrice(null);
+            reservation.setGrossAmount(null);
+            return;
+        }
+        if (reservation.getTenantId() == null
+                || reservation.getStartsAt() == null
+                || reservation.getEndsAt() == null
+                || !reservation.getEndsAt().isAfter(reservation.getStartsAt())) {
+            return;
+        }
+
+        Resource requestedResource = loadRequestedResource(reservation);
+        Product product = resolveReservationProduct(reservation, requestedResource);
+        validateProductResource(product, requestedResource);
+
+        String currency = normalizeCurrency(reservation.getCurrency());
+        String uom = BookingUom.normalize(product.getDefaultUom());
+        List<PriceListEntry> priceEntries = priceListRepo.findForProductUomOnDate(
+                product.getId(),
+                uom,
+                currency,
+                reservation.getTenantId(),
+                reservation.getStartsAt().toLocalDate()
+        );
+        if (priceEntries.isEmpty()) {
+            throw new IllegalArgumentException("No price for product and uom on date");
+        }
+
+        PriceListEntry selectedPrice = selectPriceEntry(priceEntries, reservation.getStartsAt(), reservation.getEndsAt());
+        int qty = deriveReservationQty(uom, reservation.getStartsAt(), reservation.getEndsAt(), selectedPrice);
+        BigDecimal calculatedUnitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
+
+        reservation.setRequestedResource(requestedResource);
+        reservation.setProductId(product.getId());
+        reservation.setCurrency(currency);
+        reservation.setQty(qty);
+        reservation.setUnitPrice(calculatedUnitPrice);
+        reservation.setGrossAmount(money(calculatedUnitPrice.multiply(BigDecimal.valueOf(qty))));
+    }
+
+    private Resource loadRequestedResource(Reservation reservation) {
+        if (reservation.getRequestedResource() == null || reservation.getRequestedResource().getId() == null) {
+            throw new IllegalArgumentException("requestedResource.id is required");
+        }
+        return resourceRepo.findById(reservation.getRequestedResource().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Requested resource not found"));
+    }
+
+    private Product resolveReservationProduct(Reservation reservation, Resource requestedResource) {
+        if (reservation.getProductId() != null) {
+            return productRepo.findById(reservation.getProductId())
+                    .orElseThrow(() -> new IllegalArgumentException("Product not found"));
+        }
+        if (requestedResource.getProduct() == null || requestedResource.getProduct().getId() == null) {
+            throw new IllegalArgumentException("productId is required");
+        }
+        return requestedResource.getProduct();
+    }
+
+    private String normalizeCurrency(String currency) {
+        if (!StringUtils.hasText(currency)) {
+            return "EUR";
+        }
+        return currency.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private PriceListEntry selectPriceEntry(List<PriceListEntry> priceEntries,
+                                            LocalDateTime startsAt,
+                                            LocalDateTime endsAt) {
+        for (PriceListEntry entry : priceEntries) {
+            if (entry.getStartTime() == null || entry.getEndTime() == null) {
+                continue;
+            }
+            if (entry.getStartTime().equals(startsAt.toLocalTime())
+                    && entry.getEndTime().equals(endsAt.toLocalTime())) {
+                return entry;
+            }
+        }
+        return priceEntries.getFirst();
+    }
+
+    private int deriveReservationQty(String uom,
+                                     LocalDateTime startsAt,
+                                     LocalDateTime endsAt,
+                                     PriceListEntry selectedPrice) {
+        if ("DAY".equalsIgnoreCase(uom)) {
+            return 1;
+        }
+        if ("HOUR".equalsIgnoreCase(uom)) {
+            long minutes = java.time.Duration.between(startsAt, endsAt).toMinutes();
+            if (minutes <= 0 || minutes % 60 != 0) {
+                throw new IllegalArgumentException("Reservation time range must align to whole hours for hourly pricing");
+            }
+            return (int) (minutes / 60);
+        }
+        if (selectedPrice.getStartTime() != null && selectedPrice.getEndTime() != null) {
+            return 1;
+        }
+        return 1;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        if (value == null) {
+            return null;
+        }
+        return value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    @Transactional
+    public Reservation overrideOperaReservationLink(Long reservationId, String hotelCode, Long operaReservationId) {
+        Reservation reservation = repo.findById(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
+        if ("CHECKED_IN".equalsIgnoreCase(reservation.getStatus())
+                || "CHECKED_OUT".equalsIgnoreCase(reservation.getStatus())
+                || "CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+            throw new IllegalStateException("Opera reservation link can only be overridden before check-in");
+        }
+        if (reservation.getRequest() != null && StringUtils.hasText(hotelCode)) {
+            reservation.getRequest().setOperaHotelCode(hotelCode.trim().toUpperCase(Locale.ROOT));
+        }
+        reservation.setOperaReservationId(normalizePositiveLong(operaReservationId));
+        return repo.save(reservation);
+    }
+
+    private Long normalizePositiveLong(Long value) {
+        if (value == null || value <= 0) {
+            return null;
+        }
+        return value;
+    }
+
+    private void applyDefaultOperaReservationLink(Reservation reservation, ReservationRequest request) {
+        if (reservation == null || reservation.getOperaReservationId() != null || request == null) {
+            return;
+        }
+        reservation.setOperaReservationId(normalizePositiveLong(request.getLinkedOperaReservationId()));
     }
 
     private boolean isCompositionResource(Resource resource) {

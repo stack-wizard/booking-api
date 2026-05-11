@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.controller;
 
 import com.stackwizard.booking_api.dto.BookingRequest;
+import com.stackwizard.booking_api.dto.ReservationOperaLinkOverrideRequest;
 import com.stackwizard.booking_api.dto.ReservationSummaryDto;
 import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.Reservation;
@@ -85,6 +86,16 @@ public class ReservationController {
             return ResponseEntity.ok(service.saveHoldReservation(r));
         }
         return ResponseEntity.ok(service.save(r));
+    }
+
+    @PostMapping("/{id}/opera-link")
+    public ResponseEntity<Reservation> overrideOperaLink(@PathVariable Long id,
+                                                         @RequestBody(required = false) ReservationOperaLinkOverrideRequest request) {
+        return ResponseEntity.ok(service.overrideOperaReservationLink(
+                id,
+                request != null ? request.getHotelCode() : null,
+                request != null ? request.getOperaReservationId() : null
+        ));
     }
 
     @DeleteMapping("/{id}")

@@ -117,6 +117,8 @@ public class ReservationRequestDtoMapper {
                 .publicAccessExpiresAt(accessToken != null ? accessToken.getExpiresAt() : null)
                 .qrPayload(publicAccessUrl)
                 .extensionCount(request.getExtensionCount())
+                .operaHotelCode(request.getOperaHotelCode())
+                .linkedOperaReservationId(request.getLinkedOperaReservationId())
                 .paymentTotalAmount(paymentSummary.totalAmount())
                 .paymentDueNowAmount(paymentSummary.dueNowAmount())
                 .paymentPaidAmount(paymentSummary.paidAmount())

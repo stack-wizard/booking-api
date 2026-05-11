@@ -138,13 +138,7 @@ public class OperaInvoicePostingService {
             invoice.setOperaErrorMessage(null);
             invoiceRepo.save(invoice);
 
-            JsonNode response = operaPostingClient.postChargesAndPayments(
-                    config,
-                    prepared.target().hotel().getHotelCode(),
-                    prepared.target().hotel().getChainCode(),
-                    prepared.target().reservationId(),
-                    prepared.payload()
-            );
+            JsonNode response = postToOpera(config, prepared.invoice(), prepared.target(), prepared.payload());
 
             invoice.setOperaPostingStatus(OperaPostingStatus.POSTED);
             invoice.setOperaPostedAt(OffsetDateTime.now());
@@ -302,7 +296,9 @@ public class OperaInvoicePostingService {
      * {@code /reservations/{id}/payments}. Other invoice types may still include payment rows when configured.
      */
     private static boolean shouldIncludeOperaPayments(Invoice invoice) {
-        return invoice.getInvoiceType() != InvoiceType.INVOICE;
+        return invoice != null
+                && (invoice.getInvoiceType() == InvoiceType.DEPOSIT
+                || invoice.getInvoiceType() == InvoiceType.DEPOSIT_STORNO);
     }
 
     private OperaInvoicePostingPreview previewFinalStayPerReservation(Invoice invoice,
@@ -387,11 +383,11 @@ public class OperaInvoicePostingService {
                 ResolvedTarget target = new ResolvedTarget(
                         OperaPostingTarget.RESERVATION, hotel, ohId, cashierId, folioWindowNo);
                 JsonNode payload = buildPayload(invoice, e.getValue(), List.of(), target, request, false);
+                payload = adaptPayloadForEndpoint(invoice, target, payload);
                 requestPosts.add(payload);
                 invoice.setOperaLastRequestPayload(payload);
                 invoiceRepo.save(invoice);
-                lastResponse = operaPostingClient.postChargesAndPayments(
-                        config, hotel.getHotelCode(), chain, ohId, payload);
+                lastResponse = postToOpera(config, invoice, target, payload);
             }
 
             invoice.setOperaPostingStatus(OperaPostingStatus.POSTED);
@@ -481,6 +477,7 @@ public class OperaInvoicePostingService {
         ResolvedTarget target = resolveTarget(invoice, request);
         JsonNode payload = buildPayload(
                 invoice, items, allocations, target, request, shouldIncludeOperaPayments(invoice));
+        payload = adaptPayloadForEndpoint(invoice, target, payload);
         return new PreparedPosting(invoice, target, payload);
     }
 
@@ -718,6 +715,49 @@ public class OperaInvoicePostingService {
         payload.put("payments", payments);
         payload.put("cashierId", target.cashierId());
         return objectMapper.valueToTree(payload);
+    }
+
+    private JsonNode adaptPayloadForEndpoint(Invoice invoice, ResolvedTarget target, JsonNode payload) {
+        if (!usesChargesOnlyEndpoint(invoice)) {
+            return payload;
+        }
+        ObjectNode criteria = objectMapper.createObjectNode();
+        criteria.put("postIt", false);
+        if (target.cashierId() != null) {
+            criteria.put("cashierId", target.cashierId());
+        }
+        criteria.set("charges", payload.path("charges").deepCopy());
+        ObjectNode wrapper = objectMapper.createObjectNode();
+        wrapper.set("criteria", criteria);
+        return wrapper;
+    }
+
+    private JsonNode postToOpera(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                 Invoice invoice,
+                                 ResolvedTarget target,
+                                 JsonNode payload) {
+        if (usesChargesOnlyEndpoint(invoice)) {
+            return operaPostingClient.postCharges(
+                    config,
+                    target.hotel().getHotelCode(),
+                    postingChainCode(target.hotel()),
+                    target.reservationId(),
+                    payload
+            );
+        }
+        return operaPostingClient.postChargesAndPayments(
+                config,
+                target.hotel().getHotelCode(),
+                postingChainCode(target.hotel()),
+                target.reservationId(),
+                payload
+        );
+    }
+
+    private boolean usesChargesOnlyEndpoint(Invoice invoice) {
+        return invoice != null
+                && invoice.getInvoiceType() != InvoiceType.DEPOSIT
+                && invoice.getInvoiceType() != InvoiceType.DEPOSIT_STORNO;
     }
 
     private Map<String, Object> amountPayload(BigDecimal amount, String currencyCode) {

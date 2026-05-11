@@ -10,6 +10,7 @@ import com.stackwizard.booking_api.service.ReservationStayService;
 import com.stackwizard.booking_api.service.ReservationNotificationEmailService;
 import com.stackwizard.booking_api.service.TenantConfigService;
 import com.stackwizard.booking_api.service.CancellationService;
+import com.stackwizard.booking_api.service.opera.OperaReservationSearchService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -44,6 +45,8 @@ class ReservationRequestControllerTest {
     private ReservationRequestExportService exportService;
     @Mock
     private ReservationStayService reservationStayService;
+    @Mock
+    private OperaReservationSearchService operaReservationSearchService;
 
     @Test
     void createKeepsInternalDraftRequestWithoutExpiry() {
@@ -56,7 +59,8 @@ class ReservationRequestControllerTest {
                 tenantConfigService,
                 dtoMapper,
                 exportService,
-                reservationStayService
+                reservationStayService,
+                operaReservationSearchService
         );
 
         ReservationRequest request = ReservationRequest.builder()
@@ -78,5 +82,40 @@ class ReservationRequestControllerTest {
         assertThat(response.getBody().getExtensionCount()).isZero();
         verify(requestService).save(request);
         verifyNoInteractions(tenantConfigService);
+    }
+
+    @Test
+    void patchNotesDelegatesToService() {
+        ReservationRequestController controller = new ReservationRequestController(
+                requestService,
+                reservationService,
+                cancellationService,
+                confirmationEmailServiceProvider,
+                notificationEmailServiceProvider,
+                tenantConfigService,
+                dtoMapper,
+                exportService,
+                reservationStayService,
+                operaReservationSearchService
+        );
+
+        ReservationRequest updated = ReservationRequest.builder()
+                .id(77L)
+                .tenantId(7L)
+                .notes("Updated")
+                .build();
+        when(requestService.updateNotes(77L, "Updated")).thenReturn(updated);
+        when(dtoMapper.toDto(updated)).thenReturn(null);
+
+        controller.patchNotes(77L, requestWithNotes("Updated"));
+
+        verify(requestService).updateNotes(77L, "Updated");
+    }
+
+    private static com.stackwizard.booking_api.dto.ReservationRequestNotesPatchRequest requestWithNotes(String notes) {
+        com.stackwizard.booking_api.dto.ReservationRequestNotesPatchRequest request =
+                new com.stackwizard.booking_api.dto.ReservationRequestNotesPatchRequest();
+        request.setNotes(notes);
+        return request;
     }
 }

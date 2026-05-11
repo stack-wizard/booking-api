@@ -108,16 +108,19 @@ public class ReservationStayService {
             }
         }
         if (bookingOperaProperties.getCheckIn().isEnabled()) {
-            for (Reservation reservation : reservations) {
-                if ("CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
-                    continue;
-                }
-                if (reservation.getRequestedResource() == null
-                        || !StringUtils.hasText(reservation.getRequestedResource().getOperaRoomId())) {
-                    issues.add("Opera check-in requires OHIP room id on resource for reservation line "
-                            + reservation.getId());
+            if (requiresOperaCheckIn(request)) {
+                for (Reservation reservation : reservations) {
+                    if ("CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                        continue;
+                    }
+                    if (reservation.getRequestedResource() == null
+                            || !StringUtils.hasText(reservation.getRequestedResource().getOperaRoomId())) {
+                        issues.add("Opera check-in requires OHIP room id on resource for reservation line "
+                                + reservation.getId());
+                    }
                 }
             }
+            addLinkedOperaReservationIssues(request, issues);
             addOperaChargeMappingIssues(request.getTenantId(), reservations, issues);
         }
 
@@ -204,9 +207,13 @@ public class ReservationStayService {
             }
         }
 
-        operaCheckInOrchestrator.runIfEnabled(request, reservations);
+        if (requiresLinkedOperaReservation(request)) {
+            propagateLinkedOperaReservation(reservations, request);
+        } else {
+            operaCheckInOrchestrator.runIfEnabled(request, reservations);
+        }
 
-        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+        if (bookingOperaProperties.getCheckIn().isEnabled() && requiresOperaCheckIn(request)) {
             request = requestRepo.findById(requestId)
                     .orElseThrow(() -> new IllegalArgumentException("Request not found"));
             reservations = reservationRepo.findByRequestIdWithDetails(requestId);
@@ -228,7 +235,7 @@ public class ReservationStayService {
         invoiceService.createDraftForFinalizedRequest(requestId);
         invoiceService.allocateReleasedDepositPaymentsToFinalRequestInvoice(requestId);
         Invoice finalInvoice = invoiceService.issueSystemFinalInvoiceForRequest(requestId);
-        if (bookingOperaProperties.getCheckIn().isEnabled()) {
+        if (shouldPostFinalInvoiceToOpera(request)) {
             operaInvoicePostingService.postInvoice(finalInvoice.getId(), null);
         }
 
@@ -305,6 +312,54 @@ public class ReservationStayService {
                         + "). Configure an active opera_fiscal_charge_mapping for this product, for product_type "
                         + typeLabel + ", or a tenant default row with product_id and product_type both null.");
             }
+        }
+    }
+
+    private void addLinkedOperaReservationIssues(ReservationRequest request, List<String> issues) {
+        if (request == null || !requiresLinkedOperaReservation(request)) {
+            return;
+        }
+        if (!StringUtils.hasText(request.getOperaHotelCode())) {
+            issues.add("Opera hotel is required for linked in-house posting");
+        }
+        if (request.getLinkedOperaReservationId() == null || request.getLinkedOperaReservationId() <= 0) {
+            issues.add("Linked Opera reservation id is required for in-house posting");
+        }
+    }
+
+    private boolean requiresOperaCheckIn(ReservationRequest request) {
+        return request != null
+                && request.getType() != ReservationRequest.Type.INHOUSE
+                && request.getLinkedOperaReservationId() == null;
+    }
+
+    private boolean requiresLinkedOperaReservation(ReservationRequest request) {
+        return request != null && request.getType() == ReservationRequest.Type.INHOUSE
+                || request != null && request.getLinkedOperaReservationId() != null;
+    }
+
+    private boolean shouldPostFinalInvoiceToOpera(ReservationRequest request) {
+        return request != null
+                && bookingOperaProperties.getCheckIn().isEnabled()
+                && request.getType() != ReservationRequest.Type.INTERNAL;
+    }
+
+    private void propagateLinkedOperaReservation(List<Reservation> reservations, ReservationRequest request) {
+        if (request == null || request.getLinkedOperaReservationId() == null || reservations == null || reservations.isEmpty()) {
+            return;
+        }
+        boolean changed = false;
+        for (Reservation reservation : reservations) {
+            if ("CANCELLED".equalsIgnoreCase(reservation.getStatus())) {
+                continue;
+            }
+            if (!request.getLinkedOperaReservationId().equals(reservation.getOperaReservationId())) {
+                reservation.setOperaReservationId(request.getLinkedOperaReservationId());
+                changed = true;
+            }
+        }
+        if (changed) {
+            reservationRepo.saveAll(reservations);
         }
     }
 

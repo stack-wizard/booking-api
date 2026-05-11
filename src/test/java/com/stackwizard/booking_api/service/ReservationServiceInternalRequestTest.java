@@ -270,6 +270,63 @@ class ReservationServiceInternalRequestTest {
         assertThat(savedReservation.getRequest().getExpiresAt()).isNull();
         assertThat(savedReservation.getExpiresAt()).isNull();
         assertThat(savedReservation.getRequestType()).isEqualTo(ReservationRequest.Type.INTERNAL);
+        assertThat(savedReservation.getCurrency()).isNull();
+        assertThat(savedReservation.getQty()).isNull();
+        assertThat(savedReservation.getUnitPrice()).isNull();
+        assertThat(savedReservation.getGrossAmount()).isNull();
+    }
+
+    @Test
+    void saveHoldReservationDefaultsOperaReservationLinkFromAttachedRequest() {
+        Long tenantId = 11L;
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(181L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.WALKIN)
+                .status(ReservationRequest.Status.DRAFT)
+                .linkedOperaReservationId(991122L)
+                .build();
+        Reservation reservationToSave = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .build();
+
+        when(tenantConfigService.holdTtlMinutes(tenantId)).thenReturn(30);
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of());
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Reservation saved = service.saveHoldReservation(reservationToSave);
+
+        assertThat(saved.getOperaReservationId()).isEqualTo(existingRequest.getLinkedOperaReservationId());
+    }
+
+    @Test
+    void saveHoldReservationKeepsExplicitOperaReservationLink() {
+        Long tenantId = 12L;
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(182L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.WALKIN)
+                .status(ReservationRequest.Status.DRAFT)
+                .linkedOperaReservationId(991122L)
+                .build();
+        Reservation reservationToSave = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .operaReservationId(554433L)
+                .build();
+
+        when(tenantConfigService.holdTtlMinutes(tenantId)).thenReturn(30);
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of());
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Reservation saved = service.saveHoldReservation(reservationToSave);
+
+        assertThat(saved.getOperaReservationId()).isEqualTo(554433L);
     }
 
     @Test
@@ -328,5 +385,103 @@ class ReservationServiceInternalRequestTest {
         assertThat(existingActiveReservation.getExpiresAt()).isEqualTo(saved.getExpiresAt());
         assertThat(activeAllocation.getExpiresAt()).isEqualTo(saved.getExpiresAt());
         assertThat(cancelledReservation.getExpiresAt()).isEqualTo(originalExpiry);
+    }
+
+    @Test
+    void createReservationAndAllocateCalculatesPriceForWalkInRequest() {
+        assertBillableDraftRequestReservationIsPriced(ReservationRequest.Type.WALKIN);
+    }
+
+    @Test
+    void createReservationAndAllocateCalculatesPriceForInHouseRequest() {
+        assertBillableDraftRequestReservationIsPriced(ReservationRequest.Type.INHOUSE);
+    }
+
+    @Test
+    void overrideOperaReservationLinkUpdatesReservationBeforeCheckIn() {
+        Reservation reservation = Reservation.builder()
+                .id(703L)
+                .tenantId(21L)
+                .status("CONFIRMED")
+                .operaReservationId(111L)
+                .build();
+
+        when(reservationRepo.findById(reservation.getId())).thenReturn(Optional.of(reservation));
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
+            return invocation.getArgument(0);
+        });
+
+        Reservation savedReservation = service.overrideOperaReservationLink(reservation.getId(), "DH", 222L);
+
+        assertThat(savedReservation.getOperaReservationId()).isEqualTo(222L);
+    }
+
+    private void assertBillableDraftRequestReservationIsPriced(ReservationRequest.Type requestType) {
+        Long tenantId = 15L;
+        OffsetDateTime originalExpiry = OffsetDateTime.now().plusMinutes(5);
+        LocalDateTime startsAt = LocalDateTime.of(2026, 5, 17, 10, 0);
+        LocalDateTime endsAt = LocalDateTime.of(2026, 5, 17, 18, 0);
+
+        Product product = Product.builder()
+                .id(301L)
+                .defaultUom("DAY")
+                .extraUoms(Set.of())
+                .build();
+        Resource requestedResource = Resource.builder()
+                .id(401L)
+                .tenantId(tenantId)
+                .kind("EXACT")
+                .unitCount(1)
+                .product(product)
+                .build();
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(501L)
+                .tenantId(tenantId)
+                .type(requestType)
+                .status(ReservationRequest.Status.DRAFT)
+                .expiresAt(originalExpiry)
+                .extensionCount(0)
+                .build();
+        Reservation incoming = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .requestType(requestType)
+                .requestedResource(Resource.builder().id(requestedResource.getId()).build())
+                .startsAt(startsAt)
+                .endsAt(endsAt)
+                .build();
+        PriceListEntry dayPrice = PriceListEntry.builder()
+                .productId(product.getId())
+                .uom("DAY")
+                .price(new BigDecimal("120.00"))
+                .build();
+
+        when(tenantConfigService.holdTtlMinutes(tenantId)).thenReturn(30);
+        when(resourceRepo.findById(requestedResource.getId())).thenReturn(Optional.of(requestedResource));
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of());
+        when(priceListRepo.findForProductUomOnDate(product.getId(), "DAY", "EUR", tenantId, startsAt.toLocalDate()))
+                .thenReturn(List.of(dayPrice));
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
+            Reservation reservation = invocation.getArgument(0);
+            reservation.setId(601L);
+            return reservation;
+        });
+        when(compositionRepo.findByParentResourceId(requestedResource.getId())).thenReturn(List.of());
+        when(allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
+                requestedResource.getId(), endsAt, startsAt)).thenReturn(0L);
+        when(allocationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        List<Allocation> allocations = service.createReservationAndAllocate(incoming);
+
+        assertThat(allocations).hasSize(1);
+        Reservation savedReservation = allocations.getFirst().getReservation();
+        assertThat(savedReservation.getRequestType()).isEqualTo(requestType);
+        assertThat(savedReservation.getProductId()).isEqualTo(product.getId());
+        assertThat(savedReservation.getCurrency()).isEqualTo("EUR");
+        assertThat(savedReservation.getQty()).isEqualTo(1);
+        assertThat(savedReservation.getUnitPrice()).isEqualByComparingTo("120.00");
+        assertThat(savedReservation.getGrossAmount()).isEqualByComparingTo("120.00");
     }
 }

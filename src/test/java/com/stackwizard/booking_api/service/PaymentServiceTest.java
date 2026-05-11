@@ -146,7 +146,7 @@ class PaymentServiceTest {
 
         assertThatThrownBy(() -> service.initiateForReservationRequest(requestId, new PaymentInitiateRequest()))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Internal reservation requests are not payable online");
+                .hasMessage("Only external reservation requests are payable online");
 
         verify(paymentIntentRepo, never()).save(any(PaymentIntent.class));
     }

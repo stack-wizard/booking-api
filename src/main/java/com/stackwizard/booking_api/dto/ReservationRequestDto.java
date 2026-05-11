@@ -30,6 +30,8 @@ public class ReservationRequestDto {
     private OffsetDateTime publicAccessExpiresAt;
     private String qrPayload;
     private Integer extensionCount;
+    private String operaHotelCode;
+    private Long linkedOperaReservationId;
     private BigDecimal paymentTotalAmount;
     private BigDecimal paymentDueNowAmount;
     private BigDecimal paymentPaidAmount;

@@ -38,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
@@ -164,9 +165,6 @@ class OperaInvoicePostingServiceTest {
         when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
         when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
         when(operaFiscalMappingService.resolveChargeMapping(1L, 77L, "ROOM")).thenReturn(Optional.of(chargeMapping));
-        when(paymentTransactionService.requireById(501L)).thenReturn(paymentTransaction);
-        when(operaFiscalMappingService.resolvePaymentMapping(1L, "CARD", "VISA")).thenReturn(Optional.of(paymentMapping));
-
         OperaInvoicePostRequest request = new OperaInvoicePostRequest();
         request.setPostingReference("IGNORED-REFERENCE");
         request.setPostingRemark("IGNORED-REMARK");
@@ -178,12 +176,11 @@ class OperaInvoicePostingServiceTest {
         assertThat(preview.cashierId()).isEqualTo(19L);
         assertThat(preview.folioWindowNo()).isEqualTo(1);
         JsonNode payload = preview.payload();
-        assertThat(payload.path("charges").get(0).path("transactionCode").asText()).isEqualTo("10010");
-        assertThat(payload.path("charges").get(0).path("postingReference").asText()).isEqualTo("FISC-2026-00001");
-        assertThat(payload.path("charges").get(0).path("postingRemark").asText()).isEqualTo("Room Charge");
-        assertThat(payload.path("payments").get(0).path("paymentMethod").path("paymentMethod").asText()).isEqualTo("VA");
-        assertThat(payload.path("payments").get(0).path("postingReference").asText()).isEqualTo("FISC-2026-00001");
-        assertThat(payload.path("payments").get(0).path("postingRemark").asText()).isEqualTo("FISC-2026-00001");
+        assertThat(payload.path("criteria").path("charges").get(0).path("transactionCode").asText()).isEqualTo("10010");
+        assertThat(payload.path("criteria").path("charges").get(0).path("postingReference").asText()).isEqualTo("FISC-2026-00001");
+        assertThat(payload.path("criteria").path("charges").get(0).path("postingRemark").asText()).isEqualTo("Room Charge");
+        assertThat(payload.path("criteria").path("charges")).isNotEmpty();
+        assertThat(payload.path("payments").isMissingNode() || payload.path("payments").isEmpty()).isTrue();
         verify(configurationService, never()).resolveRouting(any(), any(), any());
     }
 
@@ -248,7 +245,7 @@ class OperaInvoicePostingServiceTest {
         when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
         when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), isNull(), eq(99001L), any())).thenReturn(response);
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), anyString(), eq(99001L), any())).thenReturn(response);
 
         OperaInvoicePostRequest request = new OperaInvoicePostRequest();
         request.setBaseUrl("https://opera.example");
@@ -513,7 +510,7 @@ class OperaInvoicePostingServiceTest {
         when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
         when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), isNull(), eq(99004L), any()))
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), anyString(), eq(99004L), any()))
                 .thenThrow(new IllegalStateException("OHIP request failed"));
 
         Invoice result = service.tryAutoPostInvoice(15L);
@@ -608,7 +605,7 @@ class OperaInvoicePostingServiceTest {
         when(reservationRepo.findById(301L)).thenReturn(Optional.of(stayA));
         when(reservationRepo.findById(302L)).thenReturn(Optional.of(stayB));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq("SUN"), anyLong(), any()))
+        when(operaPostingClient.postCharges(any(), eq("DH"), eq("SUN"), anyLong(), any()))
                 .thenReturn(response);
 
         OperaInvoicePostingResult result = service.postInvoice(50L, new OperaInvoicePostRequest());
@@ -616,13 +613,11 @@ class OperaInvoicePostingServiceTest {
         assertThat(result.invoice().getOperaPostingStatus()).isEqualTo(OperaPostingStatus.POSTED);
         assertThat(result.invoice().getOperaReservationId()).isNull();
         org.mockito.ArgumentCaptor<JsonNode> payloadCaptor = org.mockito.ArgumentCaptor.forClass(JsonNode.class);
-        verify(operaPostingClient, times(2)).postChargesAndPayments(
+        verify(operaPostingClient, times(2)).postCharges(
                 any(), eq("DH"), eq("SUN"), anyLong(), payloadCaptor.capture());
         for (JsonNode posted : payloadCaptor.getAllValues()) {
-            assertThat(posted.path("payments").isArray()).isTrue();
-            assertThat(posted.path("payments")).isEmpty();
-            assertThat(posted.path("charges").isArray()).isTrue();
-            assertThat(posted.path("charges")).isNotEmpty();
+            assertThat(posted.path("criteria").path("charges").isArray()).isTrue();
+            assertThat(posted.path("criteria").path("charges")).isNotEmpty();
         }
     }
 
@@ -745,7 +740,7 @@ class OperaInvoicePostingServiceTest {
         when(invoiceItemRepo.findById(512L)).thenReturn(Optional.of(persistedRowB));
         when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(invoiceItemRepo.save(any(InvoiceItem.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), eq("SUN"), anyLong(), any()))
+        when(operaPostingClient.postCharges(any(), eq("DH"), eq("SUN"), anyLong(), any()))
                 .thenReturn(response);
 
         OperaInvoicePostingResult result = service.postInvoice(51L, new OperaInvoicePostRequest());

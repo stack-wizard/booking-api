@@ -13,11 +13,15 @@ import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 
 @Component
 public class DefaultOperaPostingClient implements OperaPostingClient {
     private static final String CHARGES_AND_PAYMENTS_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/chargesAndPayments";
+    private static final String CHARGES_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/charges";
     private static final String CREATE_RESERVATION_PATH = "/rsv/v1/hotels/{hotelCode}/reservations";
+    private static final String RESERVATIONS_PATH = "/rsv/v1/hotels/{hotelCode}/reservations";
     private static final String CHECK_IN_PATH = "/fof/v1/hotels/{hotelCode}/reservations/{reservationId}/checkIns";
     private static final String PAYMENT_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/payments";
     private static final String OAUTH_SCOPE = "urn:opc:hgbu:ws:__myscopes__";
@@ -36,6 +40,18 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
                                            Long reservationId,
                                            JsonNode payload) {
         String requestUrl = buildChargesAndPaymentsUrl(config.baseUrl(), hotelCode, reservationId);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = payload == null ? "{}" : payload.toString();
+        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    @Override
+    public JsonNode postCharges(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                String hotelCode,
+                                String chainCode,
+                                Long reservationId,
+                                JsonNode payload) {
+        String requestUrl = buildReservationUrl(config.baseUrl(), CHARGES_PATH, hotelCode, reservationId);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = payload == null ? "{}" : payload.toString();
         return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
@@ -81,6 +97,32 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = body == null ? "{}" : body.toString();
         return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+    }
+
+    @Override
+    public JsonNode getReservations(OperaTenantConfigResolver.OperaResolvedConfig config,
+                                    String chainCode,
+                                    String hotelCode,
+                                    Map<String, List<String>> queryParams) {
+        String requestUrl = appendQueryParams(
+                normalizeUrl(config.baseUrl(), RESERVATIONS_PATH.replace("{hotelCode}", hotelCode)),
+                queryParams);
+        String authorization = resolveAuthorization(config, chainCode);
+        try {
+            String raw = restClient.get()
+                    .uri(requestUrl)
+                    .header("x-app-key", config.appKey())
+                    .header("x-hotelid", hotelCode)
+                    .header("Authorization", authorization)
+                    .retrieve()
+                    .body(String.class);
+            return parseJson(raw);
+        } catch (RestClientResponseException ex) {
+            throw new IllegalStateException("Opera reservation lookup failed: " + ex.getStatusCode().value()
+                    + " " + sanitize(ex.getResponseBodyAsString()), ex);
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Opera reservation lookup failed", ex);
+        }
     }
 
     private JsonNode postJson(OperaTenantConfigResolver.OperaResolvedConfig config,
@@ -164,7 +206,11 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
     }
 
     private String buildChargesAndPaymentsUrl(String baseUrl, String hotelCode, Long reservationId) {
-        String resolvedPath = CHARGES_AND_PAYMENTS_PATH
+        return buildReservationUrl(baseUrl, CHARGES_AND_PAYMENTS_PATH, hotelCode, reservationId);
+    }
+
+    private String buildReservationUrl(String baseUrl, String templatePath, String hotelCode, Long reservationId) {
+        String resolvedPath = templatePath
                 .replace("{hotelCode}", hotelCode)
                 .replace("{reservationId}", reservationId != null ? reservationId.toString() : "");
         return normalizeUrl(baseUrl, resolvedPath);
@@ -198,5 +244,29 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
             return "<empty>";
         }
         return value.trim().replaceAll("\\s+", " ");
+    }
+
+    private String appendQueryParams(String requestUrl, Map<String, List<String>> queryParams) {
+        if (queryParams == null || queryParams.isEmpty()) {
+            return requestUrl;
+        }
+        StringBuilder url = new StringBuilder(requestUrl);
+        char separator = requestUrl.contains("?") ? '&' : '?';
+        for (Map.Entry<String, List<String>> entry : queryParams.entrySet()) {
+            if (!StringUtils.hasText(entry.getKey()) || entry.getValue() == null) {
+                continue;
+            }
+            for (String value : entry.getValue()) {
+                if (value == null) {
+                    continue;
+                }
+                url.append(separator)
+                        .append(entry.getKey())
+                        .append('=')
+                        .append(value);
+                separator = '&';
+            }
+        }
+        return url.toString();
     }
 }

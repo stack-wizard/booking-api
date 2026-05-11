@@ -6,8 +6,11 @@ import com.stackwizard.booking_api.dto.CheckinReadinessDto;
 import com.stackwizard.booking_api.dto.CheckinResultDto;
 import com.stackwizard.booking_api.dto.CheckoutReadinessDto;
 import com.stackwizard.booking_api.dto.CheckoutResultDto;
+import com.stackwizard.booking_api.dto.OperaReservationAttachRequest;
+import com.stackwizard.booking_api.dto.OperaReservationSearchResultDto;
 import com.stackwizard.booking_api.dto.ReservationRequestCustomerPatchRequest;
 import com.stackwizard.booking_api.dto.ReservationRequestDto;
+import com.stackwizard.booking_api.dto.ReservationRequestNotesPatchRequest;
 import com.stackwizard.booking_api.dto.ReservationRequestSearchCriteria;
 import com.stackwizard.booking_api.dto.ReservationTtlExtendRequest;
 import com.stackwizard.booking_api.model.ReservationRequest;
@@ -21,6 +24,7 @@ import com.stackwizard.booking_api.service.ReservationRequestService;
 import com.stackwizard.booking_api.service.ReservationService;
 import com.stackwizard.booking_api.service.ReservationStayService;
 import com.stackwizard.booking_api.service.TenantConfigService;
+import com.stackwizard.booking_api.service.opera.OperaReservationSearchService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -32,6 +36,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -52,6 +57,7 @@ public class ReservationRequestController {
     private final ReservationRequestDtoMapper dtoMapper;
     private final ReservationRequestExportService exportService;
     private final ReservationStayService reservationStayService;
+    private final OperaReservationSearchService operaReservationSearchService;
 
     public ReservationRequestController(ReservationRequestService service,
                                         ReservationService reservationService,
@@ -61,7 +67,8 @@ public class ReservationRequestController {
                                         TenantConfigService tenantConfigService,
                                         ReservationRequestDtoMapper dtoMapper,
                                         ReservationRequestExportService exportService,
-                                        ReservationStayService reservationStayService) {
+                                        ReservationStayService reservationStayService,
+                                        OperaReservationSearchService operaReservationSearchService) {
         this.service = service;
         this.reservationService = reservationService;
         this.cancellationService = cancellationService;
@@ -71,6 +78,7 @@ public class ReservationRequestController {
         this.dtoMapper = dtoMapper;
         this.exportService = exportService;
         this.reservationStayService = reservationStayService;
+        this.operaReservationSearchService = operaReservationSearchService;
     }
 
     /**
@@ -175,6 +183,44 @@ public class ReservationRequestController {
         return ResponseEntity.ok(reservationStayService.checkOut(id));
     }
 
+    @GetMapping("/opera/in-house-reservations")
+    public ResponseEntity<List<OperaReservationSearchResultDto>> searchOperaInHouseReservations(
+            @RequestParam(required = false) Long tenantId,
+            @RequestParam String hotelCode,
+            @RequestParam(required = false) String arrivalDate,
+            @RequestParam(required = false) String roomId,
+            @RequestParam(required = false) String givenName,
+            @RequestParam(required = false) String surname,
+            @RequestParam(required = false) String customer) {
+        Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
+        LocalDate parsedArrivalDate = parseLocalDate(arrivalDate);
+        return ResponseEntity.ok(operaReservationSearchService.searchInHouseReservations(
+                resolvedTenantId,
+                hotelCode,
+                parsedArrivalDate,
+                roomId,
+                givenName,
+                surname,
+                customer
+        ));
+    }
+
+    @PostMapping("/{id}/attach-opera-reservation")
+    public ResponseEntity<ReservationRequestDto> attachOperaReservation(@PathVariable Long id,
+                                                                        @RequestBody OperaReservationAttachRequest request) {
+        ReservationRequest updated = service.attachOperaReservation(
+                id,
+                request != null ? request.getHotelCode() : null,
+                request != null ? request.getReservationId() : null,
+                request != null ? request.getOperaProfileId() : null,
+                request != null ? request.getConfirmationNumber() : null,
+                request != null ? request.getCustomerName() : null,
+                request != null ? request.getCustomerEmail() : null,
+                request != null ? request.getCustomerPhone() : null
+        );
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
     @PostMapping("/{id}/send-confirmation-email")
     public ResponseEntity<ReservationConfirmationEmailService.DispatchResult> sendConfirmationEmail(
             @PathVariable Long id,
@@ -228,6 +274,13 @@ public class ReservationRequestController {
         return ResponseEntity.ok(dtoMapper.toDto(updated));
     }
 
+    @PatchMapping("/{id}/notes")
+    public ResponseEntity<ReservationRequestDto> patchNotes(@PathVariable Long id,
+                                                            @RequestBody(required = false) ReservationRequestNotesPatchRequest request) {
+        ReservationRequest updated = service.updateNotes(id, request != null ? request.getNotes() : null);
+        return ResponseEntity.ok(dtoMapper.toDto(updated));
+    }
+
     @PostMapping("/{id}/cancel-payment")
     public ResponseEntity<ReservationRequestDto> cancelPayment(@PathVariable Long id) {
         ReservationRequest updated = service.cancelPaymentForRequest(id);
@@ -260,6 +313,13 @@ public class ReservationRequestController {
         }
 
         return PageRequest.of(page, size, buildSort(sortBy, sortDir));
+    }
+
+    private LocalDate parseLocalDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        return LocalDate.parse(raw.trim());
     }
 
     private Sort buildSort(String sortBy, String sortDir) {

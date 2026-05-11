@@ -386,6 +386,7 @@ public class InvoiceService {
                 .referenceTable(canonicalReservationRequestRefTaken ? null : REFERENCE_TABLE_RESERVATION_REQUEST)
                 .referenceId(canonicalReservationRequestRefTaken ? null : requestId)
                 .reservationRequestId(requestId)
+                .operaHotelCode(normalizeOperaHotelCode(request.getOperaHotelCode()))
                 .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(currency)
                 .subtotalNet(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP))
@@ -718,6 +719,7 @@ public class InvoiceService {
                 .referenceTable(REFERENCE_TABLE_PAYMENT_INTENT)
                 .referenceId(paymentIntent.getId())
                 .reservationRequestId(requestId)
+                .operaHotelCode(normalizeOperaHotelCode(request.getOperaHotelCode()))
                 .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(paymentIntent.getCurrency())
                 .subtotalNet(money(netAmount))
@@ -1520,12 +1522,10 @@ public class InvoiceService {
         throw new IllegalArgumentException("Unsupported invoice type for storno: " + sourceType);
     }
 
-    /**
-     * Final stay invoices ({@link InvoiceType#INVOICE}) are mirrored in Opera/PMS; local OFIS fiscalization is not required.
-     * Same for {@link InvoiceType#ROOM_CHARGE}.
-     */
     private static boolean isLocalFiscalizationNotRequiredForInvoiceType(InvoiceType invoiceType) {
-        return invoiceType == InvoiceType.ROOM_CHARGE || invoiceType == InvoiceType.INVOICE;
+        return invoiceType == InvoiceType.ROOM_CHARGE
+                || invoiceType == InvoiceType.INVOICE
+                || invoiceType == InvoiceType.INVOICE_STORNO;
     }
 
     private Invoice issueSystemInvoiceIfNeeded(Invoice invoice) {

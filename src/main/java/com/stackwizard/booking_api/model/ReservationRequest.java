@@ -76,6 +76,12 @@ public class ReservationRequest {
     @Column(name = "opera_profile_id")
     private String operaProfileId;
 
+    @Column(name = "opera_hotel_code", length = 32)
+    private String operaHotelCode;
+
+    @Column(name = "linked_opera_reservation_id")
+    private Long linkedOperaReservationId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "opera_deposit_post_status")
     private OperaDepositPostStatus operaDepositPostStatus;
