@@ -113,6 +113,23 @@ public class ReservationRequestController {
                 .body(workbook);
     }
 
+    /**
+     * Abbreviated export (arrival, request id, guest, map resource, notes) using the same filters as
+     * {@link #exportSearch}; implemented with paged reads and batched reservation loads.
+     */
+    @GetMapping(value = "/search/export-summary", produces = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    public ResponseEntity<byte[]> exportSearchSummary(ReservationRequestSearchCriteria criteria,
+                                                      @RequestParam(defaultValue = "createdAt") String sortBy,
+                                                      @RequestParam(defaultValue = "desc") String sortDir) {
+        byte[] workbook = exportService.exportSearchSummary(criteria, buildSort(sortBy, sortDir));
+        String fileName = "reservation-requests-summary-export-"
+                + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(OffsetDateTime.now()) + ".xlsx";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(workbook);
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ReservationRequestDto> get(@PathVariable Long id) {
         return service.findById(id)

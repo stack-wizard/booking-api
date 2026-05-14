@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 
 public interface ReservationRepository extends JpaRepository<Reservation, Long> {
@@ -12,6 +13,9 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     @Query("select distinct r from Reservation r join fetch r.requestedResource join fetch r.request req where req.id = :requestId order by r.id")
     List<Reservation> findByRequestIdWithDetails(@Param("requestId") Long requestId);
+
+    @Query("select distinct r from Reservation r join fetch r.requestedResource join fetch r.request req where req.id in :requestIds order by req.id, r.id")
+    List<Reservation> findByRequestIdsWithDetails(@Param("requestIds") Collection<Long> requestIds);
 
     boolean existsByRequestId(Long requestId);
 }
