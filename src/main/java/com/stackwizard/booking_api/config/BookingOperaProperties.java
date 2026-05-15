@@ -17,13 +17,13 @@ public class BookingOperaProperties {
 
     @Data
     public static class ReservationTemplate {
-        private String roomType = "PM";
-        private String ratePlanCode = "RATETEST";
-        private String marketCode = "PKG";
-        private String sourceCode = "LNG";
+        private String roomType = "PMS";
+        private String ratePlanCode = "PM";
+        private String marketCode = "NRG";
+        private String sourceCode = "FO";
         private String guaranteeCode = "NON";
         private String paymentMethodCode = "CA";
-        private String roomTypeCharged = "PM";
+        private String roomTypeCharged = "PMS";
         private String sourceOfSaleType = "WLK";
         private String sourceOfSaleCode = "WLK";
         /** OHIP create reservation: matches working Postman / property samples. */
