@@ -310,10 +310,6 @@ public class OperaCheckInOrchestrator {
         criteria.put("folioWindowNo", folio);
         criteria.put("cashierId", cashierId);
 
-        if (StringUtils.hasText(hotel.getCheckinDepositPaymentTrxCode())) {
-            criteria.put("transactionCode", hotel.getCheckinDepositPaymentTrxCode().trim());
-        }
-
         ObjectNode reservationIdObj = objectMapper.createObjectNode();
         reservationIdObj.put("type", "Reservation");
         reservationIdObj.put("id", String.valueOf(operaReservationId));
