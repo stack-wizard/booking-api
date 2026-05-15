@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.service.opera;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -18,6 +20,7 @@ import java.util.Map;
 
 @Component
 public class DefaultOperaPostingClient implements OperaPostingClient {
+    private static final Logger log = LoggerFactory.getLogger(DefaultOperaPostingClient.class);
     private static final String CHARGES_AND_PAYMENTS_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/chargesAndPayments";
     private static final String CHARGES_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/charges";
     private static final String CREATE_RESERVATION_PATH = "/rsv/v1/hotels/{hotelCode}/reservations";
@@ -42,7 +45,7 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = buildChargesAndPaymentsUrl(config.baseUrl(), hotelCode, reservationId);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = payload == null ? "{}" : payload.toString();
-        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+        return postJson("chargesAndPayments", config, chainCode, hotelCode, requestUrl, authorization, requestBody);
     }
 
     @Override
@@ -54,7 +57,7 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = buildReservationUrl(config.baseUrl(), CHARGES_PATH, hotelCode, reservationId);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = payload == null ? "{}" : payload.toString();
-        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+        return postJson("charges", config, chainCode, hotelCode, requestUrl, authorization, requestBody);
     }
 
     @Override
@@ -66,7 +69,7 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = normalizeUrl(config.baseUrl(), path);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = body == null ? "{}" : body.toString();
-        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+        return postJson("createReservation", config, chainCode, hotelCode, requestUrl, authorization, requestBody);
     }
 
     @Override
@@ -81,7 +84,7 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = normalizeUrl(config.baseUrl(), path);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = body == null ? "{}" : body.toString();
-        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+        return postJson("checkIn", config, chainCode, hotelCode, requestUrl, authorization, requestBody);
     }
 
     @Override
@@ -96,7 +99,7 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = normalizeUrl(config.baseUrl(), path);
         String authorization = resolveAuthorization(config, chainCode);
         String requestBody = body == null ? "{}" : body.toString();
-        return postJson(config, chainCode, hotelCode, requestUrl, authorization, requestBody);
+        return postJson("payment", config, chainCode, hotelCode, requestUrl, authorization, requestBody);
     }
 
     @Override
@@ -125,7 +128,8 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         }
     }
 
-    private JsonNode postJson(OperaTenantConfigResolver.OperaResolvedConfig config,
+    private JsonNode postJson(String operation,
+                              OperaTenantConfigResolver.OperaResolvedConfig config,
                               String chainCode,
                               String hotelCode,
                               String requestUrl,
@@ -143,9 +147,25 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
                     .body(String.class);
             return parseJson(raw);
         } catch (RestClientResponseException ex) {
+            log.error("Opera POST failed. operation={}, hotelCode={}, chainCode={}, url={}, status={}, requestBody={}, responseBody={}",
+                    operation,
+                    hotelCode,
+                    safe(chainCode),
+                    requestUrl,
+                    ex.getStatusCode().value(),
+                    safe(requestBody),
+                    sanitize(ex.getResponseBodyAsString()),
+                    ex);
             throw new IllegalStateException("Opera posting request failed: " + ex.getStatusCode().value()
                     + " " + sanitize(ex.getResponseBodyAsString()), ex);
         } catch (RestClientException ex) {
+            log.error("Opera POST failed before response. operation={}, hotelCode={}, chainCode={}, url={}, requestBody={}",
+                    operation,
+                    hotelCode,
+                    safe(chainCode),
+                    requestUrl,
+                    safe(requestBody),
+                    ex);
             throw new IllegalStateException("Opera posting request failed", ex);
         }
     }
@@ -244,6 +264,10 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
             return "<empty>";
         }
         return value.trim().replaceAll("\\s+", " ");
+    }
+
+    private String safe(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "<empty>";
     }
 
     private String appendQueryParams(String requestUrl, Map<String, List<String>> queryParams) {

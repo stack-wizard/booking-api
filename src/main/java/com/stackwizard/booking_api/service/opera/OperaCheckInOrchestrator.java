@@ -15,6 +15,8 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.InvoiceRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.service.InvoiceService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -36,6 +38,7 @@ import java.util.List;
  */
 @Service
 public class OperaCheckInOrchestrator {
+    private static final Logger log = LoggerFactory.getLogger(OperaCheckInOrchestrator.class);
 
     private final BookingOperaProperties bookingOperaProperties;
     private final OperaPostingClient operaPostingClient;
@@ -163,11 +166,24 @@ public class OperaCheckInOrchestrator {
                 depositTotal,
                 resolveCurrency(active));
         try {
+            log.info("Opera payload [depositPaymentRequest]. requestId={}, hotelCode={}, operaReservationId={}, amount={}, payload={}",
+                    requestFresh.getId(),
+                    hotel.getHotelCode(),
+                    firstOperaReservationIdForDeposit,
+                    depositTotal,
+                    paymentBody);
             operaPostingClient.postPayment(
                     config, chainCode, hotel.getHotelCode(), firstOperaReservationIdForDeposit, paymentBody);
             checkInProgressService.recordDepositPosted(request.getId());
         } catch (RuntimeException ex) {
             String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+            log.error("Opera payload [depositPaymentRequest] failed. requestId={}, hotelCode={}, operaReservationId={}, amount={}, payload={}",
+                    requestFresh.getId(),
+                    hotel.getHotelCode(),
+                    firstOperaReservationIdForDeposit,
+                    depositTotal,
+                    paymentBody,
+                    ex);
             checkInProgressService.recordDepositFailed(request.getId(), msg);
             throw new IllegalStateException("Opera deposit payment failed: " + msg, ex);
         }
