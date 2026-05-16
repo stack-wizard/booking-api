@@ -298,7 +298,8 @@ public class OperaInvoicePostingService {
     private static boolean shouldIncludeOperaPayments(Invoice invoice) {
         return invoice != null
                 && (invoice.getInvoiceType() == InvoiceType.DEPOSIT
-                || invoice.getInvoiceType() == InvoiceType.DEPOSIT_STORNO);
+                || invoice.getInvoiceType() == InvoiceType.DEPOSIT_STORNO
+                || invoice.getInvoiceType() == InvoiceType.CREDIT_NOTE);
     }
 
     private OperaInvoicePostingPreview previewFinalStayPerReservation(Invoice invoice,
@@ -757,7 +758,8 @@ public class OperaInvoicePostingService {
     private boolean usesChargesOnlyEndpoint(Invoice invoice) {
         return invoice != null
                 && invoice.getInvoiceType() != InvoiceType.DEPOSIT
-                && invoice.getInvoiceType() != InvoiceType.DEPOSIT_STORNO;
+                && invoice.getInvoiceType() != InvoiceType.DEPOSIT_STORNO
+                && invoice.getInvoiceType() != InvoiceType.CREDIT_NOTE;
     }
 
     private Map<String, Object> amountPayload(BigDecimal amount, String currencyCode) {

@@ -795,4 +795,211 @@ class OperaInvoicePostingServiceTest {
                 "Expected mix of reservationId null/non-null to fail");
         verify(operaPostingClient, never()).postChargesAndPayments(any(), any(), any(), any(), any());
     }
+
+    @Test
+    void previewCreditNoteIncludesNegativePaymentRowsAndSkipsChargesOnlyWrapper() {
+        Invoice invoice = Invoice.builder()
+                .id(16L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .invoiceNumber("CREDIT_NOTE-2026-00001")
+                .fiscalFolioNo("CN-2026-00001")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("-50.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem item = InvoiceItem.builder()
+                .id(160L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(92L)
+                .productName("Cancellation refund")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("-50.00"))
+                .grossAmount(new BigDecimal("-50.00"))
+                .build();
+        InvoicePaymentAllocation allocation = InvoicePaymentAllocation.builder()
+                .id(260L)
+                .invoice(invoice)
+                .paymentTransactionId(702L)
+                .allocatedAmount(new BigDecimal("-50.00"))
+                .build();
+        Product product = Product.builder()
+                .id(92L)
+                .tenantId(1L)
+                .productType("PENALTY")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(306L)
+                .tenantId(1L)
+                .trxCode("20020")
+                .build();
+        PaymentTransaction refundTransaction = PaymentTransaction.builder()
+                .id(702L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .paymentType("CARD")
+                .cardType("VISA")
+                .currency("EUR")
+                .amount(new BigDecimal("-50.00"))
+                .status("POSTED")
+                .build();
+        OperaFiscalPaymentMapping paymentMapping = OperaFiscalPaymentMapping.builder()
+                .id(402L)
+                .tenantId(1L)
+                .paymentType("CARD")
+                .cardType("VISA")
+                .trxCode("90020")
+                .paymentMethodCode("VA")
+                .active(Boolean.TRUE)
+                .build();
+        OperaInvoiceTypeRouting routing = OperaInvoiceTypeRouting.builder()
+                .id(705L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .hotelCode("DH")
+                .reservationId(99005L)
+                .active(Boolean.TRUE)
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(605L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+
+        when(invoiceRepo.findById(16L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(16L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(16L)).thenReturn(List.of(allocation));
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(paymentTransactionService.requireById(702L)).thenReturn(refundTransaction);
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 92L, "PENALTY")).thenReturn(Optional.of(chargeMapping));
+        when(operaFiscalMappingService.resolvePaymentMapping(1L, "CARD", "VISA")).thenReturn(Optional.of(paymentMapping));
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.resolveRouting(1L, InvoiceType.CREDIT_NOTE, "DH")).thenReturn(routing);
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+
+        OperaInvoicePostingPreview preview = service.previewInvoice(16L, new OperaInvoicePostRequest());
+
+        JsonNode payload = preview.payload();
+        assertThat(payload.path("criteria").isMissingNode()).isTrue();
+        assertThat(payload.path("charges").get(0).path("transactionCode").asText()).isEqualTo("20020");
+        assertThat(payload.path("charges").get(0).path("price").path("amount").decimalValue())
+                .isEqualByComparingTo("-50.00");
+        assertThat(payload.path("payments").get(0).path("postingAmount").path("amount").decimalValue())
+                .isEqualByComparingTo("-50.00");
+        assertThat(payload.path("payments").get(0).path("paymentMethod").path("paymentMethod").asText()).isEqualTo("VA");
+    }
+
+    @Test
+    void postCreditNoteUsesChargesAndPaymentsEndpoint() {
+        Invoice invoice = Invoice.builder()
+                .id(17L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .invoiceNumber("CREDIT_NOTE-2026-00002")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("-50.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem item = InvoiceItem.builder()
+                .id(170L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(92L)
+                .productName("Cancellation refund")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("-50.00"))
+                .grossAmount(new BigDecimal("-50.00"))
+                .build();
+        InvoicePaymentAllocation allocation = InvoicePaymentAllocation.builder()
+                .id(270L)
+                .invoice(invoice)
+                .paymentTransactionId(703L)
+                .allocatedAmount(new BigDecimal("-50.00"))
+                .build();
+        Product product = Product.builder()
+                .id(92L)
+                .tenantId(1L)
+                .productType("PENALTY")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(307L)
+                .tenantId(1L)
+                .trxCode("20020")
+                .build();
+        PaymentTransaction refundTransaction = PaymentTransaction.builder()
+                .id(703L)
+                .tenantId(1L)
+                .transactionType("REFUND")
+                .paymentType("CARD")
+                .cardType("VISA")
+                .currency("EUR")
+                .amount(new BigDecimal("-50.00"))
+                .status("POSTED")
+                .build();
+        OperaFiscalPaymentMapping paymentMapping = OperaFiscalPaymentMapping.builder()
+                .id(403L)
+                .tenantId(1L)
+                .paymentType("CARD")
+                .cardType("VISA")
+                .trxCode("90020")
+                .paymentMethodCode("VA")
+                .active(Boolean.TRUE)
+                .build();
+        OperaInvoiceTypeRouting routing = OperaInvoiceTypeRouting.builder()
+                .id(706L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.CREDIT_NOTE)
+                .hotelCode("DH")
+                .reservationId(99006L)
+                .active(Boolean.TRUE)
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(606L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+        JsonNode response = new ObjectMapper().createObjectNode().put("status", "ok");
+
+        when(invoiceRepo.findById(17L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(17L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(17L)).thenReturn(List.of(allocation));
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(paymentTransactionService.requireById(703L)).thenReturn(refundTransaction);
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 92L, "PENALTY")).thenReturn(Optional.of(chargeMapping));
+        when(operaFiscalMappingService.resolvePaymentMapping(1L, "CARD", "VISA")).thenReturn(Optional.of(paymentMapping));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.resolveRouting(1L, InvoiceType.CREDIT_NOTE, "DH")).thenReturn(routing);
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postChargesAndPayments(any(), eq("DH"), anyString(), eq(99006L), any())).thenReturn(response);
+
+        OperaInvoicePostingResult result = service.postInvoice(17L, new OperaInvoicePostRequest());
+
+        assertThat(result.response().path("status").asText()).isEqualTo("ok");
+        verify(operaPostingClient, times(1)).postChargesAndPayments(any(), eq("DH"), anyString(), eq(99006L), any());
+        verify(operaPostingClient, never()).postCharges(any(), anyString(), anyString(), anyLong(), any());
+    }
 }
