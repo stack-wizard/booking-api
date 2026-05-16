@@ -207,6 +207,8 @@ class InvoiceServiceTest {
                 .id(500L)
                 .tenantId(1L)
                 .invoiceType(InvoiceType.DEPOSIT)
+                .operaReservationId(777L)
+                .operaHotelCode("DH")
                 .currency("EUR")
                 .customerName("John Doe")
                 .subtotalNet(new BigDecimal("24.00"))
@@ -258,6 +260,15 @@ class InvoiceServiceTest {
         when(allocationRepo.sumAllocatedByInvoiceId(501L)).thenReturn(BigDecimal.ZERO);
 
         service.createStornoInvoice(500L);
+
+        ArgumentCaptor<Invoice> invoiceCaptor = ArgumentCaptor.forClass(Invoice.class);
+        verify(invoiceRepo, org.mockito.Mockito.atLeastOnce()).save(invoiceCaptor.capture());
+        Invoice createdStorno = invoiceCaptor.getAllValues().stream()
+                .filter(inv -> inv.getInvoiceType() == InvoiceType.DEPOSIT_STORNO)
+                .findFirst()
+                .orElseThrow();
+        assertThat(createdStorno.getOperaReservationId()).isNull();
+        assertThat(createdStorno.getOperaHotelCode()).isEqualTo("DH");
 
         ArgumentCaptor<InvoiceItem> itemCaptor = ArgumentCaptor.forClass(InvoiceItem.class);
         verify(invoiceItemRepo).save(itemCaptor.capture());
@@ -744,5 +755,113 @@ class InvoiceServiceTest {
         assertThat(result.blockers()).isEmpty();
         assertThat(result.warnings()).hasSize(1);
         assertThat(result.warnings().get(0).getOperaPostingStatus()).isEqualTo("NOT_POSTED");
+    }
+
+    @Test
+    void evaluateCheckoutGateSkipsUnpaidBlockerForWalkin() {
+        long reqId = 57L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(reqId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.WALKIN)
+                .build();
+        Invoice inv = Invoice.builder()
+                .id(11L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2024-00003")
+                .invoiceDate(LocalDate.now())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.FISCALIZED)
+                .operaPostingStatus(OperaPostingStatus.POSTED)
+                .currency("EUR")
+                .subtotalNet(new BigDecimal("40.00"))
+                .discountTotal(BigDecimal.ZERO.setScale(2))
+                .tax1Total(new BigDecimal("10.00"))
+                .tax2Total(BigDecimal.ZERO.setScale(2))
+                .totalGross(new BigDecimal("50.00"))
+                .build();
+        when(requestRepo.findById(reqId)).thenReturn(Optional.of(request));
+        when(invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reqId)).thenReturn(List.of(inv));
+        when(allocationRepo.sumAllocatedByInvoiceId(11L)).thenReturn(BigDecimal.ZERO);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoiceCheckoutGateResult result = service.evaluateCheckoutGateForReservationRequest(reqId);
+
+        assertThat(result.blockers()).isEmpty();
+    }
+
+    @Test
+    void evaluateCheckoutGateSkipsUnpaidBlockerForInternal() {
+        long reqId = 58L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(reqId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INTERNAL)
+                .build();
+        Invoice inv = Invoice.builder()
+                .id(12L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2024-00004")
+                .invoiceDate(LocalDate.now())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.FISCALIZED)
+                .operaPostingStatus(OperaPostingStatus.POSTED)
+                .currency("EUR")
+                .subtotalNet(new BigDecimal("40.00"))
+                .discountTotal(BigDecimal.ZERO.setScale(2))
+                .tax1Total(new BigDecimal("10.00"))
+                .tax2Total(BigDecimal.ZERO.setScale(2))
+                .totalGross(new BigDecimal("50.00"))
+                .build();
+        when(requestRepo.findById(reqId)).thenReturn(Optional.of(request));
+        when(invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reqId)).thenReturn(List.of(inv));
+        when(allocationRepo.sumAllocatedByInvoiceId(12L)).thenReturn(BigDecimal.ZERO);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoiceCheckoutGateResult result = service.evaluateCheckoutGateForReservationRequest(reqId);
+
+        assertThat(result.blockers()).isEmpty();
+    }
+
+    @Test
+    void evaluateCheckoutGateSkipsUnpaidBlockerForInhouse() {
+        long reqId = 59L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(reqId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INHOUSE)
+                .build();
+        Invoice inv = Invoice.builder()
+                .id(13L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .invoiceNumber("INV-2024-00005")
+                .invoiceDate(LocalDate.now())
+                .issuedByMode(IssuedByMode.ONLINE_SYSTEM)
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("UNPAID")
+                .fiscalizationStatus(InvoiceFiscalizationStatus.FISCALIZED)
+                .operaPostingStatus(OperaPostingStatus.POSTED)
+                .currency("EUR")
+                .subtotalNet(new BigDecimal("40.00"))
+                .discountTotal(BigDecimal.ZERO.setScale(2))
+                .tax1Total(new BigDecimal("10.00"))
+                .tax2Total(BigDecimal.ZERO.setScale(2))
+                .totalGross(new BigDecimal("50.00"))
+                .build();
+        when(requestRepo.findById(reqId)).thenReturn(Optional.of(request));
+        when(invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reqId)).thenReturn(List.of(inv));
+        when(allocationRepo.sumAllocatedByInvoiceId(13L)).thenReturn(BigDecimal.ZERO);
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InvoiceCheckoutGateResult result = service.evaluateCheckoutGateForReservationRequest(reqId);
+
+        assertThat(result.blockers()).isEmpty();
     }
 }

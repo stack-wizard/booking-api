@@ -331,6 +331,74 @@ class OperaInvoicePostingServiceTest {
     }
 
     @Test
+    void previewDepositStornoUsesInvoiceTypeRoutingReservationEvenWhenHotelCodeIsPresent() {
+        Invoice invoice = Invoice.builder()
+                .id(121L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .invoiceNumber("DEPOSIT_STORNO-2026-00001")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("-50.00"))
+                .operaHotelCode("DH")
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem item = InvoiceItem.builder()
+                .id(1211L)
+                .invoice(invoice)
+                .lineNo(1)
+                .productId(91L)
+                .productName("Deposit reversal")
+                .quantity(-1)
+                .unitPriceGross(new BigDecimal("50.00"))
+                .grossAmount(new BigDecimal("-50.00"))
+                .build();
+        Product product = Product.builder()
+                .id(91L)
+                .tenantId(1L)
+                .productType("DEPOSIT")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(308L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaInvoiceTypeRouting routing = OperaInvoiceTypeRouting.builder()
+                .id(707L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .hotelCode("DH")
+                .reservationId(99121L)
+                .active(Boolean.TRUE)
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(607L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+
+        when(invoiceRepo.findById(121L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(121L)).thenReturn(List.of(item));
+        when(allocationRepo.findByInvoiceIdOrderByCreatedAtAsc(121L)).thenReturn(List.of());
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.resolveRouting(1L, InvoiceType.DEPOSIT_STORNO, "DH")).thenReturn(routing);
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 91L, "DEPOSIT")).thenReturn(Optional.of(chargeMapping));
+
+        OperaInvoicePostingPreview preview = service.previewInvoice(121L, new OperaInvoicePostRequest());
+
+        assertThat(preview.hotelCode()).isEqualTo("DH");
+        assertThat(preview.reservationId()).isEqualTo(99121L);
+        verify(configurationService).resolveRouting(1L, InvoiceType.DEPOSIT_STORNO, "DH");
+    }
+
+    @Test
     void postInvoiceIgnoresConfiguredStaticAccessToken() {
         Invoice invoice = Invoice.builder()
                 .id(13L)

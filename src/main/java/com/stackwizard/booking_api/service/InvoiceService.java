@@ -232,6 +232,10 @@ public class InvoiceService {
     @Transactional
     public InvoiceCheckoutGateResult evaluateCheckoutGateForReservationRequest(Long reservationRequestId) {
         List<Invoice> invoices = invoiceRepo.findByReservationRequestIdOrderByCreatedAtDescIdDesc(reservationRequestId);
+        ReservationRequest reservationRequest = reservationRequestId != null
+                ? requestRepo.findById(reservationRequestId).orElse(null)
+                : null;
+        boolean skipPaymentValidation = shouldSkipCheckoutPaymentValidation(reservationRequest);
         for (Invoice invoice : invoices) {
             refreshInvoicePaymentStatus(invoice);
         }
@@ -243,7 +247,7 @@ public class InvoiceService {
                 continue;
             }
             String ps = inv.getPaymentStatus();
-            if (ps == null || !"PAID".equalsIgnoreCase(ps)) {
+            if (!skipPaymentValidation && (ps == null || !"PAID".equalsIgnoreCase(ps))) {
                 blockers.add("Invoice " + inv.getInvoiceNumber() + " (" + inv.getInvoiceType()
                         + ") payment status is " + (ps != null ? ps : "null") + " (expected PAID)");
             }
@@ -264,6 +268,15 @@ public class InvoiceService {
             }
         }
         return new InvoiceCheckoutGateResult(blockers, warnings);
+    }
+
+    private boolean shouldSkipCheckoutPaymentValidation(ReservationRequest reservationRequest) {
+        if (reservationRequest == null || reservationRequest.getType() == null) {
+            return false;
+        }
+        return reservationRequest.getType() == ReservationRequest.Type.WALKIN
+                || reservationRequest.getType() == ReservationRequest.Type.INTERNAL
+                || reservationRequest.getType() == ReservationRequest.Type.INHOUSE;
     }
 
     @Transactional
@@ -815,7 +828,7 @@ public class InvoiceService {
                 .referenceTable(REFERENCE_TABLE_INVOICE)
                 .referenceId(source.getId())
                 .reservationRequestId(source.getReservationRequestId())
-                .operaReservationId(source.getOperaReservationId())
+                .operaReservationId(expectedStorno == InvoiceType.DEPOSIT_STORNO ? null : source.getOperaReservationId())
                 .operaHotelCode(source.getOperaHotelCode())
                 .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
                 .currency(source.getCurrency())
