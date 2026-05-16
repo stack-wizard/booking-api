@@ -16,10 +16,12 @@ import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.security.TenantContext;
+import com.stackwizard.booking_api.service.fiscal.InvoiceAutoFiscalizationRequestedEvent;
 import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
 import com.stackwizard.booking_api.service.opera.OperaCheckInOrchestrator;
 import com.stackwizard.booking_api.service.opera.OperaInvoicePostingService;
 import jakarta.persistence.EntityManager;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -40,6 +42,7 @@ public class ReservationStayService {
     private final ProductRepository productRepo;
     private final OperaFiscalMappingService operaFiscalMappingService;
     private final EntityManager entityManager;
+    private final ApplicationEventPublisher eventPublisher;
 
     public ReservationStayService(ReservationRequestRepository requestRepo,
                                     ReservationRepository reservationRepo,
@@ -49,7 +52,8 @@ public class ReservationStayService {
                                     OperaInvoicePostingService operaInvoicePostingService,
                                     ProductRepository productRepo,
                                     OperaFiscalMappingService operaFiscalMappingService,
-                                    EntityManager entityManager) {
+                                    EntityManager entityManager,
+                                    ApplicationEventPublisher eventPublisher) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.invoiceService = invoiceService;
@@ -59,6 +63,7 @@ public class ReservationStayService {
         this.productRepo = productRepo;
         this.operaFiscalMappingService = operaFiscalMappingService;
         this.entityManager = entityManager;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -227,7 +232,8 @@ public class ReservationStayService {
         for (Invoice inv : invoiceService.findByRequestId(requestId)) {
             if (inv.getInvoiceType() == InvoiceType.DEPOSIT && inv.getStornoId() == null) {
                 if (!invoiceService.hasReversalChildForSourceInvoice(inv.getId(), InvoiceType.DEPOSIT)) {
-                    invoiceService.createStornoInvoice(inv.getId());
+                    Invoice stornoInvoice = invoiceService.createStornoInvoice(inv.getId());
+                    publishAutoFiscalizationIfRequired(stornoInvoice);
                 }
             }
         }
@@ -378,5 +384,14 @@ public class ReservationStayService {
 
     private static boolean isExpired(OffsetDateTime expiresAt) {
         return expiresAt != null && expiresAt.isBefore(OffsetDateTime.now());
+    }
+
+    private void publishAutoFiscalizationIfRequired(Invoice invoice) {
+        if (invoice != null
+                && invoice.getId() != null
+                && invoice.getFiscalizationStatus() != null
+                && invoice.getFiscalizationStatus().name().equals("REQUIRED")) {
+            eventPublisher.publishEvent(new InvoiceAutoFiscalizationRequestedEvent(invoice.getId()));
+        }
     }
 }

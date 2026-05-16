@@ -8,6 +8,7 @@ import com.stackwizard.booking_api.dto.InvoiceCheckoutGateResult;
 import com.stackwizard.booking_api.exception.CheckoutBlockedException;
 import com.stackwizard.booking_api.config.BookingOperaProperties;
 import com.stackwizard.booking_api.model.Invoice;
+import com.stackwizard.booking_api.model.InvoiceFiscalizationStatus;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.OperaFiscalChargeMapping;
 import com.stackwizard.booking_api.model.Reservation;
@@ -15,6 +16,7 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.ReservationRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.service.fiscal.InvoiceAutoFiscalizationRequestedEvent;
 import com.stackwizard.booking_api.service.fiscal.OperaFiscalMappingService;
 import com.stackwizard.booking_api.service.opera.OperaCheckInOrchestrator;
 import com.stackwizard.booking_api.service.opera.OperaInvoicePostingService;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -65,6 +68,8 @@ class ReservationStayServiceTest {
     private ProductRepository productRepo;
     @Mock
     private OperaFiscalMappingService operaFiscalMappingService;
+    @Mock
+    private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks
     private ReservationStayService stayService;
@@ -213,6 +218,11 @@ class ReservationStayServiceTest {
         when(deposit.getId()).thenReturn(33L);
         when(deposit.getInvoiceType()).thenReturn(InvoiceType.DEPOSIT);
         when(deposit.getStornoId()).thenReturn(null);
+        Invoice depositStorno = Invoice.builder()
+                .id(44L)
+                .invoiceType(InvoiceType.DEPOSIT_STORNO)
+                .fiscalizationStatus(InvoiceFiscalizationStatus.REQUIRED)
+                .build();
         Invoice finalInvoice = mock(Invoice.class);
         when(finalInvoice.getId()).thenReturn(200L);
 
@@ -220,6 +230,7 @@ class ReservationStayServiceTest {
         when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
         when(invoiceService.findByRequestId(requestId)).thenReturn(List.of(deposit));
         when(invoiceService.hasReversalChildForSourceInvoice(33L, InvoiceType.DEPOSIT)).thenReturn(false);
+        when(invoiceService.createStornoInvoice(33L)).thenReturn(depositStorno);
         when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
         when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
         when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -237,6 +248,7 @@ class ReservationStayServiceTest {
         verify(invoiceService).issueSystemFinalInvoiceForRequest(requestId);
         verify(operaCheckInOrchestrator).runIfEnabled(eq(request), anyList());
         verify(operaInvoicePostingService, never()).postInvoice(anyLong(), any());
+        verify(eventPublisher).publishEvent(new InvoiceAutoFiscalizationRequestedEvent(44L));
     }
 
     @Test
