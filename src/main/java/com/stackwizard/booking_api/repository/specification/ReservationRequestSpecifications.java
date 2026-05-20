@@ -169,6 +169,14 @@ public final class ReservationRequestSpecifications {
             return null;
         }
 
+        boolean hasDateRelatedReservationFilters =
+                criteria.getReservationFrom() != null
+                        || criteria.getReservationTo() != null
+                        || criteria.getReservationStartsFrom() != null
+                        || criteria.getReservationStartsTo() != null
+                        || criteria.getReservationEndsFrom() != null
+                        || criteria.getReservationEndsTo() != null;
+
         Subquery<Long> sq = query.subquery(Long.class);
         Root<Reservation> reservation = sq.from(Reservation.class);
         List<Predicate> predicates = new ArrayList<>();
@@ -179,6 +187,12 @@ public final class ReservationRequestSpecifications {
         }
         if (hasValues(criteria.getReservationStatuses())) {
             predicates.add(inUpperCase(cb, reservation.get("status").as(String.class), criteria.getReservationStatuses()));
+        } else if (hasDateRelatedReservationFilters) {
+            Expression<String> normalizedStatus = cb.upper(reservation.get("status").as(String.class));
+            predicates.add(cb.or(
+                    cb.isNull(reservation.get("status")),
+                    cb.notEqual(normalizedStatus, "CANCELLED")
+            ));
         }
         if (criteria.getProductId() != null) {
             predicates.add(cb.equal(reservation.get("productId"), criteria.getProductId()));

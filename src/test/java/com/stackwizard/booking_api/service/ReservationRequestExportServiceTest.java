@@ -169,4 +169,66 @@ class ReservationRequestExportServiceTest {
             assertThat(sheet.getRow(1).getCell(6).getStringCellValue()).isEqualTo("VIP");
         }
     }
+
+    @Test
+    void exportSearchSummarySkipsCancelledReservationLines() throws Exception {
+        ReservationRequestExportService service = new ReservationRequestExportService(
+                reservationRequestService, dtoMapper, reservationRepository);
+        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        ReservationRequest request = ReservationRequest.builder()
+                .id(11L)
+                .tenantId(1L)
+                .customerName("Ana Anić")
+                .customerEmail("ana@example.com")
+                .notes("VIP")
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .build();
+        Resource resource = Resource.builder()
+                .id(6L)
+                .tenantId(1L)
+                .kind("EXACT")
+                .code("A-13")
+                .name("Beach side")
+                .build();
+        Reservation active = Reservation.builder()
+                .id(110L)
+                .tenantId(1L)
+                .request(request)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .requestedResource(resource)
+                .startsAt(LocalDateTime.of(2026, 4, 2, 9, 0))
+                .endsAt(LocalDateTime.of(2026, 4, 2, 19, 0))
+                .status("CONFIRMED")
+                .customerName("Ana Anić")
+                .customerEmail("ana@example.com")
+                .build();
+        Reservation cancelled = Reservation.builder()
+                .id(111L)
+                .tenantId(1L)
+                .request(request)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .requestedResource(resource)
+                .startsAt(LocalDateTime.of(2026, 4, 2, 8, 0))
+                .endsAt(LocalDateTime.of(2026, 4, 2, 12, 0))
+                .status("CANCELLED")
+                .customerName("Ana Anić")
+                .customerEmail("ana@example.com")
+                .build();
+
+        when(reservationRequestService.search(any(ReservationRequestSearchCriteria.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(request), PageRequest.of(0, 100, sort), 1));
+        when(reservationRepository.findByRequestIdsWithDetails(eq(List.of(11L))))
+                .thenReturn(List.of(active, cancelled));
+
+        byte[] bytes = service.exportSearchSummary(new ReservationRequestSearchCriteria(), sort);
+
+        assertThat(bytes).isNotEmpty();
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet = workbook.getSheetAt(0);
+            assertThat(sheet.getLastRowNum()).isEqualTo(1);
+            assertThat(sheet.getRow(1).getCell(1).getNumericCellValue()).isEqualTo(11d);
+            assertThat(sheet.getRow(1).getCell(4).getStringCellValue()).isEqualTo("A-13");
+        }
+    }
 }

@@ -248,7 +248,9 @@ public class ReservationRequestExportService {
             return Map.of();
         }
         List<Reservation> batch = reservationRepository.findByRequestIdsWithDetails(requestIds);
-        return batch.stream().collect(Collectors.groupingBy(r -> r.getRequest().getId(), HashMap::new, Collectors.toList()));
+        return batch.stream()
+                .filter(r -> r.getStatus() == null || !"CANCELLED".equalsIgnoreCase(r.getStatus().trim()))
+                .collect(Collectors.groupingBy(r -> r.getRequest().getId(), HashMap::new, Collectors.toList()));
     }
 
     private void writeSummaryRow(Row row, ReservationRequest request, Reservation reservation, CellStyle dateTimeStyle) {

@@ -291,6 +291,47 @@ class ReservationStayServiceTest {
     }
 
     @Test
+    void checkInIgnoresCancelledAmendmentLinesWhenConfirmedReplacementExists() {
+        long requestId = 6L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation cancelled = Reservation.builder()
+                .id(11L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CANCELLED")
+                .build();
+        Reservation confirmed = Reservation.builder()
+                .id(12L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(201L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(cancelled, confirmed));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+
+        CheckinResultDto result = stayService.checkIn(requestId);
+
+        assertThat(result.getFinalInvoiceId()).isEqualTo(201L);
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.CHECKED_IN);
+        assertThat(cancelled.getStatus()).isEqualTo("CANCELLED");
+        assertThat(confirmed.getStatus()).isEqualTo("CHECKED_IN");
+    }
+
+    @Test
     void checkInWhenOperaCheckInEnabledPostsIssuedFinalInvoiceToOpera() {
         long requestId = 7L;
         BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
