@@ -14,13 +14,13 @@ import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.PriceListEntry;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductImage;
+import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.model.ResourceMap;
 import com.stackwizard.booking_api.model.ResourceMapResource;
 import com.stackwizard.booking_api.model.Uom;
 import com.stackwizard.booking_api.repository.AllocationRepository;
-import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ResourceCompositionRepository;
 import com.stackwizard.booking_api.repository.ResourceMapRepository;
@@ -51,7 +51,7 @@ public class AvailabilityService {
     private final AllocationRepository allocationRepo;
     private final ProductRepository productRepo;
     private final UomRepository uomRepo;
-    private final PriceListEntryRepository priceListRepo;
+    private final PriceListEntryResolver priceListEntryResolver;
     private final ServiceCalendarService calendarService;
     private final ResourceMapRepository mapRepo;
     private final ResourceMapResourceRepository mapResourceRepo;
@@ -61,7 +61,7 @@ public class AvailabilityService {
                                ResourceCompositionRepository compositionRepo,
                                AllocationRepository allocationRepo,
                                ProductRepository productRepo,
-                               PriceListEntryRepository priceListRepo,
+                               PriceListEntryResolver priceListEntryResolver,
                                ServiceCalendarService calendarService,
                                ResourceMapRepository mapRepo,
                                ResourceMapResourceRepository mapResourceRepo,
@@ -71,7 +71,7 @@ public class AvailabilityService {
         this.compositionRepo = compositionRepo;
         this.allocationRepo = allocationRepo;
         this.productRepo = productRepo;
-        this.priceListRepo = priceListRepo;
+        this.priceListEntryResolver = priceListEntryResolver;
         this.calendarService = calendarService;
         this.mapRepo = mapRepo;
         this.mapResourceRepo = mapResourceRepo;
@@ -80,7 +80,10 @@ public class AvailabilityService {
     }
 
     @Transactional(readOnly = true)
-    public AvailabilityResponse getAvailability(Long tenantId, LocalDate date, Long locationId) {
+    public AvailabilityResponse getAvailability(Long tenantId,
+                                                LocalDate date,
+                                                Long locationId,
+                                                ReservationRequest.Type requestType) {
         if (tenantId == null) {
             throw new IllegalArgumentException("tenantId is required");
         }
@@ -136,7 +139,12 @@ public class AvailabilityService {
         Map<Long, List<PriceListEntry>> pricesByProductId = new HashMap<>();
         List<Long> productIds = products.stream().map(Product::getId).toList();
         if (!productIds.isEmpty()) {
-            List<PriceListEntry> prices = priceListRepo.findForProductsOnDate(productIds, tenantId, date);
+            List<PriceListEntry> prices = priceListEntryResolver.findEffectiveForProductsOnDate(
+                    productIds,
+                    tenantId,
+                    date,
+                    requestType
+            );
             for (PriceListEntry price : prices) {
                 pricesByProductId.computeIfAbsent(price.getProductId(), ignored -> new ArrayList<>()).add(price);
             }

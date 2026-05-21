@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.controller;
 
 import com.stackwizard.booking_api.dto.AvailabilityResponse;
+import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.AvailabilityService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,8 +21,16 @@ public class AvailabilityController {
     @GetMapping
     public AvailabilityResponse getAvailability(@RequestParam Long tenantId,
                                                 @RequestParam LocalDate date,
-                                                @RequestParam(required = false) Long locationId) {
+                                                @RequestParam(required = false) Long locationId,
+                                                @RequestParam(required = false) String requestType) {
         Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
-        return service.getAvailability(resolvedTenantId, date, locationId);
+        return service.getAvailability(resolvedTenantId, date, locationId, parseRequestType(requestType));
+    }
+
+    private ReservationRequest.Type parseRequestType(String requestType) {
+        if (requestType == null || requestType.isBlank()) {
+            return ReservationRequest.Type.EXTERNAL;
+        }
+        return ReservationRequest.Type.valueOf(requestType.trim().toUpperCase());
     }
 }

@@ -72,20 +72,10 @@ public class ReservationController {
         if (r.getRequestType() == null) {
             r.setRequestType(ReservationRequest.Type.EXTERNAL);
         }
-        boolean existingFound = service.findById(id)
-                .map(existing -> {
-                    if (existing.getExpiresAt() != null && existing.getExpiresAt().isBefore(OffsetDateTime.now())) {
-                        throw new IllegalStateException("Reservation expired");
-                    }
-                    r.setStatus(existing.getStatus());
-                    r.setExpiresAt(existing.getExpiresAt());
-                    return true;
-                })
-                .orElse(false);
-        if (!existingFound) {
+        if (service.findById(id).isEmpty()) {
             return ResponseEntity.ok(service.saveHoldReservation(r));
         }
-        return ResponseEntity.ok(service.save(r));
+        return ResponseEntity.ok(service.updateHoldReservation(id, r));
     }
 
     @PostMapping("/{id}/opera-link")

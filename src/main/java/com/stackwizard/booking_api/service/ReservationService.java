@@ -11,7 +11,6 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.repository.AllocationRepository;
-import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
@@ -42,7 +41,7 @@ public class ReservationService {
     private final AllocationRepository allocationRepo;
     private final ResourceRepository resourceRepo;
     private final ProductRepository productRepo;
-    private final PriceListEntryRepository priceListRepo;
+    private final PriceListEntryResolver priceListEntryResolver;
     private final ResourceCompositionRepository compositionRepo;
     private final BookingTranslationService translationService;
     private final ReservationRequestRepository requestRepo;
@@ -55,7 +54,7 @@ public class ReservationService {
                               AllocationRepository allocationRepo,
                               ResourceRepository resourceRepo,
                               ProductRepository productRepo,
-                              PriceListEntryRepository priceListRepo,
+                              PriceListEntryResolver priceListEntryResolver,
                               ResourceCompositionRepository compositionRepo,
                               BookingTranslationService translationService,
                               ReservationRequestRepository requestRepo,
@@ -67,7 +66,7 @@ public class ReservationService {
         this.allocationRepo = allocationRepo;
         this.resourceRepo = resourceRepo;
         this.productRepo = productRepo;
-        this.priceListRepo = priceListRepo;
+        this.priceListEntryResolver = priceListEntryResolver;
         this.compositionRepo = compositionRepo;
         this.translationService = translationService;
         this.requestRepo = requestRepo;
@@ -102,34 +101,37 @@ public class ReservationService {
 
     @Transactional
     public Reservation saveHoldReservation(Reservation r) {
-        if (r.getStatus() == null || "CONFIRMED".equalsIgnoreCase(r.getStatus())) {
-            r.setStatus("HOLD");
-        }
-        if (r.getAdults() == null) {
-            r.setAdults(0);
-        }
-        if (r.getChildren() == null) {
-            r.setChildren(0);
-        }
-        if (r.getInfants() == null) {
-            r.setInfants(0);
-        }
-        ReservationRequest request = null;
-        if (r.getRequest() != null && r.getRequest().getId() != null) {
-            request = resolveRequestForHold(r.getRequest().getId(), r.getTenantId());
-            r.setRequest(request);
-            if (request.getType() != null) {
-                r.setRequestType(request.getType());
-            }
-        }
-        applyDefaultOperaReservationLink(r, request);
-        applyPricingForHoldReservation(r, request);
-        if (isOpenEndedDraftRequest(request)) {
-            r.setExpiresAt(null);
-        } else if (r.getExpiresAt() == null) {
-            r.setExpiresAt(expiresAtForReservationHold(request, r.getTenantId()));
-        }
+        prepareReservationForHold(r, true);
         return repo.save(r);
+    }
+
+    @Transactional
+    public Reservation updateHoldReservation(Long reservationId, Reservation changes) {
+        Reservation existing = repo.findById(reservationId)
+                .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
+
+        if (existing.getExpiresAt() != null && existing.getExpiresAt().isBefore(OffsetDateTime.now())) {
+            throw new IllegalStateException("Reservation expired");
+        }
+
+        existing.setTenantId(changes.getTenantId() != null ? changes.getTenantId() : existing.getTenantId());
+        existing.setProductId(changes.getProductId());
+        existing.setRequest(changes.getRequest());
+        existing.setRequestType(changes.getRequestType());
+        existing.setRequestedResource(changes.getRequestedResource());
+        existing.setStartsAt(changes.getStartsAt());
+        existing.setEndsAt(changes.getEndsAt());
+        existing.setAdults(changes.getAdults());
+        existing.setChildren(changes.getChildren());
+        existing.setInfants(changes.getInfants());
+        existing.setCustomerName(changes.getCustomerName());
+        existing.setCustomerEmail(changes.getCustomerEmail());
+        existing.setCustomerPhone(changes.getCustomerPhone());
+        existing.setCurrency(changes.getCurrency());
+        existing.setUom(changes.getUom());
+
+        prepareReservationForHold(existing, false);
+        return repo.save(existing);
     }
 
     @Transactional
@@ -159,6 +161,9 @@ public class ReservationService {
             ensureAvailability(res, starts, ends);
             allocations.add(Allocation.builder()
                     .tenantId(saved.getTenantId())
+                    .productId(saved.getProductId())
+                    .uom(saved.getUom())
+                    .qty(saved.getQty())
                     .reservation(saved)
                     .requestedResource(res)
                     .allocatedResource(res)
@@ -178,6 +183,9 @@ public class ReservationService {
                     ensureAvailability(memberResource, starts, ends);
                     allocations.add(Allocation.builder()
                             .tenantId(saved.getTenantId())
+                            .productId(saved.getProductId())
+                            .uom(saved.getUom())
+                            .qty(saved.getQty())
                             .reservation(saved)
                             .requestedResource(res)
                             .allocatedResource(memberResource)
@@ -217,9 +225,16 @@ public class ReservationService {
 
         String uom = BookingUom.normalize(request.getUom());
         validateUomAllowed(product, uom);
+        ReservationRequest.Type requestType = resolveRequestType(request.getRequestType());
 
-        List<PriceListEntry> priceEntries = priceListRepo.findForProductUomOnDate(
-                product.getId(), uom, request.getCurrency(), tenantId, request.getServiceDate());
+        List<PriceListEntry> priceEntries = priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(),
+                uom,
+                request.getCurrency(),
+                tenantId,
+                request.getServiceDate(),
+                requestType
+        );
         if (priceEntries.isEmpty()) {
             throw new IllegalArgumentException("No price for product and uom on date");
         }
@@ -307,6 +322,7 @@ public class ReservationService {
                 .cancellationPolicyText(policySnapshot != null ? policySnapshot.bookingPolicyText() : null)
                 .cancellationPolicySnapshot(policySnapshot != null ? policySnapshot.ruleSnapshot() : null)
                 .currency(request.getCurrency())
+                .uom(uom)
                 .qty(resolvedQty)
                 .unitPrice(unitPrice)
                 .grossAmount(grossAmount)
@@ -535,6 +551,7 @@ public class ReservationService {
                 : request != null ? request.getType() : null;
         if (requestType == ReservationRequest.Type.INTERNAL) {
             reservation.setCurrency(null);
+            reservation.setUom(null);
             reservation.setQty(null);
             reservation.setUnitPrice(null);
             reservation.setGrossAmount(null);
@@ -552,13 +569,14 @@ public class ReservationService {
         validateProductResource(product, requestedResource);
 
         String currency = normalizeCurrency(reservation.getCurrency());
-        String uom = BookingUom.normalize(product.getDefaultUom());
-        List<PriceListEntry> priceEntries = priceListRepo.findForProductUomOnDate(
+        String uom = resolveReservationUom(reservation, product);
+        List<PriceListEntry> priceEntries = priceListEntryResolver.findEffectiveForProductUomOnDate(
                 product.getId(),
                 uom,
                 currency,
                 reservation.getTenantId(),
-                reservation.getStartsAt().toLocalDate()
+                reservation.getStartsAt().toLocalDate(),
+                requestType
         );
         if (priceEntries.isEmpty()) {
             throw new IllegalArgumentException("No price for product and uom on date");
@@ -571,9 +589,40 @@ public class ReservationService {
         reservation.setRequestedResource(requestedResource);
         reservation.setProductId(product.getId());
         reservation.setCurrency(currency);
+        reservation.setUom(uom);
         reservation.setQty(qty);
         reservation.setUnitPrice(calculatedUnitPrice);
         reservation.setGrossAmount(money(calculatedUnitPrice.multiply(BigDecimal.valueOf(qty))));
+    }
+
+    private void prepareReservationForHold(Reservation reservation, boolean assignExpiryIfMissing) {
+        if (reservation.getStatus() == null || "CONFIRMED".equalsIgnoreCase(reservation.getStatus())) {
+            reservation.setStatus("HOLD");
+        }
+        if (reservation.getAdults() == null) {
+            reservation.setAdults(0);
+        }
+        if (reservation.getChildren() == null) {
+            reservation.setChildren(0);
+        }
+        if (reservation.getInfants() == null) {
+            reservation.setInfants(0);
+        }
+        ReservationRequest request = null;
+        if (reservation.getRequest() != null && reservation.getRequest().getId() != null) {
+            request = resolveRequestForHold(reservation.getRequest().getId(), reservation.getTenantId());
+            reservation.setRequest(request);
+            if (request.getType() != null) {
+                reservation.setRequestType(request.getType());
+            }
+        }
+        applyDefaultOperaReservationLink(reservation, request);
+        applyPricingForHoldReservation(reservation, request);
+        if (isOpenEndedDraftRequest(request)) {
+            reservation.setExpiresAt(null);
+        } else if (assignExpiryIfMissing && reservation.getExpiresAt() == null) {
+            reservation.setExpiresAt(expiresAtForReservationHold(request, reservation.getTenantId()));
+        }
     }
 
     private Resource loadRequestedResource(Reservation reservation) {
@@ -600,6 +649,13 @@ public class ReservationService {
             return "EUR";
         }
         return currency.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String resolveReservationUom(Reservation reservation, Product product) {
+        String source = StringUtils.hasText(reservation.getUom()) ? reservation.getUom() : product.getDefaultUom();
+        String uom = BookingUom.normalize(source);
+        validateUomAllowed(product, uom);
+        return uom;
     }
 
     private PriceListEntry selectPriceEntry(List<PriceListEntry> priceEntries,
@@ -848,6 +904,13 @@ public class ReservationService {
             changed = true;
         }
         return changed;
+    }
+
+    private ReservationRequest.Type resolveRequestType(String requestType) {
+        if (!StringUtils.hasText(requestType)) {
+            return ReservationRequest.Type.EXTERNAL;
+        }
+        return ReservationRequest.Type.valueOf(requestType.trim().toUpperCase(Locale.ROOT));
     }
 
     private String mergeCancellationPolicyText(String existingText, String newText) {

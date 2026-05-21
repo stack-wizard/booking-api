@@ -8,6 +8,7 @@ import com.stackwizard.booking_api.model.CancellationPolicy;
 import com.stackwizard.booking_api.model.LocationNode;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
+import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.ResourceType;
 import com.stackwizard.booking_api.repository.AllocationRepository;
 import com.stackwizard.booking_api.repository.PriceListEntryRepository;
@@ -101,7 +102,7 @@ class AvailabilityServiceTest {
                 "findByTenantIdOrderByDisplayOrderAscNameAscIdAsc", args -> List.of()
         ));
         PriceListEntryRepository priceListRepo = stub(PriceListEntryRepository.class, Map.of(
-                "findForProductsOnDate", args -> List.of()
+                "findCandidatesForProductsOnDate", args -> List.of()
         ));
         ResourceMapRepository mapRepo = stub(ResourceMapRepository.class, Map.of(
                 "findByTenantId", args -> List.of()
@@ -139,7 +140,7 @@ class AvailabilityServiceTest {
                 compositionRepo,
                 allocationRepo,
                 productRepo,
-                priceListRepo,
+                new PriceListEntryResolver(priceListRepo),
                 calendarService,
                 mapRepo,
                 mapResourceRepo,
@@ -147,7 +148,7 @@ class AvailabilityServiceTest {
                 cancellationPolicyService
         );
 
-        AvailabilityResponse response = service.getAvailability(tenantId, date, locationId);
+        AvailabilityResponse response = service.getAvailability(tenantId, date, locationId, ReservationRequest.Type.EXTERNAL);
 
         assertThat(response.getCancellationPolicy()).isNotNull();
         assertThat(response.getCancellationPolicy().getPolicyId()).isEqualTo(55L);
@@ -231,7 +232,7 @@ class AvailabilityServiceTest {
                 "findByTenantIdOrderByDisplayOrderAscNameAscIdAsc", args -> List.of()
         ));
         PriceListEntryRepository priceListRepo = stub(PriceListEntryRepository.class, Map.of(
-                "findForProductsOnDate", args -> List.of()
+                "findCandidatesForProductsOnDate", args -> List.of()
         ));
         ResourceMapRepository mapRepo = stub(ResourceMapRepository.class, Map.of(
                 "findByTenantId", args -> List.of()
@@ -269,7 +270,7 @@ class AvailabilityServiceTest {
                 compositionRepo,
                 allocationRepo,
                 productRepo,
-                priceListRepo,
+                new PriceListEntryResolver(priceListRepo),
                 calendarService,
                 mapRepo,
                 mapResourceRepo,
@@ -277,7 +278,9 @@ class AvailabilityServiceTest {
                 cancellationPolicyService
         );
 
-        List<AvailabilityResourceDto> responseResources = service.getAvailability(tenantId, date, locationId).getResources();
+        List<AvailabilityResourceDto> responseResources = service
+                .getAvailability(tenantId, date, locationId, ReservationRequest.Type.EXTERNAL)
+                .getResources();
 
         AvailabilityResourceDto luxuryDto = findResource(responseResources, "L3");
         AvailabilityResourceDto packageDto = findResource(responseResources, "BLP3");

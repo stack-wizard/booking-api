@@ -96,22 +96,7 @@ public class ManagementStayDashboardService {
         BigDecimal invoiceGross = toBigDecimal(
                 stayDashboardRepository.sumInvoiceLineGross(tenantId, fromDate, toDate));
 
-        List<Object[]> rows = stayDashboardRepository.aggregateInvoiceLinesByProduct(tenantId, fromDate, toDate);
-        List<ManagementStayDashboardProductRow> byProduct = new ArrayList<>();
-        for (Object[] row : rows) {
-            Long productId = row[0] != null ? ((Number) row[0]).longValue() : null;
-            String productName = row[1] != null ? row[1].toString() : "";
-            long lineCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
-            BigDecimal grossSum = toBigDecimal(row[3]);
-            long qtySum = row[4] != null ? ((Number) row[4]).longValue() : 0L;
-            byProduct.add(ManagementStayDashboardProductRow.builder()
-                    .productId(productId)
-                    .productName(productName)
-                    .invoiceLineCount(lineCount)
-                    .quantitySum(qtySum)
-                    .grossSum(grossSum)
-                    .build());
-        }
+        List<ManagementStayDashboardProductRow> byProduct = buildByProduct(tenantId, fromDate, toDate);
 
         List<ManagementStayDashboardCountryRow> byCountry = buildByCountry(tenantId, fromDate, toDate);
 
@@ -126,6 +111,15 @@ public class ManagementStayDashboardService {
                 .byProduct(byProduct)
                 .byCountry(byCountry)
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ManagementStayDashboardProductRow> getRevenueByProduct(Long tenantId, OffsetDateTime from, OffsetDateTime to) {
+        validateRange(tenantId, from, to, false);
+        ZoneOffset offset = from.getOffset();
+        LocalDate fromDate = from.toLocalDate();
+        LocalDate toDate = to.withOffsetSameInstant(offset).toLocalDate();
+        return buildByProduct(tenantId, fromDate, toDate);
     }
 
     @Transactional(readOnly = true)
@@ -219,6 +213,28 @@ public class ManagementStayDashboardService {
                 .comparing((ManagementStayDashboardCountryRow r) -> r.getCountryCode() == null)
                 .thenComparing(ManagementStayDashboardCountryRow::getCountryName, String.CASE_INSENSITIVE_ORDER));
         return rows;
+    }
+
+    private List<ManagementStayDashboardProductRow> buildByProduct(Long tenantId,
+                                                                   LocalDate fromDate,
+                                                                   LocalDate toDate) {
+        List<Object[]> rows = stayDashboardRepository.aggregateInvoiceLinesByProduct(tenantId, fromDate, toDate);
+        List<ManagementStayDashboardProductRow> byProduct = new ArrayList<>();
+        for (Object[] row : rows) {
+            Long productId = row[0] != null ? ((Number) row[0]).longValue() : null;
+            String productName = row[1] != null ? row[1].toString() : "";
+            long lineCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            BigDecimal grossSum = toBigDecimal(row[3]);
+            long qtySum = row[4] != null ? ((Number) row[4]).longValue() : 0L;
+            byProduct.add(ManagementStayDashboardProductRow.builder()
+                    .productId(productId)
+                    .productName(productName)
+                    .invoiceLineCount(lineCount)
+                    .quantitySum(qtySum)
+                    .grossSum(money(grossSum))
+                    .build());
+        }
+        return byProduct;
     }
 
     private Map<String, String> resolveCountryNames(Set<String> keys) {

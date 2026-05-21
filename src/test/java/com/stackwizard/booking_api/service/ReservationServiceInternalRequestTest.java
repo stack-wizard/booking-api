@@ -9,7 +9,6 @@ import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.repository.AllocationRepository;
-import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.repository.ReservationRepository;
@@ -50,7 +49,7 @@ class ReservationServiceInternalRequestTest {
     @Mock
     private ProductRepository productRepo;
     @Mock
-    private PriceListEntryRepository priceListRepo;
+    private PriceListEntryResolver priceListEntryResolver;
     @Mock
     private ResourceCompositionRepository compositionRepo;
     @Mock
@@ -75,7 +74,7 @@ class ReservationServiceInternalRequestTest {
                 allocationRepo,
                 resourceRepo,
                 productRepo,
-                priceListRepo,
+                priceListEntryResolver,
                 compositionRepo,
                 translationService,
                 requestRepo,
@@ -120,7 +119,14 @@ class ReservationServiceInternalRequestTest {
         bookingRequest.setServiceDate(serviceDate);
 
         when(resourceRepo.findById(resource.getId())).thenReturn(Optional.of(resource));
-        when(priceListRepo.findForProductUomOnDate(product.getId(), "DAY", "EUR", tenantId, serviceDate))
+        when(priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(),
+                "DAY",
+                "EUR",
+                tenantId,
+                serviceDate,
+                ReservationRequest.Type.INTERNAL
+        ))
                 .thenReturn(List.of(priceListEntry));
         when(translationService.translate("DAY", 1, tenantId, null, serviceDate, null))
                 .thenReturn(new BookingTranslationService.TranslatedPeriod(startsAt, endsAt));
@@ -461,7 +467,14 @@ class ReservationServiceInternalRequestTest {
         when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
         when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of());
-        when(priceListRepo.findForProductUomOnDate(product.getId(), "DAY", "EUR", tenantId, startsAt.toLocalDate()))
+        when(priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(),
+                "DAY",
+                "EUR",
+                tenantId,
+                startsAt.toLocalDate(),
+                requestType
+        ))
                 .thenReturn(List.of(dayPrice));
         when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
             Reservation reservation = invocation.getArgument(0);
@@ -480,8 +493,74 @@ class ReservationServiceInternalRequestTest {
         assertThat(savedReservation.getRequestType()).isEqualTo(requestType);
         assertThat(savedReservation.getProductId()).isEqualTo(product.getId());
         assertThat(savedReservation.getCurrency()).isEqualTo("EUR");
+        assertThat(savedReservation.getUom()).isEqualTo("DAY");
         assertThat(savedReservation.getQty()).isEqualTo(1);
         assertThat(savedReservation.getUnitPrice()).isEqualByComparingTo("120.00");
         assertThat(savedReservation.getGrossAmount()).isEqualByComparingTo("120.00");
+    }
+
+    @Test
+    void saveHoldReservationUsesExplicitReservationUomForWalkinPricing() {
+        Long tenantId = 22L;
+        LocalDateTime startsAt = LocalDateTime.of(2026, 7, 12, 10, 0);
+        LocalDateTime endsAt = LocalDateTime.of(2026, 7, 12, 14, 0);
+
+        Product product = Product.builder()
+                .id(901L)
+                .defaultUom("DAY")
+                .extraUoms(Set.of("HALFDAY"))
+                .build();
+        Resource requestedResource = Resource.builder()
+                .id(902L)
+                .tenantId(tenantId)
+                .kind("EXACT")
+                .unitCount(1)
+                .product(product)
+                .build();
+        ReservationRequest existingRequest = ReservationRequest.builder()
+                .id(903L)
+                .tenantId(tenantId)
+                .type(ReservationRequest.Type.WALKIN)
+                .status(ReservationRequest.Status.DRAFT)
+                .extensionCount(0)
+                .build();
+        PriceListEntry halfDayPrice = PriceListEntry.builder()
+                .productId(product.getId())
+                .uom("HALFDAY")
+                .price(new BigDecimal("60.00"))
+                .startTime(startsAt.toLocalTime())
+                .endTime(endsAt.toLocalTime())
+                .build();
+        Reservation incoming = Reservation.builder()
+                .tenantId(tenantId)
+                .request(ReservationRequest.builder().id(existingRequest.getId()).build())
+                .requestType(ReservationRequest.Type.WALKIN)
+                .requestedResource(Resource.builder().id(requestedResource.getId()).build())
+                .startsAt(startsAt)
+                .endsAt(endsAt)
+                .currency("EUR")
+                .uom("HALFDAY")
+                .build();
+
+        when(tenantConfigService.holdTtlMinutes(tenantId)).thenReturn(30);
+        when(resourceRepo.findById(requestedResource.getId())).thenReturn(Optional.of(requestedResource));
+        when(requestRepo.findById(existingRequest.getId())).thenReturn(Optional.of(existingRequest));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(),
+                "HALFDAY",
+                "EUR",
+                tenantId,
+                startsAt.toLocalDate(),
+                ReservationRequest.Type.WALKIN
+        )).thenReturn(List.of(halfDayPrice));
+        when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Reservation saved = service.saveHoldReservation(incoming);
+
+        assertThat(saved.getUom()).isEqualTo("HALFDAY");
+        assertThat(saved.getUnitPrice()).isEqualByComparingTo("60.00");
+        assertThat(saved.getGrossAmount()).isEqualByComparingTo("60.00");
+        assertThat(saved.getQty()).isEqualTo(1);
     }
 }

@@ -82,6 +82,9 @@ public class Reservation {
     @Column(name = "currency")
     private String currency;
 
+    @Column(name = "uom")
+    private String uom;
+
     @Column(name = "qty")
     private Integer qty;
 

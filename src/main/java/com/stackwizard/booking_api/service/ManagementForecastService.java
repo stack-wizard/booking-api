@@ -31,10 +31,8 @@ import java.util.stream.Collectors;
 @Service
 public class ManagementForecastService {
 
-    private static final List<ReservationRequest.Status> FORECAST_CONFIRMED_STATUSES = List.of(
-            ReservationRequest.Status.FINALIZED,
-            ReservationRequest.Status.CHECKED_IN,
-            ReservationRequest.Status.CHECKED_OUT
+    private static final List<ReservationRequest.Status> FORECAST_FINALIZED_STATUSES = List.of(
+            ReservationRequest.Status.FINALIZED
     );
 
     private static final int MAX_DAILY_TREND_DAYS = 62;
@@ -77,47 +75,26 @@ public class ManagementForecastService {
 
         long requestCount = forecastRepository.countFinalizedRequests(
                 tenantId,
-                FORECAST_CONFIRMED_STATUSES,
+                FORECAST_FINALIZED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
 
         long reservationCount = forecastRepository.countForecastReservations(
                 tenantId,
-                FORECAST_CONFIRMED_STATUSES,
+                FORECAST_FINALIZED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
 
         BigDecimal grossTotal = toBigDecimal(forecastRepository.sumForecastGross(
                 tenantId,
-                FORECAST_CONFIRMED_STATUSES,
+                FORECAST_FINALIZED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to));
 
-        List<Object[]> rows = forecastRepository.aggregateReservationsByProduct(
-                tenantId,
-                FORECAST_CONFIRMED_STATUSES,
-                ReservationRequest.Type.INTERNAL,
-                from,
-                to);
-
-        List<ManagementForecastProductRow> byProduct = new ArrayList<>();
-        for (Object[] row : rows) {
-            Long productId = row[0] != null ? ((Number) row[0]).longValue() : null;
-            String productName = row[1] != null ? row[1].toString() : "";
-            long resCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
-            BigDecimal grossSum = toBigDecimal(row[3]);
-            long personCount = row[4] != null ? ((Number) row[4]).longValue() : 0L;
-            byProduct.add(ManagementForecastProductRow.builder()
-                    .productId(productId)
-                    .productName(productName)
-                    .reservationCount(resCount)
-                    .personCount(personCount)
-                    .grossSum(grossSum)
-                    .build());
-        }
+        List<ManagementForecastProductRow> byProduct = buildByProduct(tenantId, from, to);
 
         List<ManagementForecastCountryRow> byCountry = buildByCountry(
                 tenantId, from, to);
@@ -131,6 +108,20 @@ public class ManagementForecastService {
                 .byProduct(byProduct)
                 .byCountry(byCountry)
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<ManagementForecastProductRow> getRevenueByProduct(Long tenantId, OffsetDateTime from, OffsetDateTime to) {
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenantId is required");
+        }
+        if (from == null || to == null) {
+            throw new IllegalArgumentException("from and to are required");
+        }
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException("to must be on or after from");
+        }
+        return buildByProduct(tenantId, from, to);
     }
 
     /**
@@ -166,13 +157,13 @@ public class ManagementForecastService {
 
             long reservationCount = forecastRepository.countForecastReservations(
                     tenantId,
-                    FORECAST_CONFIRMED_STATUSES,
+                    FORECAST_FINALIZED_STATUSES,
                     ReservationRequest.Type.INTERNAL,
                     dayStart,
                     dayEnd);
             BigDecimal grossTotal = toBigDecimal(forecastRepository.sumForecastGross(
                     tenantId,
-                    FORECAST_CONFIRMED_STATUSES,
+                    FORECAST_FINALIZED_STATUSES,
                     ReservationRequest.Type.INTERNAL,
                     dayStart,
                     dayEnd));
@@ -195,7 +186,7 @@ public class ManagementForecastService {
                                                                OffsetDateTime to) {
         List<Object[]> rows = forecastRepository.aggregateReservationsByCountry(
                 tenantId,
-                FORECAST_CONFIRMED_STATUSES,
+                FORECAST_FINALIZED_STATUSES,
                 ReservationRequest.Type.INTERNAL,
                 from,
                 to);
@@ -238,5 +229,33 @@ public class ManagementForecastService {
                 .comparing((ManagementForecastCountryRow r) -> r.getCountryCode() == null)
                 .thenComparing(ManagementForecastCountryRow::getCountryName, String.CASE_INSENSITIVE_ORDER));
         return out;
+    }
+
+    private List<ManagementForecastProductRow> buildByProduct(Long tenantId,
+                                                              OffsetDateTime from,
+                                                              OffsetDateTime to) {
+        List<Object[]> rows = forecastRepository.aggregateReservationsByProduct(
+                tenantId,
+                FORECAST_FINALIZED_STATUSES,
+                ReservationRequest.Type.INTERNAL,
+                from,
+                to);
+
+        List<ManagementForecastProductRow> byProduct = new ArrayList<>();
+        for (Object[] row : rows) {
+            Long productId = row[0] != null ? ((Number) row[0]).longValue() : null;
+            String productName = row[1] != null ? row[1].toString() : "";
+            long resCount = row[2] != null ? ((Number) row[2]).longValue() : 0L;
+            BigDecimal grossSum = toBigDecimal(row[3]);
+            long personCount = row[4] != null ? ((Number) row[4]).longValue() : 0L;
+            byProduct.add(ManagementForecastProductRow.builder()
+                    .productId(productId)
+                    .productName(productName)
+                    .reservationCount(resCount)
+                    .personCount(personCount)
+                    .grossSum(grossSum.setScale(2, RoundingMode.HALF_UP))
+                    .build());
+        }
+        return byProduct;
     }
 }

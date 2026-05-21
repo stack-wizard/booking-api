@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -32,6 +34,10 @@ public class PriceProfile {
 
     @Column(nullable = false)
     private String currency;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "reservation_request_type")
+    private ReservationRequest.Type reservationRequestType;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
