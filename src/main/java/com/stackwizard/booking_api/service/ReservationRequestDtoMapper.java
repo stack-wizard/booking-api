@@ -124,6 +124,7 @@ public class ReservationRequestDtoMapper {
                 .paymentPaidAmount(paymentSummary.paidAmount())
                 .paymentRemainingAmount(paymentSummary.remainingAmount())
                 .paymentStatus(paymentSummary.paymentStatus())
+                .paymentCardType(paymentSummary.paymentCardType())
                 .reservationStartsAt(reservationStartsAt)
                 .reservationEndsAt(reservationEndsAt)
                 .operaProfileId(request.getOperaProfileId())

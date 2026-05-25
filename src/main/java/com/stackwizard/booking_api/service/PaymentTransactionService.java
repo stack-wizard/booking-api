@@ -133,6 +133,50 @@ public class PaymentTransactionService {
     }
 
     @Transactional(readOnly = true)
+    public String resolveFirstCardTypeForRequest(Long reservationRequestId, Long tenantId) {
+        if (reservationRequestId == null) {
+            return null;
+        }
+        return paymentTransactionRepo.findByReservationRequestIdOrderByCreatedAtAscIdAsc(reservationRequestId).stream()
+                .filter(this::isPostedCardCharge)
+                .map(PaymentTransaction::getCardType)
+                .filter(StringUtils::hasText)
+                .map(cardType -> displayCardType(tenantId, cardType))
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
+    public String resolveCardTypeForIntent(Long paymentIntentId, Long tenantId) {
+        if (paymentIntentId == null) {
+            return null;
+        }
+        String cardType = paymentTransactionRepo.findFirstByPaymentIntentIdOrderByCreatedAtAscIdAsc(paymentIntentId)
+                .filter(this::isPostedCardCharge)
+                .map(PaymentTransaction::getCardType)
+                .filter(StringUtils::hasText)
+                .map(value -> displayCardType(tenantId, value))
+                .orElse(null);
+        if (StringUtils.hasText(cardType)) {
+            return cardType;
+        }
+        return paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(paymentIntentId).stream()
+                .map(PaymentEvent::getPayload)
+                .map(payload -> resolveDisplayCardTypeFromEventPayload(tenantId, payload))
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    public String resolveDisplayCardTypeFromEventPayload(Long tenantId, JsonNode payload) {
+        String cardType = extractCardTypeFromPayload(payload);
+        if (!StringUtils.hasText(cardType)) {
+            return null;
+        }
+        return displayCardType(tenantId, cardType);
+    }
+
+    @Transactional(readOnly = true)
     public BigDecimal refundedAmountForSourcePaymentTransaction(Long sourcePaymentTransactionId) {
         if (sourcePaymentTransactionId == null) {
             return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
@@ -404,6 +448,28 @@ public class PaymentTransactionService {
         return cardType.trim().toUpperCase(Locale.ROOT);
     }
 
+    private String displayCardType(Long tenantId, String cardType) {
+        if (!StringUtils.hasText(cardType)) {
+            return null;
+        }
+        String configured = paymentCardTypeService.findActiveDisplayNameOrCodeOrNull(tenantId, cardType);
+        return StringUtils.hasText(configured) ? configured : cardType.trim();
+    }
+
+    private boolean isPostedCardCharge(PaymentTransaction tx) {
+        return tx != null
+                && STATUS_POSTED.equals(normalizeStatus(tx.getStatus()))
+                && TRANSACTION_TYPE_CHARGE.equals(normalizeTransactionType(tx.getTransactionType()))
+                && PAYMENT_TYPE_CARD.equals(normalizePaymentTypeOrNull(tx.getPaymentType()));
+    }
+
+    private String normalizePaymentTypeOrNull(String paymentType) {
+        if (!StringUtils.hasText(paymentType)) {
+            return null;
+        }
+        return paymentType.trim().toUpperCase(Locale.ROOT);
+    }
+
     private String extractCardTypeFromPayload(JsonNode payload) {
         return firstNonBlank(
                 textAt(payload, "payload.payment_method.card.brand"),
@@ -412,16 +478,52 @@ public class PaymentTransactionService {
                         firstNonBlank(
                                 textAt(payload, "payload.card.brand"),
                                 firstNonBlank(
-                                        textAt(payload, "payment_method.card.brand"),
+                                        textAt(payload, "payload.data.payment_method.card.brand"),
                                         firstNonBlank(
-                                                textAt(payload, "payment_method.brand"),
+                                                textAt(payload, "payload.data.payment_method.brand"),
                                                 firstNonBlank(
-                                                        textAt(payload, "card.brand"),
+                                                        textAt(payload, "payload.data.card.brand"),
                                                         firstNonBlank(
-                                                                textAt(payload, "brand"),
+                                                                textAt(payload, "payload.data.cc_type"),
                                                                 firstNonBlank(
-                                                                        textAt(payload, "payload.cc_type"),
-                                                                        textAt(payload, "cc_type")
+                                                                        textAt(payload, "data.payment_method.card.brand"),
+                                                                        firstNonBlank(
+                                                                                textAt(payload, "data.payment_method.brand"),
+                                                                                firstNonBlank(
+                                                                                        textAt(payload, "data.card.brand"),
+                                                                                        firstNonBlank(
+                                                                                                textAt(payload, "data.cc_type"),
+                                                                                                firstNonBlank(
+                                                                                                        textAt(payload, "transaction.payment_method.card.brand"),
+                                                                                                        firstNonBlank(
+                                                                                                                textAt(payload, "transaction.payment_method.brand"),
+                                                                                                                firstNonBlank(
+                                                                                                                        textAt(payload, "transaction.card.brand"),
+                                                                                                                        firstNonBlank(
+                                                                                                                                textAt(payload, "transaction.cc_type"),
+                                                                                                                                firstNonBlank(
+                                                                                                                                        textAt(payload, "payment_method.card.brand"),
+                                                                                                                                        firstNonBlank(
+                                                                                                                                                textAt(payload, "payment_method.brand"),
+                                                                                                                                                firstNonBlank(
+                                                                                                                                                        textAt(payload, "card.brand"),
+                                                                                                                                                        firstNonBlank(
+                                                                                                                                                                textAt(payload, "brand"),
+                                                                                                                                                                firstNonBlank(
+                                                                                                                                                                        textAt(payload, "payload.cc_type"),
+                                                                                                                                                                        textAt(payload, "cc_type")
+                                                                                                                                                                )
+                                                                                                                                                        )
+                                                                                                                                                )
+                                                                                                                                        )
+                                                                                                                                )
+                                                                                                                        )
+                                                                                                                )
+                                                                                                        )
+                                                                                                )
+                                                                                        )
+                                                                                )
+                                                                        )
                                                                 )
                                                         )
                                                 )

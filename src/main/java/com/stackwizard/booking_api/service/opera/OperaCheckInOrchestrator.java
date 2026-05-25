@@ -15,6 +15,7 @@ import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.InvoiceRepository;
 import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.service.InvoiceService;
+import com.stackwizard.booking_api.service.PaymentTransactionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class OperaCheckInOrchestrator {
     private final InvoiceRepository invoiceRepo;
     private final ReservationRequestRepository reservationRequestRepository;
     private final OperaCheckInProgressService checkInProgressService;
+    private final PaymentTransactionService paymentTransactionService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public OperaCheckInOrchestrator(BookingOperaProperties bookingOperaProperties,
@@ -57,7 +59,8 @@ public class OperaCheckInOrchestrator {
                                     InvoiceService invoiceService,
                                     InvoiceRepository invoiceRepo,
                                     ReservationRequestRepository reservationRequestRepository,
-                                    OperaCheckInProgressService checkInProgressService) {
+                                    OperaCheckInProgressService checkInProgressService,
+                                    PaymentTransactionService paymentTransactionService) {
         this.bookingOperaProperties = bookingOperaProperties;
         this.operaPostingClient = operaPostingClient;
         this.tenantConfigResolver = tenantConfigResolver;
@@ -66,6 +69,7 @@ public class OperaCheckInOrchestrator {
         this.invoiceRepo = invoiceRepo;
         this.reservationRequestRepository = reservationRequestRepository;
         this.checkInProgressService = checkInProgressService;
+        this.paymentTransactionService = paymentTransactionService;
     }
 
     public void runIfEnabled(ReservationRequest request, List<Reservation> reservations) {
@@ -158,13 +162,16 @@ public class OperaCheckInOrchestrator {
             throw new IllegalStateException(
                     "Opera hotel " + hotel.getHotelCode() + " is missing checkinDepositPaymentMethodCode");
         }
+        String cardType = paymentTransactionService.resolveFirstCardTypeForRequest(
+                requestFresh.getId(), requestFresh.getTenantId());
         JsonNode paymentBody = buildDepositPaymentPayload(
                 requestFresh.getId(),
                 requestFresh,
                 hotel,
                 firstOperaReservationIdForDeposit,
                 depositTotal,
-                resolveCurrency(active));
+                resolveCurrency(active),
+                cardType);
         try {
             log.info("Opera payload [depositPaymentRequest]. requestId={}, hotelCode={}, operaReservationId={}, amount={}, payload={}",
                     requestFresh.getId(),
@@ -277,12 +284,24 @@ public class OperaCheckInOrchestrator {
                 : "REQ-" + request.getId();
     }
 
+    static String formatDepositPostingReference(String baseReference, String cardType) {
+        if (!StringUtils.hasText(baseReference)) {
+            return StringUtils.hasText(cardType) ? cardType.trim() : "";
+        }
+        String ref = baseReference.trim();
+        if (!StringUtils.hasText(cardType)) {
+            return ref;
+        }
+        return ref + " " + cardType.trim();
+    }
+
     private JsonNode buildDepositPaymentPayload(Long requestId,
                                                 ReservationRequest request,
                                                 OperaHotel hotel,
                                                 Long operaReservationId,
                                                 BigDecimal amount,
-                                                String currency) {
+                                                String currency,
+                                                String cardType) {
         Long cashierId = hotel.getDefaultCashierId();
         if (cashierId == null || cashierId <= 0) {
             throw new IllegalStateException("Opera hotel defaultCashierId is required for check-in deposit payment");
@@ -304,7 +323,7 @@ public class OperaCheckInOrchestrator {
         postingAmount.put("currencyCode", currency);
         criteria.set("postingAmount", postingAmount);
 
-        String ref = resolveDepositPostingReference(requestId, request);
+        String ref = formatDepositPostingReference(resolveDepositPostingReference(requestId, request), cardType);
         criteria.put("postingReference", ref);
         criteria.put("comments", ref);
         criteria.put("folioWindowNo", folio);

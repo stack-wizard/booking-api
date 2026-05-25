@@ -54,6 +54,70 @@ class PaymentTransactionServiceTest {
     }
 
     @Test
+    void resolveFirstCardTypeForRequestUsesFirstPostedCardChargeWithCardType() {
+        when(paymentTransactionRepo.findByReservationRequestIdOrderByCreatedAtAscIdAsc(10L)).thenReturn(List.of(
+                PaymentTransaction.builder()
+                        .transactionType("REFUND")
+                        .paymentType("CARD")
+                        .status("POSTED")
+                        .cardType("MASTER")
+                        .build(),
+                PaymentTransaction.builder()
+                        .transactionType("CHARGE")
+                        .paymentType("CARD")
+                        .status("POSTED")
+                        .cardType("VISA")
+                        .build(),
+                PaymentTransaction.builder()
+                        .transactionType("CHARGE")
+                        .paymentType("CARD")
+                        .status("POSTED")
+                        .cardType("MASTER")
+                        .build()
+        ));
+        when(paymentCardTypeService.findActiveDisplayNameOrCodeOrNull(1L, "VISA"))
+                .thenReturn("Visa Premium");
+
+        assertThat(service.resolveFirstCardTypeForRequest(10L, 1L)).isEqualTo("Visa Premium");
+    }
+
+    @Test
+    void resolveCardTypeForIntentUsesLinkedPostedCardCharge() {
+        when(paymentTransactionRepo.findFirstByPaymentIntentIdOrderByCreatedAtAscIdAsc(50L)).thenReturn(Optional.of(
+                PaymentTransaction.builder()
+                        .paymentIntentId(50L)
+                        .transactionType("CHARGE")
+                        .paymentType("CARD")
+                        .status("POSTED")
+                        .cardType("VISA")
+                        .build()
+        ));
+        when(paymentCardTypeService.findActiveDisplayNameOrCodeOrNull(1L, "VISA"))
+                .thenReturn("Visa Premium");
+
+        assertThat(service.resolveCardTypeForIntent(50L, 1L)).isEqualTo("Visa Premium");
+    }
+
+    @Test
+    void resolveCardTypeForIntentFallsBackToPaymentEventPayload() {
+        ObjectNode payload = JsonNodeFactory.instance.objectNode();
+        payload.put("cc_type", "master");
+
+        when(paymentTransactionRepo.findFirstByPaymentIntentIdOrderByCreatedAtAscIdAsc(51L))
+                .thenReturn(Optional.empty());
+        when(paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(51L)).thenReturn(List.of(
+                PaymentEvent.builder()
+                        .paymentIntentId(51L)
+                        .payload(payload)
+                        .build()
+        ));
+        when(paymentCardTypeService.findActiveDisplayNameOrCodeOrNull(1L, "MASTER"))
+                .thenReturn("Mastercard");
+
+        assertThat(service.resolveCardTypeForIntent(51L, 1L)).isEqualTo("Mastercard");
+    }
+
+    @Test
     void ensureForPaidIntentStoresConfiguredCardTypeFromWebhookPayload() {
         PaymentIntent paymentIntent = PaymentIntent.builder()
                 .id(50L)

@@ -80,6 +80,7 @@ public class PaymentService {
     private final DepositPolicyRepository depositPolicyRepo;
     private final ReservationService reservationService;
     private final InvoiceService invoiceService;
+    private final PaymentTransactionService paymentTransactionService;
     private final ApplicationEventPublisher eventPublisher;
     private final MonriTenantConfigResolver monriTenantConfigResolver;
     private final Environment environment;
@@ -93,6 +94,7 @@ public class PaymentService {
                           DepositPolicyRepository depositPolicyRepo,
                           ReservationService reservationService,
                           InvoiceService invoiceService,
+                          PaymentTransactionService paymentTransactionService,
                           ApplicationEventPublisher eventPublisher,
                           MonriTenantConfigResolver monriTenantConfigResolver,
                           Environment environment,
@@ -104,6 +106,7 @@ public class PaymentService {
         this.depositPolicyRepo = depositPolicyRepo;
         this.reservationService = reservationService;
         this.invoiceService = invoiceService;
+        this.paymentTransactionService = paymentTransactionService;
         this.eventPublisher = eventPublisher;
         this.monriTenantConfigResolver = monriTenantConfigResolver;
         this.environment = environment;
@@ -112,21 +115,32 @@ public class PaymentService {
     }
 
     public List<PaymentIntent> findByReservationRequestId(Long reservationRequestId) {
-        return paymentIntentRepo.findByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId);
+        List<PaymentIntent> intents = paymentIntentRepo.findByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId);
+        intents.forEach(intent -> intent.setCardType(
+                paymentTransactionService.resolveCardTypeForIntent(intent.getId(), intent.getTenantId())));
+        return intents;
     }
 
     public List<PaymentEvent> findEventsByPaymentIntentId(Long paymentIntentId) {
-        return paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(paymentIntentId);
+        Long tenantId = paymentIntentRepo.findById(paymentIntentId)
+                .map(PaymentIntent::getTenantId)
+                .orElse(null);
+        Map<Long, Long> tenantIdByIntentId = tenantId != null ? Map.of(paymentIntentId, tenantId) : Map.of();
+        return enrichPaymentEvents(paymentEventRepo.findByPaymentIntentIdOrderByCreatedAtDesc(paymentIntentId), tenantIdByIntentId);
     }
 
     public List<PaymentEvent> findEventsByReservationRequestId(Long reservationRequestId) {
-        List<Long> intentIds = paymentIntentRepo.findByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId).stream()
+        List<PaymentIntent> intents = paymentIntentRepo.findByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId);
+        List<Long> intentIds = intents.stream()
                 .map(PaymentIntent::getId)
                 .toList();
         if (intentIds.isEmpty()) {
             return List.of();
         }
-        return paymentEventRepo.findByPaymentIntentIdInOrderByCreatedAtDesc(intentIds);
+        Map<Long, Long> tenantIdByIntentId = intents.stream()
+                .filter(intent -> intent.getId() != null)
+                .collect(Collectors.toMap(PaymentIntent::getId, PaymentIntent::getTenantId, (a, b) -> a));
+        return enrichPaymentEvents(paymentEventRepo.findByPaymentIntentIdInOrderByCreatedAtDesc(intentIds), tenantIdByIntentId);
     }
 
     public RequestPaymentSummary summarizeReservationRequest(Long reservationRequestId, Long tenantId, List<Reservation> reservations) {
@@ -148,8 +162,15 @@ public class PaymentService {
         }
 
         String status = resolveRequestPaymentStatus(dueNow, paidAmount);
+        String paymentCardType = paymentTransactionService.resolveFirstCardTypeForRequest(reservationRequestId, tenantId);
 
-        return new RequestPaymentSummary(totalAmount, dueNow, paidAmount, remaining, status);
+        return new RequestPaymentSummary(totalAmount, dueNow, paidAmount, remaining, status, paymentCardType);
+    }
+
+    private List<PaymentEvent> enrichPaymentEvents(List<PaymentEvent> events, Map<Long, Long> tenantIdByIntentId) {
+        events.forEach(event -> event.setCardType(paymentTransactionService.resolveDisplayCardTypeFromEventPayload(
+                tenantIdByIntentId.get(event.getPaymentIntentId()), event.getPayload())));
+        return events;
     }
 
     /**
@@ -949,7 +970,8 @@ public class PaymentService {
             BigDecimal dueNowAmount,
             BigDecimal paidAmount,
             BigDecimal remainingAmount,
-            String paymentStatus
+            String paymentStatus,
+            String paymentCardType
     ) {
     }
 }

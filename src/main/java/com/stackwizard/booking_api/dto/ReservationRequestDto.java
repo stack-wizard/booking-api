@@ -37,6 +37,7 @@ public class ReservationRequestDto {
     private BigDecimal paymentPaidAmount;
     private BigDecimal paymentRemainingAmount;
     private String paymentStatus;
+    private String paymentCardType;
     private LocalDateTime reservationStartsAt;
     private LocalDateTime reservationEndsAt;
     /** OHIP guest profile id after first successful Opera check-in. */

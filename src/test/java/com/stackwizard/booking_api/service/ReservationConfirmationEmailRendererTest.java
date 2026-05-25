@@ -76,7 +76,8 @@ class ReservationConfirmationEmailRendererTest {
                         new BigDecimal("147.50"),
                         new BigDecimal("147.50"),
                         BigDecimal.ZERO,
-                        "PAID"
+                        "PAID",
+                        "VISA"
                 ),
                 emailConfig,
                 PublicCancellationPreviewDto.builder()
@@ -204,7 +205,8 @@ class ReservationConfirmationEmailRendererTest {
                         new BigDecimal("50.00"),
                         new BigDecimal("50.00"),
                         BigDecimal.ZERO,
-                        "PAID"
+                        "PAID",
+                        "VISA"
                 ),
                 emailConfig
         );

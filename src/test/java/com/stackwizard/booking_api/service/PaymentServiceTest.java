@@ -57,6 +57,8 @@ class PaymentServiceTest {
     @Mock
     private InvoiceService invoiceService;
     @Mock
+    private PaymentTransactionService paymentTransactionService;
+    @Mock
     private ApplicationEventPublisher eventPublisher;
     @Mock
     private MonriTenantConfigResolver monriTenantConfigResolver;
@@ -78,11 +80,28 @@ class PaymentServiceTest {
                 depositPolicyRepo,
                 reservationService,
                 invoiceService,
+                paymentTransactionService,
                 eventPublisher,
                 monriTenantConfigResolver,
                 environment,
                 List.of(providerClient)
         );
+    }
+
+    @Test
+    void findByReservationRequestIdAddsCardTypeToReturnedIntents() {
+        PaymentIntent intent = PaymentIntent.builder()
+                .id(44L)
+                .reservationRequestId(10L)
+                .status("PAID")
+                .build();
+        when(paymentIntentRepo.findByReservationRequestIdOrderByCreatedAtDesc(10L)).thenReturn(List.of(intent));
+        when(paymentTransactionService.resolveCardTypeForIntent(44L, null)).thenReturn("Visa Premium");
+
+        List<PaymentIntent> result = service.findByReservationRequestId(10L);
+
+        assertThat(result).containsExactly(intent);
+        assertThat(result.getFirst().getCardType()).isEqualTo("Visa Premium");
     }
 
     @Test

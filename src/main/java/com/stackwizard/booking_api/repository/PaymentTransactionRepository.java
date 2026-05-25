@@ -9,5 +9,7 @@ import java.util.Optional;
 
 public interface PaymentTransactionRepository extends JpaRepository<PaymentTransaction, Long>, JpaSpecificationExecutor<PaymentTransaction> {
     Optional<PaymentTransaction> findByPaymentIntentId(Long paymentIntentId);
+    Optional<PaymentTransaction> findFirstByPaymentIntentIdOrderByCreatedAtAscIdAsc(Long paymentIntentId);
+    List<PaymentTransaction> findByReservationRequestIdOrderByCreatedAtAscIdAsc(Long reservationRequestId);
     List<PaymentTransaction> findBySourcePaymentTransactionId(Long sourcePaymentTransactionId);
 }

@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -57,6 +58,9 @@ public class PaymentIntent {
 
     @Column(name = "error_message")
     private String errorMessage;
+
+    @Transient
+    private String cardType;
 
     @Column(name = "expires_at")
     private OffsetDateTime expiresAt;

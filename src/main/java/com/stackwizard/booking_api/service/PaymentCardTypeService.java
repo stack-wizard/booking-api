@@ -81,6 +81,15 @@ public class PaymentCardTypeService {
                 .orElse(null);
     }
 
+    public String findActiveDisplayNameOrCodeOrNull(Long tenantId, String code) {
+        if (tenantId == null || !StringUtils.hasText(code)) {
+            return null;
+        }
+        return findActiveByTenantIdAndCode(tenantId, code)
+                .map(cardType -> StringUtils.hasText(cardType.getName()) ? cardType.getName() : cardType.getCode())
+                .orElse(null);
+    }
+
     private String normalizeCode(String value) {
         if (!StringUtils.hasText(value)) {
             throw new IllegalArgumentException("code is required");
