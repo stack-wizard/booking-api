@@ -7,6 +7,7 @@ import com.stackwizard.booking_api.model.Reservation;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.repository.ReservationRepository;
+import com.stackwizard.booking_api.repository.specification.ReservationLineCriteriaMatcher;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
 import org.apache.poi.ss.usermodel.DataFormat;
@@ -150,10 +151,14 @@ public class ReservationRequestExportService {
                 }
                 for (ReservationRequest entity : chunk) {
                     ReservationRequestDto request = dtoMapper.toDto(entity);
-                    List<ReservationSummaryDto> reservations = request.getReservations();
+                    List<ReservationSummaryDto> reservations = filterReservationSummaries(
+                            request.getReservations(), criteria);
                     if (reservations == null || reservations.isEmpty()) {
-                        Row row = sheet.createRow(rowIndex++);
-                        writeRow(row, request, null, decimalStyle, dateTimeStyle);
+                        if (!ReservationLineCriteriaMatcher.hasReservationLineFilters(criteria)
+                                && (request.getReservations() == null || request.getReservations().isEmpty())) {
+                            Row row = sheet.createRow(rowIndex++);
+                            writeRow(row, request, null, decimalStyle, dateTimeStyle);
+                        }
                         continue;
                     }
                     for (ReservationSummaryDto reservation : reservations) {
@@ -212,10 +217,14 @@ public class ReservationRequestExportService {
                 Map<Long, List<Reservation>> reservationsByRequestId = loadReservationsGrouped(requestIds);
 
                 for (ReservationRequest request : chunk) {
-                    List<Reservation> lines = reservationsByRequestId.getOrDefault(request.getId(), List.of());
+                    List<Reservation> lines = filterReservations(
+                            reservationsByRequestId.getOrDefault(request.getId(), List.of()), criteria);
                     if (lines.isEmpty()) {
-                        Row row = sheet.createRow(rowIndex++);
-                        writeSummaryRow(row, request, null, dateTimeStyle);
+                        if (!ReservationLineCriteriaMatcher.hasReservationLineFilters(criteria)
+                                && reservationsByRequestId.getOrDefault(request.getId(), List.of()).isEmpty()) {
+                            Row row = sheet.createRow(rowIndex++);
+                            writeSummaryRow(row, request, null, dateTimeStyle);
+                        }
                         continue;
                     }
                     lines.sort(Comparator.comparing(Reservation::getId, Comparator.nullsLast(Long::compareTo)));
@@ -241,6 +250,34 @@ public class ReservationRequestExportService {
         } catch (IOException ex) {
             throw new IllegalStateException("Failed to generate reservation request summary export", ex);
         }
+    }
+
+    private List<ReservationSummaryDto> filterReservationSummaries(
+            List<ReservationSummaryDto> reservations,
+            ReservationRequestSearchCriteria criteria) {
+        if (reservations == null || reservations.isEmpty()) {
+            return List.of();
+        }
+        if (!ReservationLineCriteriaMatcher.hasReservationLineFilters(criteria)) {
+            return reservations;
+        }
+        return reservations.stream()
+                .filter(reservation -> ReservationLineCriteriaMatcher.matches(reservation, criteria))
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private List<Reservation> filterReservations(
+            List<Reservation> reservations,
+            ReservationRequestSearchCriteria criteria) {
+        if (reservations == null || reservations.isEmpty()) {
+            return List.of();
+        }
+        if (!ReservationLineCriteriaMatcher.hasReservationLineFilters(criteria)) {
+            return new ArrayList<>(reservations);
+        }
+        return reservations.stream()
+                .filter(reservation -> ReservationLineCriteriaMatcher.matches(reservation, criteria))
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     private Map<Long, List<Reservation>> loadReservationsGrouped(List<Long> requestIds) {

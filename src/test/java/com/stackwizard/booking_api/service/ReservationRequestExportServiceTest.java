@@ -231,4 +231,145 @@ class ReservationRequestExportServiceTest {
             assertThat(sheet.getRow(1).getCell(4).getStringCellValue()).isEqualTo("A-13");
         }
     }
+
+    @Test
+    void exportSearchFiltersReservationLinesByPeriod() throws Exception {
+        ReservationRequestExportService service = new ReservationRequestExportService(
+                reservationRequestService, dtoMapper, reservationRepository);
+        ReservationRequest request = ReservationRequest.builder()
+                .id(20L)
+                .tenantId(1L)
+                .build();
+        ReservationRequestDto dto = ReservationRequestDto.builder()
+                .id(20L)
+                .tenantId(1L)
+                .type("EXTERNAL")
+                .status("FINALIZED")
+                .reservations(List.of(
+                        reservationSummary(200L, LocalDateTime.of(2026, 4, 1, 10, 0), "Day one"),
+                        reservationSummary(201L, LocalDateTime.of(2026, 4, 2, 10, 0), "Day two"),
+                        reservationSummary(202L, LocalDateTime.of(2026, 4, 3, 10, 0), "Day three")
+                ))
+                .build();
+        ReservationRequestSearchCriteria criteria = new ReservationRequestSearchCriteria();
+        criteria.setReservationStartsFrom(LocalDateTime.of(2026, 4, 2, 0, 0));
+        criteria.setReservationStartsTo(LocalDateTime.of(2026, 4, 2, 23, 59, 59));
+
+        when(reservationRequestService.search(any(ReservationRequestSearchCriteria.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(request), PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "createdAt")), 1));
+        when(dtoMapper.toDto(request)).thenReturn(dto);
+
+        byte[] bytes = service.exportSearch(criteria, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet = workbook.getSheetAt(0);
+            assertThat(sheet.getLastRowNum()).isEqualTo(1);
+            assertThat(sheet.getRow(1).getCell(25).getNumericCellValue()).isEqualTo(201d);
+            assertThat(sheet.getRow(1).getCell(27).getStringCellValue()).isEqualTo("Day two");
+        }
+    }
+
+    @Test
+    void exportSearchSummaryFiltersReservationLinesByPeriod() throws Exception {
+        ReservationRequestExportService service = new ReservationRequestExportService(
+                reservationRequestService, dtoMapper, reservationRepository);
+        Sort sort = Sort.by(Sort.Direction.DESC, "createdAt");
+        ReservationRequest request = ReservationRequest.builder()
+                .id(21L)
+                .tenantId(1L)
+                .customerName("Guest")
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .build();
+        Resource resource = Resource.builder()
+                .id(7L)
+                .tenantId(1L)
+                .kind("EXACT")
+                .code("R-1")
+                .name("Resource")
+                .build();
+        List<Reservation> lines = List.of(
+                reservationEntity(210L, request, resource, LocalDateTime.of(2026, 4, 1, 10, 0)),
+                reservationEntity(211L, request, resource, LocalDateTime.of(2026, 4, 2, 10, 0)),
+                reservationEntity(212L, request, resource, LocalDateTime.of(2026, 4, 3, 10, 0))
+        );
+        ReservationRequestSearchCriteria criteria = new ReservationRequestSearchCriteria();
+        criteria.setReservationStartsFrom(LocalDateTime.of(2026, 4, 2, 0, 0));
+        criteria.setReservationStartsTo(LocalDateTime.of(2026, 4, 2, 23, 59, 59));
+
+        when(reservationRequestService.search(any(ReservationRequestSearchCriteria.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(request), PageRequest.of(0, 100, sort), 1));
+        when(reservationRepository.findByRequestIdsWithDetails(eq(List.of(21L))))
+                .thenReturn(lines);
+
+        byte[] bytes = service.exportSearchSummary(criteria, sort);
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet = workbook.getSheetAt(0);
+            assertThat(sheet.getLastRowNum()).isEqualTo(1);
+            assertThat(sheet.getRow(1).getCell(1).getNumericCellValue()).isEqualTo(21d);
+        }
+    }
+
+    @Test
+    void exportSearchSkipsRequestWhenNoReservationLinesMatchPeriod() throws Exception {
+        ReservationRequestExportService service = new ReservationRequestExportService(
+                reservationRequestService, dtoMapper, reservationRepository);
+        ReservationRequest request = ReservationRequest.builder()
+                .id(22L)
+                .tenantId(1L)
+                .build();
+        ReservationRequestDto dto = ReservationRequestDto.builder()
+                .id(22L)
+                .tenantId(1L)
+                .reservations(List.of(
+                        reservationSummary(220L, LocalDateTime.of(2026, 4, 1, 10, 0), "Day one")
+                ))
+                .build();
+        ReservationRequestSearchCriteria criteria = new ReservationRequestSearchCriteria();
+        criteria.setReservationStartsFrom(LocalDateTime.of(2026, 4, 2, 0, 0));
+        criteria.setReservationStartsTo(LocalDateTime.of(2026, 4, 2, 23, 59, 59));
+
+        when(reservationRequestService.search(any(ReservationRequestSearchCriteria.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(request), PageRequest.of(0, 100, Sort.by(Sort.Direction.DESC, "createdAt")), 1));
+        when(dtoMapper.toDto(request)).thenReturn(dto);
+
+        byte[] bytes = service.exportSearch(criteria, Sort.by(Sort.Direction.DESC, "createdAt"));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook(new ByteArrayInputStream(bytes))) {
+            var sheet = workbook.getSheetAt(0);
+            assertThat(sheet.getLastRowNum()).isEqualTo(0);
+        }
+    }
+
+    private static ReservationSummaryDto reservationSummary(Long id, LocalDateTime startsAt, String productName) {
+        return ReservationSummaryDto.builder()
+                .id(id)
+                .tenantId(1L)
+                .productName(productName)
+                .startsAt(startsAt)
+                .endsAt(startsAt.withHour(18))
+                .status("CONFIRMED")
+                .build();
+    }
+
+    private static Reservation reservationEntity(
+            Long id,
+            ReservationRequest request,
+            Resource resource,
+            LocalDateTime startsAt) {
+        return Reservation.builder()
+                .id(id)
+                .tenantId(1L)
+                .request(request)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .requestedResource(resource)
+                .startsAt(startsAt)
+                .endsAt(startsAt.withHour(18))
+                .status("CONFIRMED")
+                .adults(2)
+                .children(0)
+                .infants(0)
+                .build();
+    }
 }
