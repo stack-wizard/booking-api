@@ -690,6 +690,211 @@ class OperaInvoicePostingServiceTest {
     }
 
     @Test
+    void postFinalStayInvoiceFallsBackToExistingOperaReservationWhenLaterStayMissingOhId() {
+        Invoice invoice = Invoice.builder()
+                .id(53L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .reservationRequestId(700L)
+                .invoiceNumber("INV-2026-00053")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("200.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem itemA = InvoiceItem.builder()
+                .id(531L)
+                .invoice(invoice)
+                .lineNo(1)
+                .reservationId(301L)
+                .productId(77L)
+                .productName("Day 1")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        InvoiceItem itemB = InvoiceItem.builder()
+                .id(532L)
+                .invoice(invoice)
+                .lineNo(2)
+                .reservationId(302L)
+                .productId(77L)
+                .productName("Day 2")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        Product product = Product.builder()
+                .id(77L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(801L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(901L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .chainCode("SUN")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        Reservation stayA = Reservation.builder()
+                .id(301L)
+                .tenantId(1L)
+                .operaReservationId(91001L)
+                .build();
+        Reservation stayB = Reservation.builder()
+                .id(302L)
+                .tenantId(1L)
+                .operaReservationId(null)
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+        JsonNode response = new ObjectMapper().createObjectNode().put("status", "ok");
+
+        when(invoiceRepo.findById(53L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(53L)).thenReturn(List.of(itemA, itemB));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 77L, "ROOM")).thenReturn(Optional.of(chargeMapping));
+        when(reservationRepo.findById(301L)).thenReturn(Optional.of(stayA));
+        when(reservationRepo.findById(302L)).thenReturn(Optional.of(stayB));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postCharges(any(), eq("DH"), eq("SUN"), eq(91001L), any()))
+                .thenReturn(response);
+
+        OperaInvoicePostingResult result = service.postInvoice(53L, new OperaInvoicePostRequest());
+
+        assertThat(result.invoice().getOperaPostingStatus()).isEqualTo(OperaPostingStatus.POSTED);
+        assertThat(result.invoice().getOperaReservationId()).isEqualTo(91001L);
+        org.mockito.ArgumentCaptor<JsonNode> payloadCaptor = org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+        verify(operaPostingClient, times(1)).postCharges(
+                any(), eq("DH"), eq("SUN"), eq(91001L), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue().path("criteria").path("charges")).hasSize(2);
+        verify(operaPostingClient, never()).postCharges(any(), eq("DH"), eq("SUN"), eq(91002L), any());
+    }
+
+    @Test
+    void postFinalStayInvoiceUsesRequestReservationIdOverrideForAllCharges() {
+        Invoice invoice = Invoice.builder()
+                .id(54L)
+                .tenantId(1L)
+                .invoiceType(InvoiceType.INVOICE)
+                .reservationRequestId(701L)
+                .invoiceNumber("INV-2026-00054")
+                .invoiceDate(LocalDate.now())
+                .status(InvoiceStatus.ISSUED)
+                .paymentStatus("PAID")
+                .currency("EUR")
+                .totalGross(new BigDecimal("200.00"))
+                .operaPostingStatus(OperaPostingStatus.NOT_POSTED)
+                .build();
+        InvoiceItem itemA = InvoiceItem.builder()
+                .id(541L)
+                .invoice(invoice)
+                .lineNo(1)
+                .reservationId(301L)
+                .productId(77L)
+                .productName("Day 1")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        InvoiceItem itemB = InvoiceItem.builder()
+                .id(542L)
+                .invoice(invoice)
+                .lineNo(2)
+                .reservationId(302L)
+                .productId(77L)
+                .productName("Day 2")
+                .quantity(1)
+                .unitPriceGross(new BigDecimal("100.00"))
+                .grossAmount(new BigDecimal("100.00"))
+                .build();
+        Product product = Product.builder()
+                .id(77L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build();
+        OperaFiscalChargeMapping chargeMapping = OperaFiscalChargeMapping.builder()
+                .id(801L)
+                .tenantId(1L)
+                .trxCode("20010")
+                .build();
+        OperaHotel hotel = OperaHotel.builder()
+                .id(901L)
+                .tenantId(1L)
+                .hotelCode("DH")
+                .chainCode("SUN")
+                .defaultCashierId(19L)
+                .defaultFolioWindowNo(1)
+                .active(Boolean.TRUE)
+                .build();
+        Reservation stayA = Reservation.builder()
+                .id(301L)
+                .tenantId(1L)
+                .operaReservationId(91001L)
+                .build();
+        Reservation stayB = Reservation.builder()
+                .id(302L)
+                .tenantId(1L)
+                .operaReservationId(91002L)
+                .build();
+        OperaTenantConfigResolver.OperaResolvedConfig tenantConfig = new OperaTenantConfigResolver.OperaResolvedConfig(
+                "https://opera.example",
+                "/oauth/v1/tokens",
+                "app-key",
+                "client-id",
+                "client-secret",
+                "MIKOSE",
+                null
+        );
+        JsonNode response = new ObjectMapper().createObjectNode().put("status", "ok");
+        OperaInvoicePostRequest postRequest = new OperaInvoicePostRequest();
+        postRequest.setReservationId(888001L);
+
+        when(invoiceRepo.findById(54L)).thenReturn(Optional.of(invoice));
+        when(invoiceItemRepo.findByInvoiceIdOrderByLineNoAsc(54L)).thenReturn(List.of(itemA, itemB));
+        when(tenantConfigResolver.resolve(1L)).thenReturn(tenantConfig);
+        when(tenantConfigResolver.findDefaultHotelCode(1L)).thenReturn(Optional.of("DH"));
+        when(configurationService.requireActiveHotel(1L, "DH")).thenReturn(hotel);
+        when(productRepo.findAllById(anyIterable())).thenReturn(List.of(product));
+        when(operaFiscalMappingService.resolveChargeMapping(1L, 77L, "ROOM")).thenReturn(Optional.of(chargeMapping));
+        when(reservationRepo.findById(301L)).thenReturn(Optional.of(stayA));
+        when(reservationRepo.findById(302L)).thenReturn(Optional.of(stayB));
+        when(invoiceRepo.save(any(Invoice.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(operaPostingClient.postCharges(any(), eq("DH"), eq("SUN"), eq(888001L), any()))
+                .thenReturn(response);
+
+        OperaInvoicePostingResult result = service.postInvoice(54L, postRequest);
+
+        assertThat(result.invoice().getOperaPostingStatus()).isEqualTo(OperaPostingStatus.POSTED);
+        assertThat(result.invoice().getOperaReservationId()).isEqualTo(888001L);
+        org.mockito.ArgumentCaptor<JsonNode> payloadCaptor = org.mockito.ArgumentCaptor.forClass(JsonNode.class);
+        verify(operaPostingClient, times(1)).postCharges(
+                any(), eq("DH"), eq("SUN"), eq(888001L), payloadCaptor.capture());
+        assertThat(payloadCaptor.getValue().path("criteria").path("charges")).hasSize(2);
+        verify(operaPostingClient, never()).postCharges(any(), eq("DH"), eq("SUN"), eq(91001L), any());
+        verify(operaPostingClient, never()).postCharges(any(), eq("DH"), eq("SUN"), eq(91002L), any());
+    }
+
+    @Test
     void postFinalStayInvoiceInfersStayLinksFromReservationRequestWhenLineReservationIdMissing() {
         Invoice invoice = Invoice.builder()
                 .id(51L)

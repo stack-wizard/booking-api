@@ -138,10 +138,34 @@ public class OperaCheckInOrchestrator {
             }
         }
 
+        // Post deposit (and allow caller to post final invoice) even when some OHIP check-ins fail,
+        // as long as at least one Opera reservation id exists to receive money.
         if (!lineErrors.isEmpty()) {
-            throw new IllegalStateException("Opera check-in failed: " + String.join("; ", lineErrors));
+            if (firstOperaReservationIdForDeposit == null) {
+                throw new IllegalStateException("Opera check-in failed: " + String.join("; ", lineErrors));
+            }
+            log.warn(
+                    "Opera check-in had line failures for request {} but continuing deposit/posting using Opera reservation {}: {}",
+                    request.getId(),
+                    firstOperaReservationIdForDeposit,
+                    String.join("; ", lineErrors));
         }
 
+        postDepositPaymentIfNeeded(request, firstOperaReservationIdForDeposit, resolveCurrency(active));
+    }
+
+    /**
+     * Posts check-in deposit payment to the given OHIP reservation when there is an active deposit
+     * and it has not already been posted. Used by normal check-in and by repair check-in with a
+     * manually supplied open Opera reservation id.
+     */
+    public void postDepositPaymentIfNeeded(ReservationRequest request, Long operaReservationId, String currency) {
+        if (!bookingOperaProperties.getCheckIn().isEnabled()) {
+            return;
+        }
+        if (request == null || request.getId() == null) {
+            return;
+        }
         BigDecimal depositTotal = sumActiveDepositGross(request.getId());
         ReservationRequest requestFresh = reservationRequestRepository.findById(request.getId())
                 .orElseThrow(() -> new IllegalStateException("Reservation request not found: " + request.getId()));
@@ -155,39 +179,49 @@ public class OperaCheckInOrchestrator {
             return;
         }
 
-        if (firstOperaReservationIdForDeposit == null) {
+        if (operaReservationId == null || operaReservationId <= 0) {
             throw new IllegalStateException("No Opera reservation id available for deposit payment");
         }
+
+        Long tenantId = requestFresh.getTenantId();
+        OperaTenantConfigResolver.OperaResolvedConfig config = tenantConfigResolver.resolve(tenantId);
+        String hotelCodeUpper = tenantConfigResolver.findDefaultHotelCode(tenantId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Opera default hotel code is missing on tenant PMS config for check-in"));
+        OperaHotel hotel = configurationService.requireActiveHotel(tenantId, hotelCodeUpper);
+        String chainCode = normalizeChain(hotel.getChainCode());
+
         if (!StringUtils.hasText(hotel.getCheckinDepositPaymentMethodCode())) {
             throw new IllegalStateException(
                     "Opera hotel " + hotel.getHotelCode() + " is missing checkinDepositPaymentMethodCode");
         }
+        String resolvedCurrency = StringUtils.hasText(currency) ? currency.trim() : "EUR";
         String cardType = paymentTransactionService.resolveFirstCardTypeForRequest(
                 requestFresh.getId(), requestFresh.getTenantId());
         JsonNode paymentBody = buildDepositPaymentPayload(
                 requestFresh.getId(),
                 requestFresh,
                 hotel,
-                firstOperaReservationIdForDeposit,
+                operaReservationId,
                 depositTotal,
-                resolveCurrency(active),
+                resolvedCurrency,
                 cardType);
         try {
             log.info("Opera payload [depositPaymentRequest]. requestId={}, hotelCode={}, operaReservationId={}, amount={}, payload={}",
                     requestFresh.getId(),
                     hotel.getHotelCode(),
-                    firstOperaReservationIdForDeposit,
+                    operaReservationId,
                     depositTotal,
                     paymentBody);
             operaPostingClient.postPayment(
-                    config, chainCode, hotel.getHotelCode(), firstOperaReservationIdForDeposit, paymentBody);
+                    config, chainCode, hotel.getHotelCode(), operaReservationId, paymentBody);
             checkInProgressService.recordDepositPosted(request.getId());
         } catch (RuntimeException ex) {
             String msg = ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
             log.error("Opera payload [depositPaymentRequest] failed. requestId={}, hotelCode={}, operaReservationId={}, amount={}, payload={}",
                     requestFresh.getId(),
                     hotel.getHotelCode(),
-                    firstOperaReservationIdForDeposit,
+                    operaReservationId,
                     depositTotal,
                     paymentBody,
                     ex);

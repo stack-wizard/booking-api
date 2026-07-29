@@ -38,8 +38,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -83,24 +83,14 @@ class ReservationStayServiceTest {
                 .thenReturn(Optional.of(mock(OperaFiscalChargeMapping.class)));
         lenient().doAnswer(invocation -> {
             Long invoiceId = invocation.getArgument(0);
-            Invoice inv = Invoice.builder()
+            return Invoice.builder()
                     .id(invoiceId)
                     .tenantId(1L)
                     .invoiceType(InvoiceType.INVOICE)
                     .invoiceNumber("INV-TEST")
                     .invoiceDate(LocalDate.now())
                     .build();
-            com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
-            return new com.stackwizard.booking_api.service.opera.OperaInvoicePostingResult(
-                    inv,
-                    com.stackwizard.booking_api.model.OperaPostingTarget.RESERVATION,
-                    "DH",
-                    1L,
-                    1L,
-                    1,
-                    om.createObjectNode(),
-                    om.createObjectNode());
-        }).when(operaInvoicePostingService).postInvoice(anyLong(), any());
+        }).when(operaInvoicePostingService).tryAutoPostInvoice(anyLong());
     }
 
     @Test
@@ -133,6 +123,8 @@ class ReservationStayServiceTest {
                 .tenantId(1L)
                 .requestType(ReservationRequest.Type.EXTERNAL)
                 .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
                 .build();
         when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
         when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
@@ -141,6 +133,36 @@ class ReservationStayServiceTest {
 
         assertThat(dto.isEligible()).isTrue();
         assertThat(dto.getIssues()).isEmpty();
+        assertThat(dto.getDueTodayReservationIds()).containsExactly(20L);
+        assertThat(dto.getFutureReservationIds()).isEmpty();
+    }
+
+    @Test
+    void getCheckinReadinessWhenOnlyFutureLinesIsNotEligible() {
+        long requestId = 4L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation tomorrow = Reservation.builder()
+                .id(21L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().plusDays(1).atStartOfDay())
+                .endsAt(LocalDate.now().plusDays(1).atTime(23, 59))
+                .build();
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(tomorrow));
+
+        CheckinReadinessDto dto = stayService.getCheckinReadiness(requestId);
+
+        assertThat(dto.isEligible()).isFalse();
+        assertThat(dto.getDueTodayReservationIds()).isEmpty();
+        assertThat(dto.getFutureReservationIds()).containsExactly(21L);
+        assertThat(dto.getIssues()).anyMatch(s -> s.contains("due for check-in today"));
     }
 
     @Test
@@ -247,7 +269,7 @@ class ReservationStayServiceTest {
         verify(invoiceService).allocateReleasedDepositPaymentsToFinalRequestInvoice(requestId);
         verify(invoiceService).issueSystemFinalInvoiceForRequest(requestId);
         verify(operaCheckInOrchestrator).runIfEnabled(eq(request), anyList());
-        verify(operaInvoicePostingService, never()).postInvoice(anyLong(), any());
+        verify(operaInvoicePostingService, never()).tryAutoPostInvoice(anyLong());
         verify(eventPublisher).publishEvent(new InvoiceAutoFiscalizationRequestedEvent(44L));
     }
 
@@ -364,7 +386,7 @@ class ReservationStayServiceTest {
 
         stayService.checkIn(requestId);
 
-        verify(operaInvoicePostingService).postInvoice(eq(200L), isNull());
+        verify(operaInvoicePostingService).tryAutoPostInvoice(eq(200L));
         verify(entityManager).refresh(reservation);
     }
 
@@ -376,6 +398,7 @@ class ReservationStayServiceTest {
                 .status(ReservationRequest.Status.CHECKED_IN)
                 .build();
         when(requestRepo.findById(1L)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestId(1L)).thenReturn(List.of());
         Invoice inv = org.mockito.Mockito.mock(Invoice.class);
         when(inv.getId()).thenReturn(99L);
         when(invoiceService.findPrimaryInvoiceForReservationRequest(1L)).thenReturn(Optional.of(inv));
@@ -383,7 +406,288 @@ class ReservationStayServiceTest {
         CheckinResultDto result = stayService.checkIn(1L);
 
         assertThat(result.getFinalInvoiceId()).isEqualTo(99L);
+        assertThat(result.getRequestStatus()).isEqualTo("CHECKED_IN");
         verify(invoiceService, never()).createStornoInvoice(anyLong());
         verify(invoiceService, never()).createDraftForFinalizedRequest(anyLong());
+    }
+
+    @Test
+    void checkInMultiDayChecksInOnlyDueTodayAndSetsPartiallyCheckedIn() {
+        long requestId = 8L;
+        LocalDate today = LocalDate.now();
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation todayLine = Reservation.builder()
+                .id(100L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(today.atStartOfDay())
+                .endsAt(today.atTime(23, 59))
+                .build();
+        Reservation tomorrowLine = Reservation.builder()
+                .id(101L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(today.plusDays(1).atStartOfDay())
+                .endsAt(today.plusDays(1).atTime(23, 59))
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(300L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(todayLine, tomorrowLine));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+
+        CheckinResultDto result = stayService.checkIn(requestId);
+
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.PARTIALLY_CHECKED_IN);
+        assertThat(todayLine.getStatus()).isEqualTo("CHECKED_IN");
+        assertThat(tomorrowLine.getStatus()).isEqualTo("CONFIRMED");
+        assertThat(result.getRequestStatus()).isEqualTo("PARTIALLY_CHECKED_IN");
+        assertThat(result.getCheckedInReservationIds()).containsExactly(100L);
+        assertThat(result.getRemainingConfirmedReservationIds()).containsExactly(101L);
+        verify(operaCheckInOrchestrator).runIfEnabled(eq(request), argThat(list ->
+                list.size() == 1 && list.getFirst().getId().equals(100L)));
+        verify(invoiceService).issueSystemFinalInvoiceForRequest(requestId);
+    }
+
+    @Test
+    void checkInFromPartiallyCheckedInCompletesWithoutReissuingInvoice() {
+        long requestId = 9L;
+        LocalDate today = LocalDate.now();
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.PARTIALLY_CHECKED_IN)
+                .expiresAt(null)
+                .build();
+        Reservation alreadyIn = Reservation.builder()
+                .id(100L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CHECKED_IN")
+                .startsAt(today.minusDays(1).atStartOfDay())
+                .endsAt(today.minusDays(1).atTime(23, 59))
+                .build();
+        Reservation dueToday = Reservation.builder()
+                .id(101L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(today.atStartOfDay())
+                .endsAt(today.atTime(23, 59))
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(300L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(alreadyIn, dueToday));
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+
+        CheckinResultDto result = stayService.checkIn(requestId);
+
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.CHECKED_IN);
+        assertThat(dueToday.getStatus()).isEqualTo("CHECKED_IN");
+        assertThat(result.getRequestStatus()).isEqualTo("CHECKED_IN");
+        assertThat(result.getRemainingConfirmedReservationCount()).isZero();
+        verify(invoiceService, never()).createDraftForFinalizedRequest(anyLong());
+        verify(invoiceService, never()).issueSystemFinalInvoiceForRequest(anyLong());
+        verify(invoiceService, never()).createStornoInvoice(anyLong());
+        verify(operaCheckInOrchestrator).runIfEnabled(eq(request), argThat(list ->
+                list.size() == 1 && list.getFirst().getId().equals(101L)));
+    }
+
+    @Test
+    void checkInThrowsWhenOnlyFutureLinesRemain() {
+        long requestId = 10L;
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation tomorrow = Reservation.builder()
+                .id(21L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().plusDays(1).atStartOfDay())
+                .endsAt(LocalDate.now().plusDays(1).atTime(23, 59))
+                .build();
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(tomorrow));
+
+        assertThatThrownBy(() -> stayService.checkIn(requestId))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("due for check-in today");
+        verify(operaCheckInOrchestrator, never()).runIfEnabled(any(), anyList());
+        verify(invoiceService, never()).issueSystemFinalInvoiceForRequest(anyLong());
+    }
+
+    @Test
+    void checkInWithSkipOperaDoesNotCallOperaAndStillIssuesLocalInvoice() {
+        long requestId = 11L;
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(10L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(200L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+
+        CheckinResultDto result = stayService.checkIn(requestId, true);
+
+        assertThat(result.getFinalInvoiceId()).isEqualTo(200L);
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.CHECKED_IN);
+        assertThat(reservation.getStatus()).isEqualTo("CHECKED_IN");
+        verify(operaCheckInOrchestrator, never()).runIfEnabled(any(), anyList());
+        verify(operaInvoicePostingService, never()).tryAutoPostInvoice(anyLong());
+        verify(invoiceService).issueSystemFinalInvoiceForRequest(requestId);
+    }
+
+    @Test
+    void checkInWithManualOperaReservationIdPostsDepositAndFinalToThatId() {
+        long requestId = 13L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(10L)
+                .tenantId(1L)
+                .productId(8L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .currency("EUR")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .operaReservationId(50346182L)
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(200L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+        when(productRepo.findById(8L)).thenReturn(Optional.of(com.stackwizard.booking_api.model.Product.builder()
+                .id(8L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build()));
+        doNothing().when(operaCheckInOrchestrator).postDepositPaymentIfNeeded(any(), anyLong(), any());
+        when(operaInvoicePostingService.postInvoice(anyLong(), any())).thenAnswer(invocation -> {
+            Long invoiceId = invocation.getArgument(0);
+            Invoice inv = Invoice.builder()
+                    .id(invoiceId)
+                    .tenantId(1L)
+                    .invoiceType(InvoiceType.INVOICE)
+                    .invoiceNumber("INV-TEST")
+                    .invoiceDate(LocalDate.now())
+                    .build();
+            return new com.stackwizard.booking_api.service.opera.OperaInvoicePostingResult(
+                    inv,
+                    com.stackwizard.booking_api.model.OperaPostingTarget.RESERVATION,
+                    "DH",
+                    999001L,
+                    1L,
+                    1,
+                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode(),
+                    new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode());
+        });
+
+        CheckinResultDto result = stayService.checkIn(requestId, false, 999001L);
+
+        assertThat(result.getFinalInvoiceId()).isEqualTo(200L);
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.CHECKED_IN);
+        verify(operaCheckInOrchestrator, never()).runIfEnabled(any(), anyList());
+        verify(operaCheckInOrchestrator).postDepositPaymentIfNeeded(eq(request), eq(999001L), eq("EUR"));
+        org.mockito.ArgumentCaptor<com.stackwizard.booking_api.dto.OperaInvoicePostRequest> postCaptor =
+                org.mockito.ArgumentCaptor.forClass(com.stackwizard.booking_api.dto.OperaInvoicePostRequest.class);
+        verify(operaInvoicePostingService).postInvoice(eq(200L), postCaptor.capture());
+        assertThat(postCaptor.getValue().getReservationId()).isEqualTo(999001L);
+        verify(operaInvoicePostingService, never()).tryAutoPostInvoice(anyLong());
+    }
+
+    @Test
+    void getCheckinReadinessWithSkipOperaIgnoresOperaRoomIdRequirements() {
+        long requestId = 12L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.EXTERNAL)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(20L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.EXTERNAL)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+
+        CheckinReadinessDto withoutSkip = stayService.getCheckinReadiness(requestId, false);
+        assertThat(withoutSkip.isEligible()).isFalse();
+        assertThat(withoutSkip.isOperaCheckInSkippable()).isTrue();
+        assertThat(withoutSkip.getIssues()).anyMatch(s -> s.contains("OHIP room id"));
+
+        CheckinReadinessDto withSkip = stayService.getCheckinReadiness(requestId, true);
+        assertThat(withSkip.isEligible()).isTrue();
+        assertThat(withSkip.isOperaCheckInSkippable()).isTrue();
+        assertThat(withSkip.getIssues()).isEmpty();
     }
 }

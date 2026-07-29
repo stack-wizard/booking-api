@@ -311,22 +311,13 @@ public class OperaInvoicePostingService {
         OperaHotel hotel = resolveHotelForStayInvoice(invoice, request);
         Long cashierId = resolveCashierId(request, hotel);
         Integer folioWindowNo = resolveFolioWindowNo(request, hotel);
-        Map<Long, List<InvoiceItem>> byReservation = items.stream()
-                .collect(Collectors.groupingBy(InvoiceItem::getReservationId, LinkedHashMap::new, Collectors.toList()));
+        Map<Long, List<InvoiceItem>> byOperaReservation =
+                groupFinalStayItemsByOperaReservationId(invoice, items, request);
 
         ArrayNode posts = objectMapper.createArrayNode();
         Long firstOhId = null;
-        for (Map.Entry<Long, List<InvoiceItem>> e : byReservation.entrySet()) {
-            Reservation stay = reservationRepo.findById(e.getKey())
-                    .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + e.getKey()));
-            if (!invoice.getTenantId().equals(stay.getTenantId())) {
-                throw new IllegalStateException("Reservation " + stay.getId() + " tenant mismatch for invoice");
-            }
-            Long ohId = stay.getOperaReservationId();
-            if (ohId == null || ohId <= 0) {
-                throw new IllegalStateException(
-                        "Reservation " + stay.getId() + " has no operaReservationId; check in on OHIP first");
-            }
+        for (Map.Entry<Long, List<InvoiceItem>> e : byOperaReservation.entrySet()) {
+            Long ohId = e.getKey();
             if (firstOhId == null) {
                 firstOhId = ohId;
             }
@@ -359,10 +350,9 @@ public class OperaInvoicePostingService {
         OperaHotel hotel = resolveHotelForStayInvoice(invoice, request);
         Long cashierId = resolveCashierId(request, hotel);
         Integer folioWindowNo = resolveFolioWindowNo(request, hotel);
-        String chain = postingChainCode(hotel);
 
-        Map<Long, List<InvoiceItem>> byReservation = items.stream()
-                .collect(Collectors.groupingBy(InvoiceItem::getReservationId, LinkedHashMap::new, Collectors.toList()));
+        Map<Long, List<InvoiceItem>> byOperaReservation =
+                groupFinalStayItemsByOperaReservationId(invoice, items, request);
 
         ArrayNode requestPosts = objectMapper.createArrayNode();
         JsonNode lastResponse = null;
@@ -370,17 +360,8 @@ public class OperaInvoicePostingService {
             invoice.setOperaErrorMessage(null);
             invoiceRepo.save(invoice);
 
-            for (Map.Entry<Long, List<InvoiceItem>> e : byReservation.entrySet()) {
-                Reservation stay = reservationRepo.findById(e.getKey())
-                        .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + e.getKey()));
-                if (!invoice.getTenantId().equals(stay.getTenantId())) {
-                    throw new IllegalStateException("Reservation " + stay.getId() + " tenant mismatch for invoice");
-                }
-                Long ohId = stay.getOperaReservationId();
-                if (ohId == null || ohId <= 0) {
-                    throw new IllegalStateException(
-                            "Reservation " + stay.getId() + " has no operaReservationId; check in on OHIP first");
-                }
+            for (Map.Entry<Long, List<InvoiceItem>> e : byOperaReservation.entrySet()) {
+                Long ohId = e.getKey();
                 ResolvedTarget target = new ResolvedTarget(
                         OperaPostingTarget.RESERVATION, hotel, ohId, cashierId, folioWindowNo);
                 JsonNode payload = buildPayload(invoice, e.getValue(), List.of(), target, request, false);
@@ -394,11 +375,8 @@ public class OperaInvoicePostingService {
             invoice.setOperaPostingStatus(OperaPostingStatus.POSTED);
             invoice.setOperaPostedAt(OffsetDateTime.now());
             invoice.setOperaHotelCode(hotel.getHotelCode());
-            if (byReservation.size() == 1) {
-                Long onlyOh = reservationRepo.findById(byReservation.keySet().iterator().next())
-                        .map(Reservation::getOperaReservationId)
-                        .orElse(null);
-                invoice.setOperaReservationId(onlyOh);
+            if (byOperaReservation.size() == 1) {
+                invoice.setOperaReservationId(byOperaReservation.keySet().iterator().next());
             } else {
                 invoice.setOperaReservationId(null);
             }
@@ -427,6 +405,89 @@ public class OperaInvoicePostingService {
         }
     }
 
+    /**
+     * Groups final-invoice lines by target OHIP reservation id. When {@code request.reservationId}
+     * is set (repair check-in), all charges post to that single open Opera reservation.
+     * Otherwise lines whose stay has no {@code operaReservationId} yet fall back to any Opera id
+     * already present on the request so the full stay can be posted immediately.
+     */
+    private Map<Long, List<InvoiceItem>> groupFinalStayItemsByOperaReservationId(Invoice invoice,
+                                                                                 List<InvoiceItem> items,
+                                                                                 OperaInvoicePostRequest request) {
+        Long overrideOhId = normalizePositiveLong(request != null ? request.getReservationId() : null);
+        if (overrideOhId != null) {
+            // Validate tenant stays exist / belong when lines are linked; still bundle everything to override.
+            for (InvoiceItem item : items) {
+                if (item.getReservationId() == null) {
+                    continue;
+                }
+                Reservation stay = reservationRepo.findById(item.getReservationId())
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "Reservation not found: " + item.getReservationId()));
+                if (!invoice.getTenantId().equals(stay.getTenantId())) {
+                    throw new IllegalStateException(
+                            "Reservation " + stay.getId() + " tenant mismatch for invoice");
+                }
+            }
+            Map<Long, List<InvoiceItem>> single = new LinkedHashMap<>();
+            single.put(overrideOhId, new ArrayList<>(items));
+            return single;
+        }
+
+        Map<Long, List<InvoiceItem>> byStay = items.stream()
+                .collect(Collectors.groupingBy(InvoiceItem::getReservationId, LinkedHashMap::new, Collectors.toList()));
+        Long fallbackOhId = findFallbackOperaReservationId(invoice, byStay.keySet());
+
+        Map<Long, List<InvoiceItem>> byOperaId = new LinkedHashMap<>();
+        for (Map.Entry<Long, List<InvoiceItem>> e : byStay.entrySet()) {
+            Reservation stay = reservationRepo.findById(e.getKey())
+                    .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + e.getKey()));
+            if (!invoice.getTenantId().equals(stay.getTenantId())) {
+                throw new IllegalStateException("Reservation " + stay.getId() + " tenant mismatch for invoice");
+            }
+            Long ohId = stay.getOperaReservationId();
+            if (ohId == null || ohId <= 0) {
+                if (fallbackOhId == null || fallbackOhId <= 0) {
+                    throw new IllegalStateException(
+                            "Reservation " + stay.getId() + " has no operaReservationId; check in on OHIP first");
+                }
+                log.warn(
+                        "Reservation {} has no operaReservationId; posting its final-invoice charges to fallback Opera reservation {}",
+                        stay.getId(),
+                        fallbackOhId);
+                ohId = fallbackOhId;
+            }
+            byOperaId.computeIfAbsent(ohId, ignored -> new ArrayList<>()).addAll(e.getValue());
+        }
+        return byOperaId;
+    }
+
+    private Long findFallbackOperaReservationId(Invoice invoice, Iterable<Long> stayIds) {
+        if (stayIds != null) {
+            for (Long stayId : stayIds) {
+                if (stayId == null) {
+                    continue;
+                }
+                Long ohId = reservationRepo.findById(stayId)
+                        .map(Reservation::getOperaReservationId)
+                        .orElse(null);
+                if (ohId != null && ohId > 0) {
+                    return ohId;
+                }
+            }
+        }
+        Long requestId = invoice != null ? invoice.getReservationRequestId() : null;
+        if (requestId == null) {
+            return null;
+        }
+        return reservationRepo.findByRequestId(requestId).stream()
+                .filter(r -> r.getStatus() == null || !"CANCELLED".equalsIgnoreCase(r.getStatus().trim()))
+                .map(Reservation::getOperaReservationId)
+                .filter(id -> id != null && id > 0)
+                .findFirst()
+                .orElse(null);
+    }
+
     private OperaHotel resolveHotelForStayInvoice(Invoice invoice, OperaInvoicePostRequest request) {
         String overrideHotelCode = normalizeHotelCode(request != null ? request.getHotelCode() : null);
         String invoiceHotelCode = normalizeHotelCode(invoice.getOperaHotelCode());
@@ -450,13 +511,15 @@ public class OperaInvoicePostingService {
         configurationService.requireActiveHotel(invoice.getTenantId(), hotel.getHotelCode());
         Map<Long, List<InvoiceItem>> byReservation = items.stream()
                 .collect(Collectors.groupingBy(InvoiceItem::getReservationId));
+        Long fallbackOhId = findFallbackOperaReservationId(invoice, byReservation.keySet());
         for (Long reservationId : byReservation.keySet()) {
             Reservation stay = reservationRepo.findById(reservationId)
                     .orElseThrow(() -> new IllegalStateException("Reservation not found: " + reservationId));
-            if (stay.getOperaReservationId() == null || stay.getOperaReservationId() <= 0) {
+            if (!invoice.getTenantId().equals(stay.getTenantId())) {
                 return false;
             }
-            if (!invoice.getTenantId().equals(stay.getTenantId())) {
+            Long ohId = stay.getOperaReservationId();
+            if ((ohId == null || ohId <= 0) && (fallbackOhId == null || fallbackOhId <= 0)) {
                 return false;
             }
         }

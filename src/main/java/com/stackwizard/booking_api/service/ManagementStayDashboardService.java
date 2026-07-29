@@ -36,6 +36,11 @@ public class ManagementStayDashboardService {
     private static final int MAX_DAILY_TREND_DAYS = 62;
     private static final DateTimeFormatter LABEL = DateTimeFormatter.ofPattern("d/M");
     private static final String UNKNOWN_COUNTRY_LABEL = "Unknown";
+    /** In-house request statuses; occupancy counts only {@code CHECKED_IN} reservation lines. */
+    private static final List<ReservationRequest.Status> IN_HOUSE_REQUEST_STATUSES = List.of(
+            ReservationRequest.Status.CHECKED_IN,
+            ReservationRequest.Status.PARTIALLY_CHECKED_IN
+    );
 
     private static BigDecimal toBigDecimal(Object value) {
         if (value == null) {
@@ -68,10 +73,10 @@ public class ManagementStayDashboardService {
         LocalDate fromDate = from.toLocalDate();
         LocalDate toDate = to.withOffsetSameInstant(offset).toLocalDate();
 
-        long checkedInRequests = stayDashboardRepository.countDistinctRequestsOverlappingStay(
+        long checkedInRequests = stayDashboardRepository.countDistinctInHouseRequestsOverlappingStay(
                 tenantId,
                 ReservationRequest.Type.INTERNAL,
-                ReservationRequest.Status.CHECKED_IN,
+                IN_HOUSE_REQUEST_STATUSES,
                 rangeStart,
                 rangeEnd);
         long checkedOutRequests = stayDashboardRepository.countDistinctRequestsOverlappingStay(
@@ -80,10 +85,10 @@ public class ManagementStayDashboardService {
                 ReservationRequest.Status.CHECKED_OUT,
                 rangeStart,
                 rangeEnd);
-        long checkedInReservations = stayDashboardRepository.countReservationsOverlappingStay(
+        long checkedInReservations = stayDashboardRepository.countInHouseReservationsOverlappingStay(
                 tenantId,
                 ReservationRequest.Type.INTERNAL,
-                ReservationRequest.Status.CHECKED_IN,
+                IN_HOUSE_REQUEST_STATUSES,
                 rangeStart,
                 rangeEnd);
         long checkedOutReservations = stayDashboardRepository.countReservationsOverlappingStay(
@@ -134,10 +139,10 @@ public class ManagementStayDashboardService {
             LocalDateTime dayStart = LocalDateTime.of(d, LocalTime.MIN);
             LocalDateTime dayEnd = LocalDateTime.of(d, LocalTime.of(23, 59, 59, 999_000_000));
 
-            long checkedInReservations = stayDashboardRepository.countReservationsOverlappingStay(
+            long checkedInReservations = stayDashboardRepository.countInHouseReservationsOverlappingStay(
                     tenantId,
                     ReservationRequest.Type.INTERNAL,
-                    ReservationRequest.Status.CHECKED_IN,
+                    IN_HOUSE_REQUEST_STATUSES,
                     dayStart,
                     dayEnd);
             BigDecimal dayGross = toBigDecimal(stayDashboardRepository.sumInvoiceLineGross(tenantId, d, d));

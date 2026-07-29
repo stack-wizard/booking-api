@@ -130,6 +130,7 @@ public class ReservationAmendmentService {
         }
 
         List<Long> newIds = new ArrayList<>();
+        // New amendment lines stay CONFIRMED until their service-date check-in (including under PARTIALLY_CHECKED_IN).
         String newLineStatus = request.getStatus() == ReservationRequest.Status.CHECKED_IN ? "CHECKED_IN" : "CONFIRMED";
 
         for (ReservationRequestAmendmentReplacementDto rep : body.getReplacements()) {
@@ -171,9 +172,11 @@ public class ReservationAmendmentService {
             throw new IllegalArgumentException("Tenant mismatch");
         }
         if (request.getStatus() != ReservationRequest.Status.FINALIZED
+                && request.getStatus() != ReservationRequest.Status.PARTIALLY_CHECKED_IN
                 && request.getStatus() != ReservationRequest.Status.CHECKED_IN) {
-            throw new IllegalStateException("Amendment allowed only for FINALIZED or CHECKED_IN requests (current: "
-                    + request.getStatus() + ")");
+            throw new IllegalStateException(
+                    "Amendment allowed only for FINALIZED, PARTIALLY_CHECKED_IN or CHECKED_IN requests (current: "
+                            + request.getStatus() + ")");
         }
         return request;
     }

@@ -163,6 +163,7 @@ public class ReservationRequestService {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
         if (request.getStatus() == ReservationRequest.Status.CANCELLED
+                || request.getStatus() == ReservationRequest.Status.PARTIALLY_CHECKED_IN
                 || request.getStatus() == ReservationRequest.Status.CHECKED_IN
                 || request.getStatus() == ReservationRequest.Status.CHECKED_OUT
                 || request.getStatus() == ReservationRequest.Status.EXPIRED) {

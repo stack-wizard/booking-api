@@ -107,6 +107,7 @@ public class ReservationRequest {
         PENDING_PAYMENT,
         MANUAL_REVIEW,
         FINALIZED,
+        PARTIALLY_CHECKED_IN,
         CHECKED_IN,
         CHECKED_OUT,
         CANCELLED,
@@ -116,7 +117,10 @@ public class ReservationRequest {
          * Guest-facing confirmed booking lifecycle (finalized through end of stay).
          */
         public boolean isConfirmedStay() {
-            return this == FINALIZED || this == CHECKED_IN || this == CHECKED_OUT;
+            return this == FINALIZED
+                    || this == PARTIALLY_CHECKED_IN
+                    || this == CHECKED_IN
+                    || this == CHECKED_OUT;
         }
     }
 }

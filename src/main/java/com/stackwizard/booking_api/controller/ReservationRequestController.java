@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.controller;
 import com.stackwizard.booking_api.dto.CancellationExecuteRequest;
 import com.stackwizard.booking_api.dto.CancellationRequestDto;
 import com.stackwizard.booking_api.dto.CheckinReadinessDto;
+import com.stackwizard.booking_api.dto.CheckinRequest;
 import com.stackwizard.booking_api.dto.CheckinResultDto;
 import com.stackwizard.booking_api.dto.CheckoutReadinessDto;
 import com.stackwizard.booking_api.dto.CheckoutResultDto;
@@ -181,8 +182,10 @@ public class ReservationRequestController {
     }
 
     @GetMapping("/{id}/check-in-readiness")
-    public ResponseEntity<CheckinReadinessDto> checkInReadiness(@PathVariable Long id) {
-        return ResponseEntity.ok(reservationStayService.getCheckinReadiness(id));
+    public ResponseEntity<CheckinReadinessDto> checkInReadiness(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean skipOperaCheckIn) {
+        return ResponseEntity.ok(reservationStayService.getCheckinReadiness(id, skipOperaCheckIn));
     }
 
     @GetMapping("/{id}/checkout-readiness")
@@ -191,8 +194,12 @@ public class ReservationRequestController {
     }
 
     @PostMapping("/{id}/check-in")
-    public ResponseEntity<CheckinResultDto> checkIn(@PathVariable Long id) {
-        return ResponseEntity.ok(reservationStayService.checkIn(id));
+    public ResponseEntity<CheckinResultDto> checkIn(
+            @PathVariable Long id,
+            @RequestBody(required = false) CheckinRequest body) {
+        boolean skipOperaCheckIn = body != null && body.isSkipOperaCheckIn();
+        Long finalInvoiceOperaReservationId = body != null ? body.getFinalInvoiceOperaReservationId() : null;
+        return ResponseEntity.ok(reservationStayService.checkIn(id, skipOperaCheckIn, finalInvoiceOperaReservationId));
     }
 
     @PostMapping("/{id}/check-out")

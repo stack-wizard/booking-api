@@ -17,8 +17,8 @@ public class ManagementStayDashboardResponse {
     private OffsetDateTime from;
     private OffsetDateTime to;
     /**
-     * Distinct non-INTERNAL reservation requests in {@code CHECKED_IN} with at least one
-     * non-cancelled reservation whose stay window overlaps the requested range.
+     * Distinct non-INTERNAL reservation requests in {@code CHECKED_IN} or {@code PARTIALLY_CHECKED_IN}
+     * with at least one reservation line in {@code CHECKED_IN} whose stay window overlaps the range.
      */
     private long checkedInRequestCount;
     /**

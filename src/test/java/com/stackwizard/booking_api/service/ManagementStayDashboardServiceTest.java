@@ -40,14 +40,18 @@ class ManagementStayDashboardServiceTest {
         OffsetDateTime from = OffsetDateTime.parse("2026-05-01T00:00:00+02:00");
         OffsetDateTime to = OffsetDateTime.parse("2026-05-31T23:59:59+02:00");
 
-        when(stayDashboardRepository.countDistinctRequestsOverlappingStay(
-                eq(tenantId), eq(ReservationRequest.Type.INTERNAL), eq(ReservationRequest.Status.CHECKED_IN), any(), any()))
+        when(stayDashboardRepository.countDistinctInHouseRequestsOverlappingStay(
+                eq(tenantId), eq(ReservationRequest.Type.INTERNAL),
+                eq(List.of(ReservationRequest.Status.CHECKED_IN, ReservationRequest.Status.PARTIALLY_CHECKED_IN)),
+                any(), any()))
                 .thenReturn(3L);
         when(stayDashboardRepository.countDistinctRequestsOverlappingStay(
                 eq(tenantId), eq(ReservationRequest.Type.INTERNAL), eq(ReservationRequest.Status.CHECKED_OUT), any(), any()))
                 .thenReturn(2L);
-        when(stayDashboardRepository.countReservationsOverlappingStay(
-                eq(tenantId), eq(ReservationRequest.Type.INTERNAL), eq(ReservationRequest.Status.CHECKED_IN), any(), any()))
+        when(stayDashboardRepository.countInHouseReservationsOverlappingStay(
+                eq(tenantId), eq(ReservationRequest.Type.INTERNAL),
+                eq(List.of(ReservationRequest.Status.CHECKED_IN, ReservationRequest.Status.PARTIALLY_CHECKED_IN)),
+                any(), any()))
                 .thenReturn(5L);
         when(stayDashboardRepository.countReservationsOverlappingStay(
                 eq(tenantId), eq(ReservationRequest.Type.INTERNAL), eq(ReservationRequest.Status.CHECKED_OUT), any(), any()))

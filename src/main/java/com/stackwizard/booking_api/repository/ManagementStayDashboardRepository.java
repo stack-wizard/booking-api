@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -16,6 +17,49 @@ import java.util.List;
  */
 public interface ManagementStayDashboardRepository extends JpaRepository<Reservation, Long> {
 
+    /**
+     * In-house occupancy: request in given statuses and line explicitly {@code CHECKED_IN}
+     * (excludes future CONFIRMED lines under {@code PARTIALLY_CHECKED_IN}).
+     */
+    @Query("""
+            select count(distinct rr.id)
+            from Reservation r
+            join r.request rr
+            where rr.tenantId = :tenantId
+              and rr.type <> :internalType
+              and rr.status in :statuses
+              and upper(r.status) = 'CHECKED_IN'
+              and r.startsAt <= :rangeEnd
+              and r.endsAt >= :rangeStart
+            """)
+    long countDistinctInHouseRequestsOverlappingStay(
+            @Param("tenantId") Long tenantId,
+            @Param("internalType") ReservationRequest.Type internalType,
+            @Param("statuses") Collection<ReservationRequest.Status> statuses,
+            @Param("rangeStart") LocalDateTime rangeStart,
+            @Param("rangeEnd") LocalDateTime rangeEnd);
+
+    @Query("""
+            select count(r)
+            from Reservation r
+            join r.request rr
+            where rr.tenantId = :tenantId
+              and rr.type <> :internalType
+              and rr.status in :statuses
+              and upper(r.status) = 'CHECKED_IN'
+              and r.startsAt <= :rangeEnd
+              and r.endsAt >= :rangeStart
+            """)
+    long countInHouseReservationsOverlappingStay(
+            @Param("tenantId") Long tenantId,
+            @Param("internalType") ReservationRequest.Type internalType,
+            @Param("statuses") Collection<ReservationRequest.Status> statuses,
+            @Param("rangeStart") LocalDateTime rangeStart,
+            @Param("rangeEnd") LocalDateTime rangeEnd);
+
+    /**
+     * Checked-out occupancy: request {@code CHECKED_OUT}; any non-cancelled overlapping line.
+     */
     @Query("""
             select count(distinct rr.id)
             from Reservation r
