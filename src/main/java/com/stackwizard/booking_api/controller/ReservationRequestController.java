@@ -184,8 +184,9 @@ public class ReservationRequestController {
     @GetMapping("/{id}/check-in-readiness")
     public ResponseEntity<CheckinReadinessDto> checkInReadiness(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "false") boolean skipOperaCheckIn) {
-        return ResponseEntity.ok(reservationStayService.getCheckinReadiness(id, skipOperaCheckIn));
+            @RequestParam(defaultValue = "false") boolean skipOperaCheckIn,
+            @RequestParam(defaultValue = "false") boolean postToOpera) {
+        return ResponseEntity.ok(reservationStayService.getCheckinReadiness(id, skipOperaCheckIn, postToOpera));
     }
 
     @GetMapping("/{id}/checkout-readiness")
@@ -199,7 +200,9 @@ public class ReservationRequestController {
             @RequestBody(required = false) CheckinRequest body) {
         boolean skipOperaCheckIn = body != null && body.isSkipOperaCheckIn();
         Long finalInvoiceOperaReservationId = body != null ? body.getFinalInvoiceOperaReservationId() : null;
-        return ResponseEntity.ok(reservationStayService.checkIn(id, skipOperaCheckIn, finalInvoiceOperaReservationId));
+        boolean postToOpera = body != null && body.isPostToOpera();
+        return ResponseEntity.ok(reservationStayService.checkIn(
+                id, skipOperaCheckIn, finalInvoiceOperaReservationId, postToOpera));
     }
 
     @PostMapping("/{id}/check-out")

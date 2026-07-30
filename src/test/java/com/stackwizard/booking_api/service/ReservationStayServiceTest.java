@@ -690,4 +690,168 @@ class ReservationStayServiceTest {
         assertThat(withSkip.isOperaCheckInSkippable()).isTrue();
         assertThat(withSkip.getIssues()).isEmpty();
     }
+
+    @Test
+    void checkInInhouseDefaultDoesNotPostToOperaAndDoesNotRequireLink() {
+        long requestId = 20L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INHOUSE)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(10L)
+                .tenantId(1L)
+                .productId(8L)
+                .requestType(ReservationRequest.Type.INHOUSE)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(200L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+
+        CheckinResultDto result = stayService.checkIn(requestId, false, null, false);
+
+        assertThat(result.getFinalInvoiceId()).isEqualTo(200L);
+        assertThat(request.getStatus()).isEqualTo(ReservationRequest.Status.CHECKED_IN);
+        verify(operaCheckInOrchestrator, never()).runIfEnabled(any(), anyList());
+        verify(operaInvoicePostingService, never()).tryAutoPostInvoice(anyLong());
+        verify(operaInvoicePostingService, never()).postInvoice(anyLong(), any());
+    }
+
+    @Test
+    void checkInInhousePostToOperaWithoutLinkThrows() {
+        long requestId = 21L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INHOUSE)
+                .operaHotelCode("HOTEL1")
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(10L)
+                .tenantId(1L)
+                .productId(8L)
+                .requestType(ReservationRequest.Type.INHOUSE)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+
+        assertThatThrownBy(() -> stayService.checkIn(requestId, false, null, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Linked Opera reservation id");
+
+        verify(operaInvoicePostingService, never()).tryAutoPostInvoice(anyLong());
+        verify(invoiceService, never()).issueSystemFinalInvoiceForRequest(anyLong());
+    }
+
+    @Test
+    void checkInInhousePostToOperaWithLinkPropagatesAndPosts() {
+        long requestId = 22L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INHOUSE)
+                .operaHotelCode("HOTEL1")
+                .linkedOperaReservationId(777001L)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(10L)
+                .tenantId(1L)
+                .productId(8L)
+                .requestType(ReservationRequest.Type.INHOUSE)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+        Invoice finalInvoice = mock(Invoice.class);
+        when(finalInvoice.getId()).thenReturn(200L);
+
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+        when(invoiceService.findByRequestId(requestId)).thenReturn(List.of());
+        when(invoiceService.createDraftForFinalizedRequest(requestId)).thenReturn(finalInvoice);
+        when(invoiceService.issueSystemFinalInvoiceForRequest(requestId)).thenReturn(finalInvoice);
+        when(requestRepo.save(any(ReservationRequest.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(reservationRepo.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(invoiceService.findPrimaryInvoiceForReservationRequest(requestId)).thenReturn(Optional.of(finalInvoice));
+        when(productRepo.findById(8L)).thenReturn(Optional.of(com.stackwizard.booking_api.model.Product.builder()
+                .id(8L)
+                .tenantId(1L)
+                .productType("ROOM")
+                .build()));
+
+        CheckinResultDto result = stayService.checkIn(requestId, false, null, true);
+
+        assertThat(result.getFinalInvoiceId()).isEqualTo(200L);
+        assertThat(reservation.getOperaReservationId()).isEqualTo(777001L);
+        verify(operaCheckInOrchestrator, never()).runIfEnabled(any(), anyList());
+        verify(operaInvoicePostingService).tryAutoPostInvoice(200L);
+    }
+
+    @Test
+    void getCheckinReadinessInhouseWithoutPostToOperaDoesNotRequireLink() {
+        long requestId = 23L;
+        BookingOperaProperties.CheckIn checkInCfg = new BookingOperaProperties.CheckIn();
+        checkInCfg.setEnabled(true);
+        when(bookingOperaProperties.getCheckIn()).thenReturn(checkInCfg);
+
+        ReservationRequest request = ReservationRequest.builder()
+                .id(requestId)
+                .tenantId(1L)
+                .type(ReservationRequest.Type.INHOUSE)
+                .status(ReservationRequest.Status.FINALIZED)
+                .expiresAt(null)
+                .build();
+        Reservation reservation = Reservation.builder()
+                .id(20L)
+                .tenantId(1L)
+                .requestType(ReservationRequest.Type.INHOUSE)
+                .status("CONFIRMED")
+                .startsAt(LocalDate.now().atStartOfDay())
+                .endsAt(LocalDate.now().atTime(23, 59))
+                .build();
+        when(requestRepo.findById(requestId)).thenReturn(Optional.of(request));
+        when(reservationRepo.findByRequestIdWithDetails(requestId)).thenReturn(List.of(reservation));
+
+        CheckinReadinessDto withoutPost = stayService.getCheckinReadiness(requestId, false, false);
+        assertThat(withoutPost.isEligible()).isTrue();
+        assertThat(withoutPost.getIssues()).isEmpty();
+
+        CheckinReadinessDto withPost = stayService.getCheckinReadiness(requestId, false, true);
+        assertThat(withPost.isEligible()).isFalse();
+        assertThat(withPost.getIssues()).anyMatch(s -> s.contains("Linked Opera reservation id"));
+    }
 }

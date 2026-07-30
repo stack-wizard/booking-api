@@ -77,11 +77,16 @@ public class ReservationStayService {
      */
     @Transactional(readOnly = true)
     public CheckinReadinessDto getCheckinReadiness(Long requestId) {
-        return getCheckinReadiness(requestId, false);
+        return getCheckinReadiness(requestId, false, false);
     }
 
     @Transactional(readOnly = true)
     public CheckinReadinessDto getCheckinReadiness(Long requestId, boolean skipOperaCheckIn) {
+        return getCheckinReadiness(requestId, skipOperaCheckIn, false);
+    }
+
+    @Transactional(readOnly = true)
+    public CheckinReadinessDto getCheckinReadiness(Long requestId, boolean skipOperaCheckIn, boolean postToOpera) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
         assertMatchingTenantIfPresent(request);
@@ -137,7 +142,9 @@ public class ReservationStayService {
             }
         }
         if (!skipOperaCheckIn && bookingOperaProperties.getCheckIn().isEnabled()) {
-            if (requiresOperaCheckIn(request)) {
+            boolean needLinkedPath = requiresLinkedOperaReservation(request, postToOpera);
+            boolean needOperaCreatePath = requiresOperaCheckIn(request);
+            if (needOperaCreatePath) {
                 for (Reservation reservation : buckets.dueToday()) {
                     if (reservation.getRequestedResource() == null
                             || !StringUtils.hasText(reservation.getRequestedResource().getOperaRoomId())) {
@@ -146,8 +153,12 @@ public class ReservationStayService {
                     }
                 }
             }
-            addLinkedOperaReservationIssues(request, issues);
-            addOperaChargeMappingIssues(request.getTenantId(), buckets.dueToday(), issues);
+            if (needLinkedPath) {
+                addLinkedOperaReservationIssues(request, issues);
+            }
+            if (needOperaCreatePath || needLinkedPath) {
+                addOperaChargeMappingIssues(request.getTenantId(), buckets.dueToday(), issues);
+            }
         }
 
         return readiness(issues.isEmpty(), issues, buckets, operaSkippable);
@@ -189,16 +200,24 @@ public class ReservationStayService {
 
     @Transactional
     public CheckinResultDto checkIn(Long requestId) {
-        return checkIn(requestId, false, null);
+        return checkIn(requestId, false, null, false);
     }
 
     @Transactional
     public CheckinResultDto checkIn(Long requestId, boolean skipOperaCheckIn) {
-        return checkIn(requestId, skipOperaCheckIn, null);
+        return checkIn(requestId, skipOperaCheckIn, null, false);
     }
 
     @Transactional
     public CheckinResultDto checkIn(Long requestId, boolean skipOperaCheckIn, Long finalInvoiceOperaReservationId) {
+        return checkIn(requestId, skipOperaCheckIn, finalInvoiceOperaReservationId, false);
+    }
+
+    @Transactional
+    public CheckinResultDto checkIn(Long requestId,
+                                    boolean skipOperaCheckIn,
+                                    Long finalInvoiceOperaReservationId,
+                                    boolean postToOpera) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
         assertMatchingTenantIfPresent(request);
@@ -225,9 +244,12 @@ public class ReservationStayService {
 
         ReservationRequest.Status previousStatus = request.getStatus();
         Long manualOperaReservationId = normalizePositiveLong(finalInvoiceOperaReservationId);
+        boolean inhouseWithoutOperaPost = request.getType() == ReservationRequest.Type.INHOUSE && !postToOpera;
         // Repair path: skip create/check-in on closed OHIP stays; still post deposit + final to manual id.
-        boolean skipOperaOrchestrator = skipOperaCheckIn || manualOperaReservationId != null;
+        // INHOUSE default: local check-in only unless postToOpera (requires pre-linked Opera reservation).
+        boolean skipOperaOrchestrator = skipOperaCheckIn || manualOperaReservationId != null || inhouseWithoutOperaPost;
         boolean postOperaMoneyToManualTarget = manualOperaReservationId != null;
+        boolean needLinkedPath = requiresLinkedOperaReservation(request, postToOpera);
         boolean requireChargeMappings = (!skipOperaOrchestrator || postOperaMoneyToManualTarget)
                 && bookingOperaProperties.getCheckIn().isEnabled();
 
@@ -256,6 +278,14 @@ public class ReservationStayService {
                     "No reservation lines are due for check-in today; future lines remain for later dates");
         }
 
+        if (needLinkedPath && !postOperaMoneyToManualTarget && !skipOperaCheckIn) {
+            List<String> linkedIssues = new ArrayList<>();
+            addLinkedOperaReservationIssues(request, linkedIssues);
+            if (!linkedIssues.isEmpty()) {
+                throw new IllegalStateException(String.join("; ", linkedIssues));
+            }
+        }
+
         if (requireChargeMappings) {
             List<String> chargeMappingBlockers = new ArrayList<>();
             List<Reservation> mappingScope = postOperaMoneyToManualTarget ? reservations : buckets.dueToday();
@@ -269,7 +299,7 @@ public class ReservationStayService {
             operaCheckInOrchestrator.postDepositPaymentIfNeeded(
                     request, manualOperaReservationId, resolveCurrency(reservations));
         } else if (!skipOperaOrchestrator) {
-            if (requiresLinkedOperaReservation(request)) {
+            if (needLinkedPath) {
                 propagateLinkedOperaReservation(buckets.dueToday(), request);
             } else {
                 operaCheckInOrchestrator.runIfEnabled(request, buckets.dueToday());
@@ -301,7 +331,7 @@ public class ReservationStayService {
             invoiceService.createDraftForFinalizedRequest(requestId);
             invoiceService.allocateReleasedDepositPaymentsToFinalRequestInvoice(requestId);
             Invoice finalInvoice = invoiceService.issueSystemFinalInvoiceForRequest(requestId);
-            if (postOperaMoneyToManualTarget && shouldPostFinalInvoiceToOpera(request)) {
+            if (postOperaMoneyToManualTarget && shouldPostFinalInvoiceToOpera(request, postToOpera)) {
                 OperaInvoicePostRequest postRequest = new OperaInvoicePostRequest();
                 postRequest.setReservationId(manualOperaReservationId);
                 try {
@@ -311,7 +341,8 @@ public class ReservationStayService {
                     log.warn("Opera final invoice post to manual reservation {} failed for request {}",
                             manualOperaReservationId, requestId, ex);
                 }
-            } else if (!skipOperaCheckIn && !postOperaMoneyToManualTarget && shouldPostFinalInvoiceToOpera(request)) {
+            } else if (!skipOperaCheckIn && !postOperaMoneyToManualTarget
+                    && shouldPostFinalInvoiceToOpera(request, postToOpera)) {
                 // Soft-fail: local check-in + issued invoice must not roll back if OHIP post fails.
                 operaInvoicePostingService.tryAutoPostInvoice(finalInvoice.getId());
             }
@@ -447,7 +478,7 @@ public class ReservationStayService {
     }
 
     private void addLinkedOperaReservationIssues(ReservationRequest request, List<String> issues) {
-        if (request == null || !requiresLinkedOperaReservation(request)) {
+        if (request == null) {
             return;
         }
         if (!StringUtils.hasText(request.getOperaHotelCode())) {
@@ -470,15 +501,29 @@ public class ReservationStayService {
                 && request.getLinkedOperaReservationId() == null;
     }
 
-    private boolean requiresLinkedOperaReservation(ReservationRequest request) {
-        return request != null && request.getType() == ReservationRequest.Type.INHOUSE
-                || request != null && request.getLinkedOperaReservationId() != null;
+    /**
+     * Linked OHIP reservation path: INHOUSE only when {@code postToOpera}; otherwise when a linked id is already set.
+     */
+    private boolean requiresLinkedOperaReservation(ReservationRequest request, boolean postToOpera) {
+        if (request == null) {
+            return false;
+        }
+        if (request.getType() == ReservationRequest.Type.INHOUSE) {
+            return postToOpera;
+        }
+        return request.getLinkedOperaReservationId() != null;
     }
 
-    private boolean shouldPostFinalInvoiceToOpera(ReservationRequest request) {
-        return request != null
-                && bookingOperaProperties.getCheckIn().isEnabled()
-                && request.getType() != ReservationRequest.Type.INTERNAL;
+    private boolean shouldPostFinalInvoiceToOpera(ReservationRequest request, boolean postToOpera) {
+        if (request == null
+                || !bookingOperaProperties.getCheckIn().isEnabled()
+                || request.getType() == ReservationRequest.Type.INTERNAL) {
+            return false;
+        }
+        if (request.getType() == ReservationRequest.Type.INHOUSE) {
+            return postToOpera;
+        }
+        return true;
     }
 
     private void propagateLinkedOperaReservation(List<Reservation> reservations, ReservationRequest request) {

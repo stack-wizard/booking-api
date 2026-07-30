@@ -23,4 +23,11 @@ public class CheckinRequest {
      * payment and final-invoice charges to this open Opera reservation id.
      */
     private Long finalInvoiceOperaReservationId;
+
+    /**
+     * INHOUSE only: when true, post final invoice to {@code linkedOperaReservationId}.
+     * Default false — lounge is usually included in the room rate and must not hit OHIP.
+     * Ignored for EXTERNAL / WALKIN (those still auto-post unless {@link #skipOperaCheckIn}).
+     */
+    private boolean postToOpera;
 }
