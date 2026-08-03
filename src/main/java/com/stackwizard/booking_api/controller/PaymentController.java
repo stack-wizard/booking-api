@@ -65,11 +65,28 @@ public class PaymentController {
     }
 
     @GetMapping("/transactions")
-    public Page<PaymentTransactionDto> transactions(PaymentTransactionSearchCriteria criteria,
-                                                    @RequestParam(defaultValue = "0") int page,
-                                                    @RequestParam(defaultValue = "20") int size,
-                                                    @RequestParam(defaultValue = "createdAt") String sortBy,
-                                                    @RequestParam(defaultValue = "desc") String sortDir) {
+    public Page<PaymentTransactionDto> transactions(
+            @ModelAttribute("criteria") PaymentTransactionSearchCriteria criteria,
+            @RequestParam(required = false) Long reservationRequestId,
+            @RequestParam(required = false) Long tenantId,
+            @RequestParam(required = false) Boolean onlyWithAvailableAmount,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+        if (criteria == null) {
+            criteria = new PaymentTransactionSearchCriteria();
+        }
+        // Flat query params as a reliable fallback when nested criteria.* binding is missed.
+        if (criteria.getReservationRequestId() == null && reservationRequestId != null) {
+            criteria.setReservationRequestId(reservationRequestId);
+        }
+        if (criteria.getTenantId() == null && tenantId != null) {
+            criteria.setTenantId(tenantId);
+        }
+        if (criteria.getOnlyWithAvailableAmount() == null && onlyWithAvailableAmount != null) {
+            criteria.setOnlyWithAvailableAmount(onlyWithAvailableAmount);
+        }
         Pageable pageable = buildPageable(page, size, sortBy, sortDir);
         return paymentTransactionService.search(criteria, pageable);
     }

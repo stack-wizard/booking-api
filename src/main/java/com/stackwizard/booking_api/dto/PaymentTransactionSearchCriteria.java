@@ -32,4 +32,10 @@ public class PaymentTransactionSearchCriteria {
 
     private BigDecimal amountMin;
     private BigDecimal amountMax;
+
+    /**
+     * When true, only return charge transactions whose remaining allocatable amount
+     * ({@code amount - allocated - refunded}) is not zero. Refund rows are excluded.
+     */
+    private Boolean onlyWithAvailableAmount;
 }

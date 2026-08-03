@@ -1,13 +1,18 @@
 package com.stackwizard.booking_api.repository.specification;
 
 import com.stackwizard.booking_api.dto.PaymentTransactionSearchCriteria;
+import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.PaymentTransaction;
+import jakarta.persistence.criteria.AbstractQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -63,11 +68,45 @@ public final class PaymentTransactionSpecifications {
             if (criteria.getAmountMax() != null) {
                 predicates.add(cb.lessThanOrEqualTo(root.get("amount"), criteria.getAmountMax()));
             }
+            if (Boolean.TRUE.equals(criteria.getOnlyWithAvailableAmount()) && query != null) {
+                predicates.add(availableAmountNotZero(root, query, cb));
+            }
 
             return predicates.isEmpty()
                     ? cb.conjunction()
                     : cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    /**
+     * Matches {@code PaymentTransactionService#availableAmount}: non-REFUND rows where
+     * {@code amount - allocated - refunded <> 0}.
+     */
+    private static Predicate availableAmountNotZero(Root<PaymentTransaction> root,
+                                                    AbstractQuery<?> query,
+                                                    CriteriaBuilder cb) {
+        Subquery<BigDecimal> allocatedSub = query.subquery(BigDecimal.class);
+        Root<InvoicePaymentAllocation> allocRoot = allocatedSub.from(InvoicePaymentAllocation.class);
+        allocatedSub.select(cb.coalesce(cb.sum(allocRoot.get("allocatedAmount")), BigDecimal.ZERO));
+        allocatedSub.where(cb.equal(allocRoot.get("paymentTransactionId"), root.get("id")));
+
+        Subquery<BigDecimal> refundedSub = query.subquery(BigDecimal.class);
+        Root<PaymentTransaction> refundRoot = refundedSub.from(PaymentTransaction.class);
+        refundedSub.select(cb.coalesce(cb.sum(cb.abs(refundRoot.get("amount"))), BigDecimal.ZERO));
+        refundedSub.where(
+                cb.equal(refundRoot.get("sourcePaymentTransactionId"), root.get("id")),
+                cb.equal(cb.upper(refundRoot.get("transactionType")), "REFUND"),
+                cb.equal(cb.upper(refundRoot.get("status")), "POSTED")
+        );
+
+        Expression<BigDecimal> available = cb.diff(
+                cb.diff(root.get("amount"), allocatedSub),
+                refundedSub
+        );
+        return cb.and(
+                cb.notEqual(cb.upper(root.get("transactionType")), "REFUND"),
+                cb.notEqual(available, BigDecimal.ZERO)
+        );
     }
 
     private static Predicate inUpperCase(CriteriaBuilder cb, Expression<String> field, List<String> values) {
