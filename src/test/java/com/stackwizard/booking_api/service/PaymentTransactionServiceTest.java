@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.dto.PaymentTransactionCreateRequest;
 import com.stackwizard.booking_api.dto.PaymentTransactionDto;
+import com.stackwizard.booking_api.dto.PaymentTransactionSearchCriteria;
 import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
@@ -11,11 +12,16 @@ import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository
 import com.stackwizard.booking_api.repository.PaymentEventRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.PaymentTransactionRepository;
+import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -38,6 +44,8 @@ class PaymentTransactionServiceTest {
     @Mock
     private InvoicePaymentAllocationRepository allocationRepo;
     @Mock
+    private ReservationRequestRepository reservationRequestRepo;
+    @Mock
     private PaymentCardTypeService paymentCardTypeService;
 
     private PaymentTransactionService service;
@@ -49,6 +57,7 @@ class PaymentTransactionServiceTest {
                 paymentIntentRepo,
                 paymentEventRepo,
                 allocationRepo,
+                reservationRequestRepo,
                 paymentCardTypeService
         );
     }
@@ -234,5 +243,73 @@ class PaymentTransactionServiceTest {
         assertThatThrownBy(() -> service.create(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("less than zero");
+    }
+
+    @Test
+    void searchOnlyWithAvailableAmountExcludesFullyAllocatedCharges() {
+        PaymentTransaction fullyAllocated = PaymentTransaction.builder()
+                .id(86L)
+                .tenantId(1L)
+                .reservationRequestId(514L)
+                .transactionType("CHARGE")
+                .paymentType("CARD")
+                .status("POSTED")
+                .currency("EUR")
+                .amount(new BigDecimal("295.00"))
+                .build();
+        PaymentTransaction partiallyOpen = PaymentTransaction.builder()
+                .id(87L)
+                .tenantId(1L)
+                .reservationRequestId(514L)
+                .transactionType("CHARGE")
+                .paymentType("CASH")
+                .status("POSTED")
+                .currency("EUR")
+                .amount(new BigDecimal("100.00"))
+                .build();
+
+        when(paymentTransactionRepo.findAll(any(Specification.class), any(Sort.class)))
+                .thenReturn(List.of(fullyAllocated, partiallyOpen));
+        when(allocationRepo.sumAllocatedByPaymentTransactionIds(List.of(86L, 87L))).thenReturn(List.of(
+                allocationSum(86L, new BigDecimal("295.00")),
+                allocationSum(87L, new BigDecimal("40.00"))
+        ));
+        when(paymentTransactionRepo.findBySourcePaymentTransactionId(86L)).thenReturn(List.of());
+        when(paymentTransactionRepo.findBySourcePaymentTransactionId(87L)).thenReturn(List.of());
+        when(reservationRequestRepo.findAllById(List.of(514L))).thenReturn(List.of(
+                com.stackwizard.booking_api.model.ReservationRequest.builder()
+                        .id(514L)
+                        .customerName("Ana Anić")
+                        .confirmationCode("CONF-514")
+                        .build()
+        ));
+
+        PaymentTransactionSearchCriteria criteria = new PaymentTransactionSearchCriteria();
+        criteria.setTenantId(1L);
+        criteria.setReservationRequestId(514L);
+        criteria.setOnlyWithAvailableAmount(true);
+
+        Page<PaymentTransactionDto> page = service.search(criteria, PageRequest.of(0, 100));
+
+        assertThat(page.getContent()).extracting(PaymentTransactionDto::getId).containsExactly(87L);
+        assertThat(page.getContent().get(0).getAvailableAmount()).isEqualByComparingTo("60.00");
+        assertThat(page.getContent().get(0).getCustomerName()).isEqualTo("Ana Anić");
+        assertThat(page.getContent().get(0).getConfirmationCode()).isEqualTo("CONF-514");
+        assertThat(page.getTotalElements()).isEqualTo(1);
+    }
+
+    private static InvoicePaymentAllocationRepository.PaymentTransactionAllocationSum allocationSum(
+            Long paymentTransactionId, BigDecimal totalAllocated) {
+        return new InvoicePaymentAllocationRepository.PaymentTransactionAllocationSum() {
+            @Override
+            public Long getPaymentTransactionId() {
+                return paymentTransactionId;
+            }
+
+            @Override
+            public BigDecimal getTotalAllocated() {
+                return totalAllocated;
+            }
+        };
     }
 }

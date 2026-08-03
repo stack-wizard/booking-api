@@ -7,14 +7,18 @@ import com.stackwizard.booking_api.dto.PaymentTransactionSearchCriteria;
 import com.stackwizard.booking_api.model.PaymentEvent;
 import com.stackwizard.booking_api.model.PaymentIntent;
 import com.stackwizard.booking_api.model.PaymentTransaction;
+import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.repository.InvoicePaymentAllocationRepository;
 import com.stackwizard.booking_api.repository.PaymentEventRepository;
 import com.stackwizard.booking_api.repository.PaymentIntentRepository;
 import com.stackwizard.booking_api.repository.PaymentTransactionRepository;
+import com.stackwizard.booking_api.repository.ReservationRequestRepository;
 import com.stackwizard.booking_api.repository.specification.PaymentTransactionSpecifications;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -58,32 +62,93 @@ public class PaymentTransactionService {
     private final PaymentIntentRepository paymentIntentRepo;
     private final PaymentEventRepository paymentEventRepo;
     private final InvoicePaymentAllocationRepository allocationRepo;
+    private final ReservationRequestRepository reservationRequestRepo;
     private final PaymentCardTypeService paymentCardTypeService;
 
     public PaymentTransactionService(PaymentTransactionRepository paymentTransactionRepo,
                                      PaymentIntentRepository paymentIntentRepo,
                                      PaymentEventRepository paymentEventRepo,
                                      InvoicePaymentAllocationRepository allocationRepo,
+                                     ReservationRequestRepository reservationRequestRepo,
                                      PaymentCardTypeService paymentCardTypeService) {
         this.paymentTransactionRepo = paymentTransactionRepo;
         this.paymentIntentRepo = paymentIntentRepo;
         this.paymentEventRepo = paymentEventRepo;
         this.allocationRepo = allocationRepo;
+        this.reservationRequestRepo = reservationRequestRepo;
         this.paymentCardTypeService = paymentCardTypeService;
     }
 
     @Transactional(readOnly = true)
     public Page<PaymentTransactionDto> search(PaymentTransactionSearchCriteria criteria, Pageable pageable) {
         PaymentTransactionSearchCriteria normalized = normalizeAndValidate(criteria);
-        Page<PaymentTransaction> page = paymentTransactionRepo.findAll(PaymentTransactionSpecifications.byCriteria(normalized), pageable);
-        List<Long> transactionIds = page.getContent().stream().map(PaymentTransaction::getId).toList();
+        boolean onlyWithAvailableAmount = Boolean.TRUE.equals(normalized.getOnlyWithAvailableAmount());
+        // availableAmount is derived (amount - allocated - refunded); filter after DTO mapping so it matches UI.
+        if (onlyWithAvailableAmount) {
+            normalized.setOnlyWithAvailableAmount(false);
+            Sort sort = pageable != null && pageable.getSort().isSorted()
+                    ? pageable.getSort()
+                    : Sort.by(Sort.Direction.DESC, "createdAt");
+            List<PaymentTransaction> all = paymentTransactionRepo.findAll(
+                    PaymentTransactionSpecifications.byCriteria(normalized), sort);
+            List<PaymentTransactionDto> withAvailable = toDtos(all).stream()
+                    .filter(dto -> dto.getAvailableAmount() != null
+                            && dto.getAvailableAmount().compareTo(BigDecimal.ZERO) != 0)
+                    .toList();
+            return toPage(withAvailable, pageable);
+        }
+
+        Page<PaymentTransaction> page = paymentTransactionRepo.findAll(
+                PaymentTransactionSpecifications.byCriteria(normalized), pageable);
+        return new PageImpl<>(toDtos(page.getContent()), pageable, page.getTotalElements());
+    }
+
+    private List<PaymentTransactionDto> toDtos(List<PaymentTransaction> transactions) {
+        if (transactions == null || transactions.isEmpty()) {
+            return List.of();
+        }
+        List<Long> transactionIds = transactions.stream().map(PaymentTransaction::getId).toList();
         Map<Long, BigDecimal> allocatedByTransactionId = allocatedByTransactionId(transactionIds);
         Map<Long, BigDecimal> refundedBySourceTransactionId = refundedBySourceTransactionId(transactionIds);
-        return page.map(tx -> toDto(
-                tx,
-                allocatedByTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO),
-                refundedBySourceTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO)
-        ));
+        Map<Long, ReservationRequest> requestsById = loadReservationRequests(transactions);
+        return transactions.stream()
+                .map(tx -> toDto(
+                        tx,
+                        allocatedByTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO),
+                        refundedBySourceTransactionId.getOrDefault(tx.getId(), BigDecimal.ZERO),
+                        tx.getReservationRequestId() != null
+                                ? requestsById.get(tx.getReservationRequestId())
+                                : null
+                ))
+                .toList();
+    }
+
+    private Map<Long, ReservationRequest> loadReservationRequests(List<PaymentTransaction> transactions) {
+        List<Long> requestIds = transactions.stream()
+                .map(PaymentTransaction::getReservationRequestId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        if (requestIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, ReservationRequest> byId = new HashMap<>();
+        for (ReservationRequest request : reservationRequestRepo.findAllById(requestIds)) {
+            if (request != null && request.getId() != null) {
+                byId.put(request.getId(), request);
+            }
+        }
+        return byId;
+    }
+
+    private static Page<PaymentTransactionDto> toPage(List<PaymentTransactionDto> items, Pageable pageable) {
+        Pageable effective = pageable != null ? pageable : Pageable.unpaged();
+        if (!effective.isPaged()) {
+            return new PageImpl<>(items, effective, items.size());
+        }
+        int from = (int) Math.min(effective.getOffset(), items.size());
+        int to = Math.min(from + effective.getPageSize(), items.size());
+        return new PageImpl<>(items.subList(from, to), effective, items.size());
     }
 
     @Transactional(readOnly = true)
@@ -92,8 +157,16 @@ public class PaymentTransactionService {
                 .map(tx -> toDto(
                         tx,
                         zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(tx.getId())),
-                        refundedAmountForSourcePaymentTransaction(tx.getId())
+                        refundedAmountForSourcePaymentTransaction(tx.getId()),
+                        loadReservationRequest(tx.getReservationRequestId())
                 ));
+    }
+
+    private ReservationRequest loadReservationRequest(Long reservationRequestId) {
+        if (reservationRequestId == null || reservationRequestId <= 0) {
+            return null;
+        }
+        return reservationRequestRepo.findById(reservationRequestId).orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -120,7 +193,8 @@ public class PaymentTransactionService {
         return toDto(
                 saved,
                 zeroSafe(allocationRepo.sumAllocatedByPaymentTransactionId(saved.getId())),
-                refundedAmountForSourcePaymentTransaction(saved.getId())
+                refundedAmountForSourcePaymentTransaction(saved.getId()),
+                loadReservationRequest(saved.getReservationRequestId())
         );
     }
 
@@ -269,7 +343,10 @@ public class PaymentTransactionService {
         return paymentTransactionRepo.save(tx);
     }
 
-    private PaymentTransactionDto toDto(PaymentTransaction transaction, BigDecimal allocatedAmount, BigDecimal refundedAmount) {
+    private PaymentTransactionDto toDto(PaymentTransaction transaction,
+                                        BigDecimal allocatedAmount,
+                                        BigDecimal refundedAmount,
+                                        ReservationRequest reservationRequest) {
         BigDecimal amount = money(zeroSafe(transaction.getAmount()));
         BigDecimal allocated = money(zeroSafe(allocatedAmount));
         BigDecimal refunded = money(zeroSafe(refundedAmount));
@@ -278,6 +355,8 @@ public class PaymentTransactionService {
                 .id(transaction.getId())
                 .tenantId(transaction.getTenantId())
                 .reservationRequestId(transaction.getReservationRequestId())
+                .customerName(reservationRequest != null ? reservationRequest.getCustomerName() : null)
+                .confirmationCode(reservationRequest != null ? reservationRequest.getConfirmationCode() : null)
                 .paymentIntentId(transaction.getPaymentIntentId())
                 .transactionType(transaction.getTransactionType())
                 .paymentType(transaction.getPaymentType())

@@ -16,6 +16,10 @@ public class PaymentTransactionDto {
     private Long id;
     private Long tenantId;
     private Long reservationRequestId;
+    /** Guest name from the linked reservation request (when present). */
+    private String customerName;
+    /** Confirmation code from the linked reservation request (when present). */
+    private String confirmationCode;
     private Long paymentIntentId;
     private String transactionType;
     private String paymentType;
