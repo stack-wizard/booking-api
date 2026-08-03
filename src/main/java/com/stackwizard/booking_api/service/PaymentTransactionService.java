@@ -18,7 +18,6 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -82,22 +81,6 @@ public class PaymentTransactionService {
     @Transactional(readOnly = true)
     public Page<PaymentTransactionDto> search(PaymentTransactionSearchCriteria criteria, Pageable pageable) {
         PaymentTransactionSearchCriteria normalized = normalizeAndValidate(criteria);
-        boolean onlyWithAvailableAmount = Boolean.TRUE.equals(normalized.getOnlyWithAvailableAmount());
-        // availableAmount is derived (amount - allocated - refunded); filter after DTO mapping so it matches UI.
-        if (onlyWithAvailableAmount) {
-            normalized.setOnlyWithAvailableAmount(false);
-            Sort sort = pageable != null && pageable.getSort().isSorted()
-                    ? pageable.getSort()
-                    : Sort.by(Sort.Direction.DESC, "createdAt");
-            List<PaymentTransaction> all = paymentTransactionRepo.findAll(
-                    PaymentTransactionSpecifications.byCriteria(normalized), sort);
-            List<PaymentTransactionDto> withAvailable = toDtos(all).stream()
-                    .filter(dto -> dto.getAvailableAmount() != null
-                            && dto.getAvailableAmount().compareTo(BigDecimal.ZERO) != 0)
-                    .toList();
-            return toPage(withAvailable, pageable);
-        }
-
         Page<PaymentTransaction> page = paymentTransactionRepo.findAll(
                 PaymentTransactionSpecifications.byCriteria(normalized), pageable);
         return new PageImpl<>(toDtos(page.getContent()), pageable, page.getTotalElements());
@@ -139,16 +122,6 @@ public class PaymentTransactionService {
             }
         }
         return byId;
-    }
-
-    private static Page<PaymentTransactionDto> toPage(List<PaymentTransactionDto> items, Pageable pageable) {
-        Pageable effective = pageable != null ? pageable : Pageable.unpaged();
-        if (!effective.isPaged()) {
-            return new PageImpl<>(items, effective, items.size());
-        }
-        int from = (int) Math.min(effective.getOffset(), items.size());
-        int to = Math.min(from + effective.getPageSize(), items.size());
-        return new PageImpl<>(items.subList(from, to), effective, items.size());
     }
 
     @Transactional(readOnly = true)
@@ -392,8 +365,11 @@ public class PaymentTransactionService {
             return Map.of();
         }
         Map<Long, BigDecimal> result = new HashMap<>();
-        for (Long transactionId : transactionIds) {
-            result.put(transactionId, refundedAmountForSourcePaymentTransaction(transactionId));
+        for (PaymentTransactionRepository.SourcePaymentRefundSum sum :
+                paymentTransactionRepo.sumRefundedBySourcePaymentTransactionIds(transactionIds)) {
+            if (sum.getSourcePaymentTransactionId() != null) {
+                result.put(sum.getSourcePaymentTransactionId(), money(zeroSafe(sum.getTotalRefunded())));
+            }
         }
         return result;
     }

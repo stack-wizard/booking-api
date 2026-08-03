@@ -1,13 +1,19 @@
 package com.stackwizard.booking_api.repository.specification;
 
 import com.stackwizard.booking_api.dto.PaymentTransactionSearchCriteria;
+import com.stackwizard.booking_api.model.InvoicePaymentAllocation;
 import com.stackwizard.booking_api.model.PaymentTransaction;
+import jakarta.persistence.criteria.AbstractQuery;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.Expression;
 import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+import org.hibernate.query.criteria.HibernateCriteriaBuilder;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -63,12 +69,51 @@ public final class PaymentTransactionSpecifications {
             if (criteria.getAmountMax() != null) {
                 predicates.add(cb.lessThanOrEqualTo(root.get("amount"), criteria.getAmountMax()));
             }
-            // onlyWithAvailableAmount is applied in PaymentTransactionService after availableAmount is computed.
+            if (Boolean.TRUE.equals(criteria.getOnlyWithAvailableAmount()) && query != null) {
+                predicates.add(availableAmountNotZero(root, query, cb));
+            }
 
             return predicates.isEmpty()
                     ? cb.conjunction()
                     : cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
+
+    /**
+     * Matches {@code PaymentTransactionService#availableAmount}: non-REFUND rows where
+     * {@code amount - allocated - refunded <> 0}.
+     */
+    private static Predicate availableAmountNotZero(Root<PaymentTransaction> root,
+                                                    AbstractQuery<?> query,
+                                                    CriteriaBuilder cb) {
+        if (!(cb instanceof HibernateCriteriaBuilder hcb)) {
+            throw new IllegalStateException("Hibernate CriteriaBuilder is required for available amount filtering");
+        }
+
+        Subquery<BigDecimal> allocatedSub = query.subquery(BigDecimal.class);
+        Root<InvoicePaymentAllocation> allocRoot = allocatedSub.from(InvoicePaymentAllocation.class);
+        allocatedSub.select(hcb.coalesce(hcb.sum(allocRoot.get("allocatedAmount")), BigDecimal.ZERO));
+        allocatedSub.where(hcb.equal(allocRoot.get("paymentTransactionId"), root.get("id")));
+
+        Subquery<BigDecimal> refundedSub = query.subquery(BigDecimal.class);
+        Root<PaymentTransaction> refundRoot = refundedSub.from(PaymentTransaction.class);
+        refundedSub.select(hcb.coalesce(
+                hcb.sum(hcb.abs(refundRoot.get("amount"))),
+                BigDecimal.ZERO));
+        refundedSub.where(
+                hcb.equal(refundRoot.get("sourcePaymentTransactionId"), root.get("id")),
+                hcb.equal(hcb.upper(refundRoot.get("transactionType")), "REFUND"),
+                hcb.equal(hcb.upper(refundRoot.get("status")), "POSTED")
+        );
+
+        Expression<BigDecimal> available = hcb.diff(
+                hcb.diff(root.get("amount"), allocatedSub),
+                refundedSub
+        );
+        return hcb.and(
+                hcb.notEqual(hcb.upper(root.get("transactionType")), "REFUND"),
+                hcb.notEqual(available, BigDecimal.ZERO)
+        );
     }
 
     private static Predicate inUpperCase(CriteriaBuilder cb, Expression<String> field, List<String> values) {

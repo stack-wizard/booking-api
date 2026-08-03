@@ -19,8 +19,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.math.BigDecimal;
@@ -247,16 +248,6 @@ class PaymentTransactionServiceTest {
 
     @Test
     void searchOnlyWithAvailableAmountExcludesFullyAllocatedCharges() {
-        PaymentTransaction fullyAllocated = PaymentTransaction.builder()
-                .id(86L)
-                .tenantId(1L)
-                .reservationRequestId(514L)
-                .transactionType("CHARGE")
-                .paymentType("CARD")
-                .status("POSTED")
-                .currency("EUR")
-                .amount(new BigDecimal("295.00"))
-                .build();
         PaymentTransaction partiallyOpen = PaymentTransaction.builder()
                 .id(87L)
                 .tenantId(1L)
@@ -268,14 +259,12 @@ class PaymentTransactionServiceTest {
                 .amount(new BigDecimal("100.00"))
                 .build();
 
-        when(paymentTransactionRepo.findAll(any(Specification.class), any(Sort.class)))
-                .thenReturn(List.of(fullyAllocated, partiallyOpen));
-        when(allocationRepo.sumAllocatedByPaymentTransactionIds(List.of(86L, 87L))).thenReturn(List.of(
-                allocationSum(86L, new BigDecimal("295.00")),
+        when(paymentTransactionRepo.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(partiallyOpen), PageRequest.of(0, 100), 1));
+        when(allocationRepo.sumAllocatedByPaymentTransactionIds(List.of(87L))).thenReturn(List.of(
                 allocationSum(87L, new BigDecimal("40.00"))
         ));
-        when(paymentTransactionRepo.findBySourcePaymentTransactionId(86L)).thenReturn(List.of());
-        when(paymentTransactionRepo.findBySourcePaymentTransactionId(87L)).thenReturn(List.of());
+        when(paymentTransactionRepo.sumRefundedBySourcePaymentTransactionIds(List.of(87L))).thenReturn(List.of());
         when(reservationRequestRepo.findAllById(List.of(514L))).thenReturn(List.of(
                 com.stackwizard.booking_api.model.ReservationRequest.builder()
                         .id(514L)
