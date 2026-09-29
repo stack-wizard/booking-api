@@ -35,6 +35,11 @@ begin
     select tenant_id from platform_tenant_mapping where tenant_id is not null
   ) t;
 
-  -- nextval will return max_tid + 1
-  perform setval('booking_tenant_id_seq', max_tid, true);
+  if max_tid < 1 then
+    -- Empty DB: nextval() must return 1 (setval cannot take 0).
+    perform setval('booking_tenant_id_seq', 1, false);
+  else
+    -- nextval() returns max_tid + 1
+    perform setval('booking_tenant_id_seq', max_tid, true);
+  end if;
 end $$;

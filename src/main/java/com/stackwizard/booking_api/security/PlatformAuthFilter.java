@@ -7,8 +7,6 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.core.Ordered;
-import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
@@ -29,9 +27,9 @@ import java.util.UUID;
 
 /**
  * After JWT authentication: enforce BOOKING entitlement / m2m scope, resolve tenant, sync user.
+ * Registered only via {@link SecurityConfig} (servlet FilterRegistrationBean is disabled).
  */
 @Component
-@Order(Ordered.LOWEST_PRECEDENCE - 80)
 public class PlatformAuthFilter extends OncePerRequestFilter {
 
     public static final String APP_CODE = "BOOKING";

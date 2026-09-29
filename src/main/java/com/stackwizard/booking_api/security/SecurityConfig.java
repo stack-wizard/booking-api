@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.security;
 
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -21,17 +22,11 @@ public class SecurityConfig {
     private static final String MONRI_CALLBACK_PATH = "/api/payments/providers/monri/callback/**";
     private static final String MONRI_CALLBACK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/callback/**";
 
-    private final PlatformAuthFilter platformAuthFilter;
-    private final PlatformJwtAuthenticationConverter jwtAuthenticationConverter;
-
-    public SecurityConfig(PlatformAuthFilter platformAuthFilter,
-                          PlatformJwtAuthenticationConverter jwtAuthenticationConverter) {
-        this.platformAuthFilter = platformAuthFilter;
-        this.jwtAuthenticationConverter = jwtAuthenticationConverter;
-    }
-
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                   PlatformAuthFilter platformAuthFilter,
+                                                   PlatformJwtAuthenticationConverter jwtAuthenticationConverter)
+            throws Exception {
         http
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
@@ -67,6 +62,19 @@ public class SecurityConfig {
             .addFilterAfter(platformAuthFilter, BearerTokenAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    /**
+     * PlatformAuthFilter depends on JPA; disable servlet-container registration so Tomcat
+     * does not instantiate it before EntityManagerFactory. It runs only via SecurityFilterChain.
+     */
+    @Bean
+    public FilterRegistrationBean<PlatformAuthFilter> platformAuthFilterRegistration(
+            PlatformAuthFilter platformAuthFilter) {
+        FilterRegistrationBean<PlatformAuthFilter> registration =
+                new FilterRegistrationBean<>(platformAuthFilter);
+        registration.setEnabled(false);
+        return registration;
     }
 
     @Bean
