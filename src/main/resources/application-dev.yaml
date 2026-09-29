@@ -9,7 +9,3 @@ spring:
 # booking:
 #   dev:
 #     reference-date: 2026-04-01
-
-security:
-  jwt:
-    secret: ${SECURITY_JWT_SECRET}

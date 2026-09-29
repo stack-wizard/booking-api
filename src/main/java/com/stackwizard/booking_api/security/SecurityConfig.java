@@ -2,17 +2,12 @@ package com.stackwizard.booking_api.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.AuthenticationProvider;
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
-import org.springframework.http.HttpMethod;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -26,23 +21,20 @@ public class SecurityConfig {
     private static final String MONRI_CALLBACK_PATH = "/api/payments/providers/monri/callback/**";
     private static final String MONRI_CALLBACK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/callback/**";
 
-    private final ApiTokenAuthenticationFilter apiTokenFilter;
-    private final JwtAuthenticationFilter jwtFilter;
-    private final UserDetailsServiceImpl userDetailsService;
+    private final PlatformAuthFilter platformAuthFilter;
+    private final PlatformJwtAuthenticationConverter jwtAuthenticationConverter;
 
-    public SecurityConfig(ApiTokenAuthenticationFilter apiTokenFilter,
-                          JwtAuthenticationFilter jwtFilter,
-                          UserDetailsServiceImpl userDetailsService) {
-        this.apiTokenFilter = apiTokenFilter;
-        this.jwtFilter = jwtFilter;
-        this.userDetailsService = userDetailsService;
+    public SecurityConfig(PlatformAuthFilter platformAuthFilter,
+                          PlatformJwtAuthenticationConverter jwtAuthenticationConverter) {
+        this.platformAuthFilter = platformAuthFilter;
+        this.jwtAuthenticationConverter = jwtAuthenticationConverter;
     }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors -> {})
+            .cors(Customizer.withDefaults())
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.POST, MONRI_WEBHOOK_PATH).permitAll()
@@ -53,10 +45,6 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH).permitAll()
                 .requestMatchers(HttpMethod.POST, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, MONRI_CALLBACK_PATH_PREFIXED).permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-                .requestMatchers(HttpMethod.OPTIONS, "/api/auth/login").permitAll()
-                .requestMatchers(HttpMethod.POST, "/booking-api/api/auth/login").permitAll()
-                .requestMatchers(HttpMethod.OPTIONS, "/booking-api/api/auth/login").permitAll()
                 .requestMatchers(
                     "/api/public/reservation-requests/**",
                     "/booking-api/api/public/reservation-requests/**",
@@ -73,28 +61,12 @@ public class SecurityConfig {
                 ).permitAll()
                 .anyRequest().authenticated()
             )
-            .authenticationProvider(authenticationProvider())
-            .addFilterBefore(apiTokenFilter, UsernamePasswordAuthenticationFilter.class)
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .oauth2ResourceServer(oauth2 -> oauth2
+                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+            )
+            .addFilterAfter(platformAuthFilter, BearerTokenAuthenticationFilter.class);
 
         return http.build();
-    }
-
-    @Bean
-    public AuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
-        provider.setPasswordEncoder(passwordEncoder());
-        return provider;
-    }
-
-    @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
-    }
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
     }
 
     @Bean
@@ -103,7 +75,7 @@ public class SecurityConfig {
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization"));
+        config.setExposedHeaders(List.of("Authorization", "X-Tenant-Id"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);

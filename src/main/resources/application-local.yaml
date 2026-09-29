@@ -7,10 +7,6 @@ spring:
     password: booking_pass
     driver-class-name: org.postgresql.Driver
 
-security:
-  jwt:
-    secret: "change_this_secret_key_please_32_chars_min"
-
 media:
   s3:
     app-alias: ${MEDIA_S3_APP_ALIAS:booking-api}

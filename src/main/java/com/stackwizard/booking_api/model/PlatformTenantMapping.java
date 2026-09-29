@@ -2,8 +2,6 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -17,42 +15,22 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "app_user")
+@Table(name = "platform_tenant_mapping")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class AppUser {
+public class PlatformTenantMapping {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_id")
+    @Column(name = "tenant_id", nullable = false, unique = true)
     private Long tenantId;
 
-    @Column(name = "platform_user_id", unique = true)
-    private UUID platformUserId;
-
-    @Column(nullable = false, unique = true)
-    private String username;
-
-    @Column(name = "password_hash")
-    private String passwordHash;
-
-    @Column(name = "employee_number")
-    private String employeeNumber;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private Role role;
+    @Column(name = "platform_tenant_id", nullable = false, unique = true)
+    private UUID platformTenantId;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
-
-    public enum Role {
-        SUPER_ADMIN,
-        ADMIN,
-        STAFF,
-        CASHIER
-    }
 }

@@ -1,22 +1,28 @@
 package com.stackwizard.booking_api.controller;
 
-import com.stackwizard.booking_api.dto.AuthLoginRequest;
 import com.stackwizard.booking_api.dto.AuthResponse;
-import com.stackwizard.booking_api.service.AuthService;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
+import com.stackwizard.booking_api.model.AppUser;
+import com.stackwizard.booking_api.security.AuthUserAccessor;
+import com.stackwizard.booking_api.service.ManagementAppUserService;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping({"/api/auth", "/booking-api/api/auth"})
 public class AuthController {
-    private final AuthService authService;
+    private final AuthUserAccessor authUserAccessor;
+    private final ManagementAppUserService managementAppUserService;
 
-    public AuthController(AuthService authService) { this.authService = authService; }
+    public AuthController(AuthUserAccessor authUserAccessor,
+                          ManagementAppUserService managementAppUserService) {
+        this.authUserAccessor = authUserAccessor;
+        this.managementAppUserService = managementAppUserService;
+    }
 
-    @PostMapping("/login")
-    public AuthResponse login(@RequestBody AuthLoginRequest request) {
-        return authService.login(request);
+    @GetMapping("/me")
+    public AuthResponse me() {
+        AppUser actor = authUserAccessor.requireAppUser();
+        return managementAppUserService.me(actor);
     }
 }

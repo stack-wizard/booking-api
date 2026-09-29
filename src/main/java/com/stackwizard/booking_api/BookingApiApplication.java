@@ -10,11 +10,9 @@ import com.stackwizard.booking_api.config.BookingDevProperties;
 import com.stackwizard.booking_api.config.BookingOperaProperties;
 import com.stackwizard.booking_api.config.MediaS3Properties;
 import com.stackwizard.booking_api.config.PaymentsProperties;
-import com.stackwizard.booking_api.security.JwtProperties;
 
 @SpringBootApplication
 @EnableConfigurationProperties({
-		JwtProperties.class,
 		MediaS3Properties.class,
 		PaymentsProperties.class,
 		BookingOperaProperties.class,

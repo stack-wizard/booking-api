@@ -2,13 +2,17 @@
   "info": {
     "name": "Booking API - Quick Requests",
     "_postman_id": "5d3f1b2a-0000-4000-8000-000000000001",
-    "description": "Sample requests for resources, products, pricing, calendars, and booking flow. Replace variables after creation.",
+    "description": "Sample requests for booking-api. Set collection variable jwt to a Mikos Platform access token (user JWT or m2m with scope booking.api). Send X-Tenant-Id = platform tenant UUID.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
     "type": "bearer",
     "bearer": [
-      { "key": "token", "value": "{{jwt}}", "type": "string" }
+      {
+        "key": "token",
+        "value": "{{jwt}}",
+        "type": "string"
+      }
     ]
   },
   "item": [
@@ -16,57 +20,92 @@
       "name": "Auth",
       "item": [
         {
-          "name": "Login",
+          "name": "Me",
           "request": {
-            "auth": { "type": "noauth" },
-            "method": "POST",
+            "method": "GET",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{platformTenantId}}",
+                "type": "text"
+              }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"username\": \"{{adminUsername}}\",\n  \"password\": \"{{adminPassword}}\"\n}"
-            },
             "url": {
-              "raw": "{{baseUrl}}/api/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","auth","login"]
+              "raw": "{{baseUrl}}/api/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
             }
           },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "var json = pm.response.json();",
-                  "if (json && json.token) {",
-                  "  pm.collectionVariables.set(\"jwt\", json.token);",
-                  "}",
-                  "if (json && json.tokenType) {",
-                  "  pm.collectionVariables.set(\"tokenType\", json.tokenType);",
-                  "}"
-                ]
-              }
-            }
-          ],
           "response": []
         },
         {
-          "name": "Create user (super admin)",
+          "name": "List users",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{platformTenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/management/users?tenantId={{tenantId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "management",
+                "users"
+              ],
+              "query": [
+                {
+                  "key": "tenantId",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update employee number",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Tenant-Id",
+                "value": "{{platformTenantId}}",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"tenantId\": 1,\n  \"username\": \"newcashier\",\n  \"password\": \"cashier123\",\n  \"role\": \"CASHIER\",\n  \"employeeNumber\": \"12\"\n}"
+              "raw": "{\n  \"employeeNumber\": \"12\"\n}"
             },
             "url": {
-              "raw": "{{baseUrl}}/api/management/users",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","management","users"]
+              "raw": "{{baseUrl}}/api/management/users/{{userId}}/employee-number",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "management",
+                "users",
+                "{{userId}}",
+                "employee-number"
+              ]
             }
           },
           "response": []
@@ -81,7 +120,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -89,8 +131,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/resource-types",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","resource-types"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resource-types"
+              ]
             }
           },
           "response": []
@@ -100,7 +147,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -108,8 +158,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/location-nodes",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","location-nodes"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "location-nodes"
+              ]
             }
           },
           "response": []
@@ -119,7 +174,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -127,8 +185,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/resources",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","resources"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "resources"
+              ]
             }
           },
           "response": []
@@ -138,7 +201,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -146,8 +212,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/booking-calendars",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","booking-calendars"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "booking-calendars"
+              ]
             }
           },
           "response": []
@@ -162,7 +233,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -170,8 +244,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/products",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","products"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
             }
           },
           "response": []
@@ -181,7 +260,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -189,8 +271,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/price-profiles",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","price-profiles"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "price-profiles"
+              ]
             }
           },
           "response": []
@@ -200,7 +287,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -208,8 +298,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/price-profile-dates",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","price-profile-dates"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "price-profile-dates"
+              ]
             }
           },
           "response": []
@@ -219,7 +314,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -227,8 +325,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/price-list",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","price-list"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "price-list"
+              ]
             }
           },
           "response": []
@@ -243,15 +346,29 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "url": {
               "raw": "{{baseUrl}}/api/availability?tenantId={{tenantId}}&date={{availabilityDate}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","availability"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "availability"
+              ],
               "query": [
-                { "key": "tenantId", "value": "{{tenantId}}" },
-                { "key": "date", "value": "{{availabilityDate}}" }
+                {
+                  "key": "tenantId",
+                  "value": "{{tenantId}}"
+                },
+                {
+                  "key": "date",
+                  "value": "{{availabilityDate}}"
+                }
               ]
             }
           },
@@ -262,7 +379,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -270,8 +390,14 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/reservations/book",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","reservations","book"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations",
+                "book"
+              ]
             }
           },
           "response": []
@@ -281,7 +407,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -289,8 +418,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/reservations",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","reservations"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservations"
+              ]
             }
           },
           "response": []
@@ -300,7 +434,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -308,8 +445,13 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/allocations",
-              "host": ["{{baseUrl}}"],
-              "path": ["api","allocations"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "allocations"
+              ]
             }
           },
           "response": []
@@ -318,22 +460,81 @@
     }
   ],
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:8080" },
-    { "key": "tenantId", "value": "1" },
-    { "key": "resourceTypeId", "value": "1" },
-    { "key": "locationId", "value": "10" },
-    { "key": "resourceId", "value": "100" },
-    { "key": "reservationId", "value": "200" },
-    { "key": "allocatedResourceId", "value": "101" },
-    { "key": "productId", "value": "300" },
-    { "key": "priceProfileId", "value": "400" },
-    { "key": "priceProfileDateId", "value": "500" },
-    { "key": "availabilityDate", "value": "2026-06-20" },
-    { "key": "jwt", "value": "" },
-    { "key": "tokenType", "value": "Bearer" },
-    { "key": "adminUsername", "value": "admin1" },
-    { "key": "adminPassword", "value": "admin123" },
-    { "key": "superadminUsername", "value": "superadmin" },
-    { "key": "superadminPassword", "value": "superadmin123" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "tenantId",
+      "value": "1"
+    },
+    {
+      "key": "resourceTypeId",
+      "value": "1"
+    },
+    {
+      "key": "locationId",
+      "value": "10"
+    },
+    {
+      "key": "resourceId",
+      "value": "100"
+    },
+    {
+      "key": "reservationId",
+      "value": "200"
+    },
+    {
+      "key": "allocatedResourceId",
+      "value": "101"
+    },
+    {
+      "key": "productId",
+      "value": "300"
+    },
+    {
+      "key": "priceProfileId",
+      "value": "400"
+    },
+    {
+      "key": "priceProfileDateId",
+      "value": "500"
+    },
+    {
+      "key": "availabilityDate",
+      "value": "2026-06-20"
+    },
+    {
+      "key": "jwt",
+      "value": ""
+    },
+    {
+      "key": "tokenType",
+      "value": "Bearer"
+    },
+    {
+      "key": "adminUsername",
+      "value": "admin1"
+    },
+    {
+      "key": "adminPassword",
+      "value": "admin123"
+    },
+    {
+      "key": "superadminUsername",
+      "value": "superadmin"
+    },
+    {
+      "key": "superadminPassword",
+      "value": "superadmin123"
+    },
+    {
+      "key": "platformTenantId",
+      "value": "21111111-1111-1111-1111-111111111111"
+    },
+    {
+      "key": "userId",
+      "value": "1"
+    }
   ]
 }
