@@ -1,12 +1,9 @@
 package com.stackwizard.booking_api.model;
 
- 
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.OffsetDateTime;
-
-
 
 @Entity
 @Table(name = "resource_type")
@@ -19,9 +16,6 @@ public class ResourceType {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "tenant_id", nullable = false)
-    private Long tenantId;
-
     @Column(nullable = false)
     private String code;
 
@@ -30,8 +24,6 @@ public class ResourceType {
 
     @Column(name = "default_time_model")
     private String defaultTimeModel;
-
-
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

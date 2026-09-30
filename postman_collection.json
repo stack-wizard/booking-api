@@ -116,19 +116,10 @@
       "name": "Setup",
       "item": [
         {
-          "name": "Create ResourceType",
+          "name": "List ResourceTypes",
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"tenantId\": 1,\n  \"code\": \"SUNBED\",\n  \"name\": \"Sun Bed\",\n  \"defaultTimeModel\": \"DAY\"\n}"
-            },
+            "method": "GET",
+            "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/resource-types",
               "host": [

@@ -15,8 +15,11 @@ public class ResourceTypeService {
         this.repo = repo;
     }
 
-    public List<ResourceType> findAll() { return repo.findAll(); }
-    public Optional<ResourceType> findById(Long id) { return repo.findById(id); }
-    public ResourceType save(ResourceType t) { return repo.save(t); }
-    public void deleteById(Long id) { repo.deleteById(id); }
+    public List<ResourceType> findAll() {
+        return repo.findAll();
+    }
+
+    public Optional<ResourceType> findById(Long id) {
+        return repo.findById(id);
+    }
 }

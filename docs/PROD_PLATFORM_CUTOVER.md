@@ -1,8 +1,20 @@
 # Production cutover: Mikos Platform auth for booking (single tenant)
 
 Run **after** mikos-platform migration `V27__booking_roles.sql` and booking-api migrations
-`V86` / `V87` are applied, and **before** switching booking-admin / booking-cms / booking-api
+`V86` / `V87` / `V88` are applied, and **before** switching booking-admin / booking-cms / booking-api
 traffic to Platform JWT.
+
+`V88` makes `resource_type` a **global** catalog (drops `tenant_id`). Before applying it on prod,
+check for duplicate codes with different names (the migration keeps the lowest `id` per code):
+
+```sql
+SELECT upper(code), count(*), array_agg(distinct name)
+FROM resource_type
+GROUP BY 1
+HAVING count(*) > 1;
+```
+
+After V88, all tenants share the same types; new types are added only via Flyway.
 
 Replace placeholders:
 

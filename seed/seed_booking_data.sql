@@ -1,16 +1,7 @@
 -- Seed data (manual run, not managed by Flyway)
 
 -- resource
--- prerequisites: resource_type + location_node
-insert into resource_type (tenant_id, code, name, default_time_model)
-values
-  (1, 'SUNBED', 'Sunbed', null),
-  (1, 'DECK_CABANA', 'Deck Cabana', null),
-  (1, 'BALDAHIN', 'Baldahin', null),
-  (1, 'APARTMENT', 'Apartment', null),
-  (1, 'COMPOSITION', 'Composition', null)
-on conflict (tenant_id, code) do nothing;
-
+-- prerequisites: resource_type (global catalog from V88) + location_node
 insert into location_node (tenant_id, parent_id, node_type, code, name, sort_order)
 values (1, null, 'BEACH', 'BEACH_1', 'Beach Area 1', 1)
 on conflict (tenant_id, parent_id, name) do nothing;
@@ -28,7 +19,7 @@ select
   'ACTIVE',
   1, 1, 0, 0, 1
 from generate_series(1, 62) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'SUNBED'
+join resource_type rt on rt.code = 'SUNBED'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -37,7 +28,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'B' || gs, 'Baldahin ' || gs, 'ACTIVE', 1, 2, 0, 0, 2
 from generate_series(1, 5) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'BALDAHIN'
+join resource_type rt on rt.code = 'BALDAHIN'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -46,7 +37,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'A' || gs, 'Apartment ' || gs, 'ACTIVE', 1, 2, 0, 0, 2
 from generate_series(1, 6) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'APARTMENT'
+join resource_type rt on rt.code = 'APARTMENT'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -55,7 +46,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'DD' || gs, 'Deck Duo ' || gs, 'ACTIVE', 1, 2, 0, 0, 2
 from generate_series(1, 3) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+join resource_type rt on rt.code = 'COMPOSITION'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -65,7 +56,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
 select 1, rt.id, 'EXACT', loc.id, 'C1', 'Deck Cabana 1', 'ACTIVE', 1, 2, 0, 0, 2
 from resource_type rt
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
-where rt.tenant_id = 1 and rt.code = 'DECK_CABANA'
+where rt.code = 'DECK_CABANA'
 on conflict (tenant_id, code) do nothing;
 
 -- 5 Peninsulas (P1-P5) as COMPOSITION
@@ -73,7 +64,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'P' || gs, 'Peninsula ' || gs, 'ACTIVE', 1, 4, 0, 0, 4
 from generate_series(1, 5) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+join resource_type rt on rt.code = 'COMPOSITION'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -82,7 +73,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'L' || gs, 'Luxury Sunbed ' || gs, 'ACTIVE', 1, 2, 0, 0, 2
 from generate_series(1, 5) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+join resource_type rt on rt.code = 'COMPOSITION'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -92,7 +83,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
 select 1, rt.id, 'EXACT', loc.id, 'GL1', 'Grand Luxury 1', 'ACTIVE', 1, 6, 0, 0, 6
 from resource_type rt
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
-where rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+where rt.code = 'COMPOSITION'
 on conflict (tenant_id, code) do nothing;
 
 -- Bespoke Luxury BL1-BL5 as COMPOSITION
@@ -100,7 +91,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
                       unit_count, cap_adults, cap_children, cap_infants, cap_total)
 select 1, rt.id, 'EXACT', loc.id, 'BL' || gs, 'Bespoke Luxury ' || gs, 'ACTIVE', 1, 6, 0, 0, 6
 from generate_series(1, 5) gs
-join resource_type rt on rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+join resource_type rt on rt.code = 'COMPOSITION'
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
 on conflict (tenant_id, code) do nothing;
 
@@ -110,7 +101,7 @@ insert into resource (tenant_id, resource_type_id, kind, location_id, code, name
 select 1, rt.id, 'EXACT', loc.id, 'BD1', 'Bespoke Deluxe 1', 'ACTIVE', 1, 8, 0, 0, 8
 from resource_type rt
 left join location_node loc on loc.tenant_id = 1 and loc.code = 'BEACH_1'
-where rt.tenant_id = 1 and rt.code = 'COMPOSITION'
+where rt.code = 'COMPOSITION'
 on conflict (tenant_id, code) do nothing;
 
 -- resource_composition

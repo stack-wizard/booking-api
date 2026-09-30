@@ -50,7 +50,6 @@ class AvailabilityServiceTest {
                 .build();
         ResourceType exactType = ResourceType.builder()
                 .id(2L)
-                .tenantId(tenantId)
                 .code("EXACT")
                 .name("Exact")
                 .build();
@@ -174,13 +173,11 @@ class AvailabilityServiceTest {
                 .build();
         ResourceType compositionType = ResourceType.builder()
                 .id(1L)
-                .tenantId(tenantId)
                 .code("COMPOSITION")
                 .name("Composition")
                 .build();
         ResourceType exactType = ResourceType.builder()
                 .id(2L)
-                .tenantId(tenantId)
                 .code("EXACT")
                 .name("Exact")
                 .build();
