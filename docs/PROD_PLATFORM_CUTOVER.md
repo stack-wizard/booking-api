@@ -152,7 +152,13 @@ WHERE id = :booking_app_user_id
 
 ## 4. booking-cms
 
-Set tenant field `platformTenantId` = `:platform_tenant_id` (and keep `bookingTenantId`).
+Set CMS tenant fields:
+- `platformTenantId` = `:platform_tenant_id`
+- `domains` = public hostname(s), e.g. `booking.beachhvar.com`
+- `slug` = short code for forotel override (`https://web.forotel.com/cms?tenant=<slug>`)
+
+CMS no longer stores a local booking tenant id; booking-api resolves it from `X-Tenant-Id`
+via `platform_tenant_mapping`.
 
 ## 5. Smoke test after deploy
 

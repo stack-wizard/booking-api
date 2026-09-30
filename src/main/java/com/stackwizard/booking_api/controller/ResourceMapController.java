@@ -40,7 +40,7 @@ public class ResourceMapController {
     }
 
     @GetMapping("/periods")
-    public ResourceMapPeriodsResponse periods(@RequestParam Long tenantId,
+    public ResourceMapPeriodsResponse periods(@RequestParam(required = false) Long tenantId,
                                               @RequestParam(required = false) Long locationId,
                                               @RequestParam(required = false) LocalDate fromDate) {
         Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);

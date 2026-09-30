@@ -1,5 +1,11 @@
 package com.stackwizard.booking_api.security;
 
+/**
+ * Resolves the active booking tenant. When {@link TenantContext} is set (Platform JWT /
+ * m2m + X-Tenant-Id), that value wins; a client-supplied bigint is optional and only
+ * validated for mismatch. Callers should prefer {@link #requireTenantId()} and stop
+ * requiring local tenant ids from CMS/clients.
+ */
 public final class TenantResolver {
     private TenantResolver() {
     }
@@ -13,6 +19,11 @@ public final class TenantResolver {
             return tokenTenantId;
         }
         return requestTenantId;
+    }
+
+    /** Tenant from auth context, or from optional request value when unauthenticated. */
+    public static Long requireTenantId() {
+        return requireTenantId(null);
     }
 
     public static Long requireTenantId(Long requestTenantId) {

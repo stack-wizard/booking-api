@@ -19,7 +19,7 @@ public class AvailabilityController {
     public AvailabilityController(AvailabilityService service) { this.service = service; }
 
     @GetMapping
-    public AvailabilityResponse getAvailability(@RequestParam Long tenantId,
+    public AvailabilityResponse getAvailability(@RequestParam(required = false) Long tenantId,
                                                 @RequestParam LocalDate date,
                                                 @RequestParam(required = false) Long locationId,
                                                 @RequestParam(required = false) String requestType) {

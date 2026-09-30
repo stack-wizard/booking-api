@@ -28,9 +28,6 @@ public class TenantIntegrationConfigController {
 
     @GetMapping
     public List<TenantIntegrationConfig> all(@RequestParam(required = false) Long tenantId) {
-        if (tenantId == null) {
-            return service.findAll();
-        }
         Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
         return service.findByTenantId(resolvedTenantId);
     }
