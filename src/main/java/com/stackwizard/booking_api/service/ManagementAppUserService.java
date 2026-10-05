@@ -5,6 +5,7 @@ import com.stackwizard.booking_api.dto.ManagementAppUserResponse;
 import com.stackwizard.booking_api.dto.ManagementUpdateEmployeeNumberRequest;
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.repository.AppUserRepository;
+import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.TenantContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -17,9 +18,11 @@ import java.util.List;
 public class ManagementAppUserService {
 
     private final AppUserRepository userRepo;
+    private final CrmAccessContext crmAccessContext;
 
-    public ManagementAppUserService(AppUserRepository userRepo) {
+    public ManagementAppUserService(AppUserRepository userRepo, CrmAccessContext crmAccessContext) {
         this.userRepo = userRepo;
+        this.crmAccessContext = crmAccessContext;
     }
 
     @Transactional(readOnly = true)
@@ -33,6 +36,7 @@ public class ManagementAppUserService {
                 .username(actor.getUsername())
                 .employeeNumber(actor.getEmployeeNumber())
                 .role(actor.getRole().name())
+                .roles(crmAccessContext.roleNamesForMe())
                 .tenantId(tenantId)
                 .build();
     }
