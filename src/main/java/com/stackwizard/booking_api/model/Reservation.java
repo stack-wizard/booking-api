@@ -34,6 +34,9 @@ public class Reservation {
     @JoinColumn(name = "request_id")
     private ReservationRequest request;
 
+    @Column(name = "event_function_id")
+    private Long eventFunctionId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "request_type", nullable = false)
     private ReservationRequest.Type requestType;

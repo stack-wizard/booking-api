@@ -150,7 +150,10 @@ public class ReservationService {
         }
 
         Reservation saved = saveHoldReservation(r);
+        return allocationRepo.saveAll(buildHoldAllocations(saved, res, starts, ends));
+    }
 
+    private List<Allocation> buildHoldAllocations(Reservation saved, Resource res, LocalDateTime starts, LocalDateTime ends) {
         List<ResourceComposition> members = compositionRepo.findByParentResourceId(res.getId());
         boolean isComposition = isCompositionResource(res);
         List<Allocation> allocations = new ArrayList<>();
@@ -200,8 +203,156 @@ public class ReservationService {
                 }
             }
         }
+        return allocations;
+    }
 
-        return allocationRepo.saveAll(allocations);
+    /**
+     * Rent line for an event function. The line has no reservation_request; it is priced from
+     * price_list (INTERNAL profile) because the request-based hold path clears prices for INTERNAL.
+     */
+    @Transactional
+    public Reservation holdEventFunctionLine(EventLineCommand command) {
+        if (command.resourceId() == null) {
+            throw new IllegalArgumentException("Function has no space");
+        }
+        LocalDateTime starts = command.startsAt();
+        LocalDateTime ends = command.endsAt();
+        if (starts == null || ends == null || !ends.isAfter(starts)) {
+            throw new IllegalArgumentException("Invalid occupancy window");
+        }
+        Resource resource = resourceRepo.findByIdWithType(command.resourceId())
+                .filter(r -> command.tenantId().equals(r.getTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException("Space not found: " + command.resourceId()));
+
+        Reservation line = Reservation.builder()
+                .tenantId(command.tenantId())
+                .eventFunctionId(command.eventFunctionId())
+                .requestType(ReservationRequest.Type.INTERNAL)
+                .requestedResource(resource)
+                .startsAt(starts)
+                .endsAt(ends)
+                .status("HOLD")
+                .adults(0)
+                .children(0)
+                .infants(0)
+                .customerName(command.customerName())
+                .customerEmail(command.customerEmail())
+                .customerPhone(command.customerPhone())
+                .currency(normalizeCurrency(command.currency()))
+                .expiresAt(command.expiresAt())
+                .build();
+        if (command.includedInPackage()) {
+            applyPackageIncludedRent(line, resource);
+        } else {
+            applyEventLinePricing(line, resource);
+        }
+        Reservation saved = repo.save(line);
+        allocationRepo.saveAll(buildHoldAllocations(saved, resource, starts, ends));
+        return saved;
+    }
+
+    @Transactional
+    public void confirmEventLines(List<Reservation> lines) {
+        setEventLineState(lines, "CONFIRMED", null);
+    }
+
+    @Transactional
+    public void extendEventLineHolds(List<Reservation> lines, OffsetDateTime expiresAt) {
+        setEventLineState(lines, "HOLD", expiresAt);
+    }
+
+    @Transactional
+    public void releaseEventLines(List<Reservation> lines) {
+        setEventLineState(lines, "CANCELLED", null);
+    }
+
+    private void setEventLineState(List<Reservation> lines, String status, OffsetDateTime expiresAt) {
+        List<Reservation> active = lines.stream()
+                .filter(r -> r.getEventFunctionId() != null && !"CANCELLED".equalsIgnoreCase(r.getStatus()))
+                .toList();
+        if (active.isEmpty()) {
+            return;
+        }
+        for (Reservation reservation : active) {
+            reservation.setStatus(status);
+            reservation.setExpiresAt(expiresAt);
+        }
+        repo.saveAllAndFlush(active);
+        List<Allocation> allocations = allocationRepo.findByReservationIdIn(active.stream().map(Reservation::getId).toList());
+        for (Allocation allocation : allocations) {
+            allocation.setStatus(status);
+            allocation.setExpiresAt(expiresAt);
+        }
+        allocationRepo.saveAllAndFlush(allocations);
+    }
+
+    private void applyEventLinePricing(Reservation line, Resource resource) {
+        Product product = resolveReservationProduct(line, resource);
+        String uom = BookingUom.normalize(product.getDefaultUom());
+        List<PriceListEntry> priceEntries = priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(),
+                uom,
+                line.getCurrency(),
+                line.getTenantId(),
+                line.getStartsAt().toLocalDate(),
+                ReservationRequest.Type.INTERNAL
+        );
+        if (priceEntries.isEmpty()) {
+            throw new IllegalArgumentException("No rent price for " + product.getName() + " (" + uom + ") on "
+                    + line.getStartsAt().toLocalDate());
+        }
+        PriceListEntry selectedPrice = selectPriceEntry(priceEntries, line.getStartsAt(), line.getEndsAt());
+        int qty = deriveEventLineQty(uom, line.getStartsAt(), line.getEndsAt());
+        BigDecimal unitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
+        line.setProductId(product.getId());
+        line.setUom(uom);
+        line.setQty(qty);
+        line.setUnitPrice(unitPrice);
+        line.setGrossAmount(money(unitPrice.multiply(BigDecimal.valueOf(qty))));
+    }
+
+    private void applyPackageIncludedRent(Reservation line, Resource resource) {
+        Product product = resource.getProduct();
+        if (product == null) {
+            line.setQty(0);
+            line.setUnitPrice(BigDecimal.ZERO.setScale(2));
+            line.setGrossAmount(BigDecimal.ZERO.setScale(2));
+            return;
+        }
+        String uom = BookingUom.normalize(product.getDefaultUom());
+        line.setProductId(product.getId());
+        line.setUom(uom);
+        line.setQty(deriveEventLineQty(uom, line.getStartsAt(), line.getEndsAt()));
+        line.setUnitPrice(BigDecimal.ZERO.setScale(2));
+        line.setGrossAmount(BigDecimal.ZERO.setScale(2));
+    }
+
+    static int deriveEventLineQty(String uom, LocalDateTime startsAt, LocalDateTime endsAt) {
+        long minutes = java.time.Duration.between(startsAt, endsAt).toMinutes();
+        if ("MINUTE".equalsIgnoreCase(uom)) {
+            return (int) minutes;
+        }
+        if ("HOUR".equalsIgnoreCase(uom)) {
+            return (int) Math.ceilDiv(minutes, 60L);
+        }
+        if ("DAY".equalsIgnoreCase(uom) || "HALF_DAY".equalsIgnoreCase(uom)) {
+            LocalDateTime lastInstant = endsAt.minusNanos(1);
+            return (int) java.time.temporal.ChronoUnit.DAYS.between(startsAt.toLocalDate(), lastInstant.toLocalDate()) + 1;
+        }
+        return 1;
+    }
+
+    public record EventLineCommand(Long tenantId,
+                                   Long eventFunctionId,
+                                   Long resourceId,
+                                   LocalDateTime startsAt,
+                                   LocalDateTime endsAt,
+                                   String currency,
+                                   String customerName,
+                                   String customerEmail,
+                                   String customerPhone,
+                                   OffsetDateTime expiresAt,
+                                   boolean includedInPackage) {
     }
 
     @Transactional

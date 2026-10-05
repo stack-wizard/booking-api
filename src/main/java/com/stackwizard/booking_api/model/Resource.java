@@ -4,6 +4,7 @@ package com.stackwizard.booking_api.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 
@@ -78,6 +79,14 @@ public class Resource {
 
     @Column(name = "cap_total", nullable = false)
     private Integer capTotal;
+
+    @Column(name = "area_sqm")
+    private BigDecimal areaSqm;
+
+    private String floor;
+
+    @Column(name = "natural_light")
+    private Boolean naturalLight;
 
 
 

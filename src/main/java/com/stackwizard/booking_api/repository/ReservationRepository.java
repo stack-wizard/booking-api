@@ -18,4 +18,15 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
     List<Reservation> findByRequestIdsWithDetails(@Param("requestIds") Collection<Long> requestIds);
 
     boolean existsByRequestId(Long requestId);
+
+    List<Reservation> findByTenantIdAndEventFunctionIdIn(Long tenantId, Collection<Long> eventFunctionIds);
+
+    @Query("""
+            select r from Reservation r
+            where r.tenantId = :tenantId
+              and r.eventFunctionId = :eventFunctionId
+              and upper(r.status) <> 'CANCELLED'
+            """)
+    List<Reservation> findActiveByEventFunctionId(@Param("tenantId") Long tenantId,
+                                                  @Param("eventFunctionId") Long eventFunctionId);
 }

@@ -16,12 +16,12 @@ import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "function_space_setup")
+@Table(name = "event_status_history")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class FunctionSpaceSetup {
+public class EventStatusHistory {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -29,17 +29,24 @@ public class FunctionSpaceSetup {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "function_space_id", nullable = false)
-    private Long functionSpaceId;
+    @Column(name = "event_id", nullable = false)
+    private Long eventId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "setup_style", nullable = false)
-    private FunctionSpace.SetupStyle setupStyle;
+    @Column(name = "from_status")
+    private Event.Status fromStatus;
 
-    @Column(nullable = false)
-    private Integer capacity;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "to_status", nullable = false)
+    private Event.Status toStatus;
 
-    private String notes;
+    @Column(name = "outcome_reason_id")
+    private Long outcomeReasonId;
+
+    private String note;
+
+    @Column(name = "changed_by")
+    private Long changedBy;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

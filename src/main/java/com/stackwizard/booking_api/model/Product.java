@@ -5,6 +5,8 @@ import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Column;
 import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -77,6 +79,10 @@ public class Product {
     @Column(name = "tax2_percent", nullable = false)
     private BigDecimal tax2Percent;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "package_pricing")
+    private PackagePricing packagePricing;
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC, id ASC")
     @Builder.Default
@@ -98,5 +104,9 @@ public class Product {
                 .or(() -> images.stream().findFirst())
                 .map(ProductImage::getImageUrl)
                 .orElse(null);
+    }
+
+    public enum PackagePricing {
+        SUM, SPLIT_PERCENT, SPLIT_FIXED
     }
 }

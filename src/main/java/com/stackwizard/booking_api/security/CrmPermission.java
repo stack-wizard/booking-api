@@ -8,5 +8,7 @@ public enum CrmPermission {
     OPPORTUNITY_CLOSE,
     PIPELINE_CONFIG,
     ACTIVITY_WRITE,
-    REPORT_READ
+    REPORT_READ,
+    EVENT_READ,
+    EVENT_WRITE
 }

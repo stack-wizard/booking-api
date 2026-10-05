@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface CrmOutcomeReasonRepository extends JpaRepository<CrmOutcomeReason, Long> {
     List<CrmOutcomeReason> findByTenantIdOrderByDisplayOrderAsc(Long tenantId);
     Optional<CrmOutcomeReason> findByIdAndTenantId(Long id, Long tenantId);
+    Optional<CrmOutcomeReason> findFirstByTenantIdAndKindAndCodeIgnoreCase(Long tenantId, CrmOutcomeReason.Kind kind, String code);
 }

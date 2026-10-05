@@ -19,7 +19,9 @@ public final class CrmPermissionCatalog {
                 CrmPermission.ACCOUNT_WRITE,
                 CrmPermission.OPPORTUNITY_READ,
                 CrmPermission.OPPORTUNITY_WRITE,
-                CrmPermission.ACTIVITY_WRITE
+                CrmPermission.ACTIVITY_WRITE,
+                CrmPermission.EVENT_READ,
+                CrmPermission.EVENT_WRITE
         );
         PERMISSIONS.put(CrmRole.SALES_REP, Collections.unmodifiableSet(rep));
         SCOPES.put(CrmRole.SALES_REP, CrmScope.OWN);
@@ -34,14 +36,17 @@ public final class CrmPermissionCatalog {
         PERMISSIONS.put(CrmRole.EVENT_COORDINATOR, Collections.unmodifiableSet(EnumSet.of(
                 CrmPermission.ACCOUNT_READ,
                 CrmPermission.OPPORTUNITY_READ,
-                CrmPermission.ACTIVITY_WRITE
+                CrmPermission.ACTIVITY_WRITE,
+                CrmPermission.EVENT_READ,
+                CrmPermission.EVENT_WRITE
         )));
         SCOPES.put(CrmRole.EVENT_COORDINATOR, CrmScope.TEAM);
 
         PERMISSIONS.put(CrmRole.REVENUE_MANAGER, Collections.unmodifiableSet(EnumSet.of(
                 CrmPermission.ACCOUNT_READ,
                 CrmPermission.OPPORTUNITY_READ,
-                CrmPermission.REPORT_READ
+                CrmPermission.REPORT_READ,
+                CrmPermission.EVENT_READ
         )));
         SCOPES.put(CrmRole.REVENUE_MANAGER, CrmScope.ALL);
     }
