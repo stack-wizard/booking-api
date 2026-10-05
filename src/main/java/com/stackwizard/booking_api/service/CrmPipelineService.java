@@ -59,6 +59,9 @@ public class CrmPipelineService {
         if (pipeline.getActive() == null) {
             pipeline.setActive(true);
         }
+        if (Boolean.TRUE.equals(pipeline.getIsDefault())) {
+            pipelineRepo.clearDefault(pipeline.getTenantId(), null);
+        }
         return pipelineRepo.save(pipeline);
     }
 
@@ -71,6 +74,9 @@ public class CrmPipelineService {
         existing.setName(changes.getName());
         existing.setDescription(changes.getDescription());
         if (changes.getIsDefault() != null) {
+            if (changes.getIsDefault()) {
+                pipelineRepo.clearDefault(existing.getTenantId(), existing.getId());
+            }
             existing.setIsDefault(changes.getIsDefault());
         }
         if (changes.getActive() != null) {

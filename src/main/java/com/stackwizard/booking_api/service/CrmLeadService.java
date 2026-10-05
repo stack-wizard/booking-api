@@ -203,7 +203,7 @@ public class CrmLeadService {
                 .currency("EUR")
                 .source(lead.getSource())
                 .status(CrmOpportunity.Status.OPEN)
-                .attrs(objectMapper.createObjectNode())
+                .attrs(lead.getAttrs() != null ? lead.getAttrs().deepCopy() : objectMapper.createObjectNode())
                 .build());
 
         transitionRepo.save(CrmStageTransition.builder()
