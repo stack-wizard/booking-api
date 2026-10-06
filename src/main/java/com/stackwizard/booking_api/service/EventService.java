@@ -67,6 +67,7 @@ public class EventService {
     private final EventReservationSync reservationSync;
     private final EventItemPricing itemPricing;
     private final CrmAccessContext accessContext;
+    private final CrmTeamDirectory teamDirectory;
     private final TransactionTemplate transactionTemplate;
     private final SalesQuoteRepository quoteRepo;
     private final boolean definiteRequiresAcceptedQuote;
@@ -82,6 +83,7 @@ public class EventService {
                         EventReservationSync reservationSync,
                         EventItemPricing itemPricing,
                         CrmAccessContext accessContext,
+                        CrmTeamDirectory teamDirectory,
                         PlatformTransactionManager transactionManager,
                         SalesQuoteRepository quoteRepo,
                         @Value("${crm.events.definite-requires-accepted-quote:true}") boolean definiteRequiresAcceptedQuote) {
@@ -95,6 +97,7 @@ public class EventService {
         this.reservationSync = reservationSync;
         this.itemPricing = itemPricing;
         this.accessContext = accessContext;
+        this.teamDirectory = teamDirectory;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.quoteRepo = quoteRepo;
         this.definiteRequiresAcceptedQuote = definiteRequiresAcceptedQuote;
@@ -105,13 +108,13 @@ public class EventService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return eventRepo.findScoped(TenantResolver.requireTenantId(), status, accountId,
                 from != null ? from : MIN_DATE, to != null ? to : MAX_DATE,
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds());
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
     }
 
     public Optional<Event> findById(Long id) {
         accessContext.require(CrmPermission.EVENT_READ);
         return eventRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(e -> CrmOwnerScope.from(accessContext).allows(e.getOwnerUserId()));
+                .filter(e -> CrmOwnerScope.from(accessContext).allows(e.getOwnerUserId(), e.getTeamId()));
     }
 
     /** Tenant-scoped lookup without the caller's CRM scope, for scheduled jobs and the client portal. */
@@ -123,7 +126,7 @@ public class EventService {
         accessContext.require(CrmPermission.EVENT_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(TenantResolver.requireTenantId(), opportunityId)
-                .stream().filter(e -> scope.allows(e.getOwnerUserId())).toList();
+                .stream().filter(e -> scope.allows(e.getOwnerUserId(), e.getTeamId())).toList();
     }
 
     public Event requireEvent(Long id) {
@@ -169,7 +172,14 @@ public class EventService {
             if (event.getAccountId() == null) {
                 event.setAccountId(opportunity.getAccountId());
             }
+            if (event.getTeamId() == null) {
+                event.setTeamId(opportunity.getTeamId());
+            }
         }
+        Long accountTeam = event.getAccountId() == null ? null
+                : accountRepo.findByIdAndTenantId(event.getAccountId(), tenantId).map(a -> a.getTeamId()).orElse(null);
+        event.setTeamId(teamDirectory.resolveTeam(tenantId, event.getOwnerUserId(), event.getTeamId(), accountTeam));
+        teamDirectory.requireAssignable(tenantId, event.getOwnerUserId(), event.getTeamId());
         validateHeader(tenantId, event);
         Event saved = eventRepo.save(event);
         writeHistory(saved, null, Event.Status.INQUIRY, null, "created", accessContext.currentUserId());
@@ -184,7 +194,7 @@ public class EventService {
         accessContext.require(CrmPermission.EVENT_WRITE);
         Long tenantId = TenantResolver.requireTenantId();
         CrmOpportunity opportunity = opportunityRepo.findByIdAndTenantId(opportunityId, tenantId)
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId()))
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
         JsonNode attrs = opportunity.getAttrs();
         LocalDate from = parseDate(attrs, "startDate");
@@ -206,6 +216,7 @@ public class EventService {
                 .expectedPax(intValue(attrs, "pax"))
                 .currency(opportunity.getCurrency())
                 .ownerUserId(opportunity.getOwnerUserId())
+                .teamId(opportunity.getTeamId())
                 .notes(text(attrs, "notes"))
                 .build();
         return create(event);
@@ -228,9 +239,16 @@ public class EventService {
             if (StringUtils.hasText(changes.getCurrency())) {
                 existing.setCurrency(changes.getCurrency());
             }
-            if (changes.getOwnerUserId() != null) {
-                existing.setOwnerUserId(changes.getOwnerUserId());
+            Long owner = changes.getOwnerUserId() != null ? changes.getOwnerUserId() : existing.getOwnerUserId();
+            boolean ownerChanged = !java.util.Objects.equals(owner, existing.getOwnerUserId());
+            Long team = changes.getTeamId() != null ? changes.getTeamId()
+                    : ownerChanged ? teamDirectory.resolveTeam(tenantId, owner, null, existing.getTeamId())
+                    : existing.getTeamId();
+            if (ownerChanged || !java.util.Objects.equals(team, existing.getTeamId())) {
+                teamDirectory.requireAssignable(tenantId, owner, team);
             }
+            existing.setOwnerUserId(owner);
+            existing.setTeamId(team);
             LocalDate previousDecision = existing.getDecisionDate();
             existing.setDecisionDate(changes.getDecisionDate());
             validateGuaranteedPax(existing, changes.getGuaranteedPax());

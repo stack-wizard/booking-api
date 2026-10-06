@@ -11,16 +11,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "crm_team_member")
+@Table(name = "crm_segment")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CrmTeamMember {
+public class CrmSegment {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,21 +27,20 @@ public class CrmTeamMember {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "team_id", nullable = false)
-    private Long teamId;
+    @Column(nullable = false)
+    private String code;
 
-    @Column(name = "app_user_id", nullable = false)
-    private Long appUserId;
+    @Column(nullable = false)
+    private String name;
 
-    @Column(name = "team_lead", nullable = false)
-    private Boolean teamLead;
+    @Column(name = "default_team_id")
+    private Long defaultTeamId;
 
-    @Column(name = "valid_from", nullable = false)
-    private LocalDate validFrom;
+    @Column(nullable = false)
+    private Boolean active;
 
-    /** Exclusive: the member left the team on this day. */
-    @Column(name = "valid_to")
-    private LocalDate validTo;
+    @Column(name = "display_order", nullable = false)
+    private Integer displayOrder;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

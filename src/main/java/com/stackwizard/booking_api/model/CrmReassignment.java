@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.model;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -10,17 +11,18 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "crm_team_member")
+@Table(name = "crm_reassignment")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CrmTeamMember {
+public class CrmReassignment {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,21 +30,23 @@ public class CrmTeamMember {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "team_id", nullable = false)
-    private Long teamId;
+    @Column(name = "from_user_id")
+    private Long fromUserId;
 
-    @Column(name = "app_user_id", nullable = false)
-    private Long appUserId;
+    @Column(name = "to_user_id")
+    private Long toUserId;
 
-    @Column(name = "team_lead", nullable = false)
-    private Boolean teamLead;
+    @Column(name = "to_team_id")
+    private Long toTeamId;
 
-    @Column(name = "valid_from", nullable = false)
-    private LocalDate validFrom;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "counts", columnDefinition = "jsonb", nullable = false)
+    private JsonNode counts;
 
-    /** Exclusive: the member left the team on this day. */
-    @Column(name = "valid_to")
-    private LocalDate validTo;
+    private String note;
+
+    @Column(name = "created_by")
+    private Long createdBy;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;

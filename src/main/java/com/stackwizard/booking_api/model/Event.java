@@ -80,6 +80,9 @@ public class Event extends CrmAuditableEntity {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    @Column(name = "team_id")
+    private Long teamId;
+
     @Column(name = "outcome_reason_id")
     private Long outcomeReasonId;
 

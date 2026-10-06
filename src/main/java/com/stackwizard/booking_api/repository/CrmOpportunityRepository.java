@@ -20,6 +20,7 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
                    :scopeAll = true
                    or (:scopeOwn = true and o.ownerUserId = :currentUserId)
                    or (:scopeTeam = true and o.ownerUserId in :teamUserIds)
+                   or (:scopeTeam = true and o.teamId in :teamIds)
               )
             order by o.createdAt desc
             """)
@@ -29,5 +30,8 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
                                     @Param("scopeOwn") boolean scopeOwn,
                                     @Param("scopeTeam") boolean scopeTeam,
                                     @Param("currentUserId") Long currentUserId,
-                                    @Param("teamUserIds") Collection<Long> teamUserIds);
+                                    @Param("teamUserIds") Collection<Long> teamUserIds,
+                            @Param("teamIds") Collection<Long> teamIds);
+
+    List<CrmOpportunity> findByTenantIdAndOwnerUserIdAndStatus(Long tenantId, Long ownerUserId, CrmOpportunity.Status status);
 }

@@ -51,6 +51,7 @@ class EventServiceTest {
     @Mock EventReservationSync reservationSync;
     @Mock EventItemPricing itemPricing;
     @Mock CrmAccessContext accessContext;
+    @Mock CrmTeamDirectory teamDirectory;
     @Mock PlatformTransactionManager transactionManager;
     @Mock SalesQuoteRepository quoteRepo;
 
@@ -63,7 +64,7 @@ class EventServiceTest {
         when(accessContext.currentUserId()).thenReturn(7L);
         when(eventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
-                opportunityRepo, reservationSync, itemPricing, accessContext, transactionManager, quoteRepo, true);
+                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager, quoteRepo, true);
     }
 
     @AfterEach

@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -25,16 +26,22 @@ public class CrmAccountService {
     private final CrmContactRepository contactRepo;
     private final CrmAccountContactRoleRepository roleRepo;
     private final CrmAccessContext accessContext;
+    private final CrmTeamDirectory teamDirectory;
+    private final CrmSegmentService segmentService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CrmAccountService(CrmAccountRepository accountRepo,
                              CrmContactRepository contactRepo,
                              CrmAccountContactRoleRepository roleRepo,
-                             CrmAccessContext accessContext) {
+                             CrmAccessContext accessContext,
+                             CrmTeamDirectory teamDirectory,
+                             CrmSegmentService segmentService) {
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
         this.roleRepo = roleRepo;
         this.accessContext = accessContext;
+        this.teamDirectory = teamDirectory;
+        this.segmentService = segmentService;
     }
 
     public List<CrmAccount> search(String search,
@@ -47,14 +54,14 @@ public class CrmAccountService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return accountRepo.search(
                 tenantId, blankToNull(search), accountType, blankToNull(segment), ownerUserId, active,
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(),
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds(),
                 org.springframework.data.domain.Pageable.unpaged()).getContent();
     }
 
     public Optional<CrmAccount> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
         return accountRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(a -> CrmOwnerScope.from(accessContext).allows(a.getOwnerUserId()));
+                .filter(a -> CrmOwnerScope.from(accessContext).allows(a.getOwnerUserId(), a.getTeamId()));
     }
 
     @Transactional
@@ -73,6 +80,10 @@ public class CrmAccountService {
         if (account.getOwnerUserId() == null) {
             account.setOwnerUserId(accessContext.currentUserId());
         }
+        account.setSegment(segmentService.normalize(tenantId, account.getSegment()));
+        account.setTeamId(teamDirectory.resolveTeam(tenantId, account.getOwnerUserId(), account.getTeamId(),
+                segmentService.defaultTeam(tenantId, account.getSegment())));
+        teamDirectory.requireAssignable(tenantId, account.getOwnerUserId(), account.getTeamId());
         if (account.getAttrs() == null) {
             account.setAttrs(objectMapper.createObjectNode());
         }
@@ -83,19 +94,17 @@ public class CrmAccountService {
     public CrmAccount update(Long id, CrmAccount changes) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
         CrmAccount existing = requireOwned(id);
+        Long tenantId = existing.getTenantId();
         existing.setName(changes.getName());
         existing.setLegalName(changes.getLegalName());
         if (changes.getAccountType() != null) {
             existing.setAccountType(changes.getAccountType());
         }
-        existing.setSegment(changes.getSegment());
+        existing.setSegment(segmentService.normalize(tenantId, changes.getSegment()));
         existing.setVatId(changes.getVatId());
-        validateParent(existing.getTenantId(), existing.getId(), changes.getParentAccountId());
+        validateParent(tenantId, existing.getId(), changes.getParentAccountId());
         existing.setParentAccountId(changes.getParentAccountId());
-        if (changes.getOwnerUserId() != null) {
-            existing.setOwnerUserId(changes.getOwnerUserId());
-        }
-        existing.setTeamId(changes.getTeamId());
+        applyOwnership(tenantId, existing, changes.getOwnerUserId(), changes.getTeamId());
         existing.setEmail(changes.getEmail());
         existing.setPhone(changes.getPhone());
         existing.setWebsite(changes.getWebsite());
@@ -152,8 +161,21 @@ public class CrmAccountService {
         roleRepo.delete(role);
     }
 
-    private CrmAccount requireOwned(Long id) {
+    public CrmAccount requireOwned(Long id) {
         return findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Account not found"));
+    }
+
+    private void applyOwnership(Long tenantId, CrmAccount existing, Long ownerUserId, Long teamId) {
+        Long owner = ownerUserId != null ? ownerUserId : existing.getOwnerUserId();
+        boolean ownerChanged = !Objects.equals(owner, existing.getOwnerUserId());
+        Long team = teamId != null ? teamId
+                : ownerChanged ? teamDirectory.resolveTeam(tenantId, owner, null, existing.getTeamId())
+                : existing.getTeamId();
+        if (ownerChanged || !Objects.equals(team, existing.getTeamId())) {
+            teamDirectory.requireAssignable(tenantId, owner, team);
+        }
+        existing.setOwnerUserId(owner);
+        existing.setTeamId(team);
     }
 
     private void requireVisible(Long id) {
@@ -173,6 +195,13 @@ public class CrmAccountService {
         }
         if (accountRepo.findByIdAndTenantId(parentAccountId, tenantId).isEmpty()) {
             throw new IllegalArgumentException("Parent account not found: " + parentAccountId);
+        }
+        Long cursor = parentAccountId;
+        for (int depth = 0; cursor != null && depth < 50; depth++) {
+            if (cursor.equals(accountId)) {
+                throw new IllegalArgumentException("Parent account would create a cycle");
+            }
+            cursor = accountRepo.findByIdAndTenantId(cursor, tenantId).map(CrmAccount::getParentAccountId).orElse(null);
         }
     }
 }

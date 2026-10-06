@@ -24,7 +24,8 @@ public interface EventRepository extends JpaRepository<Event, Long> {
               and e.dateFrom <= :to
               and (:all = true
                    or (:own = true and e.ownerUserId = :currentUserId)
-                   or (:team = true and e.ownerUserId in :teamUserIds))
+                   or (:team = true and e.ownerUserId in :teamUserIds)
+                   or (:team = true and e.teamId in :teamIds))
             order by e.dateFrom asc, e.id asc
             """)
     List<Event> findScoped(@Param("tenantId") Long tenantId,
@@ -36,7 +37,8 @@ public interface EventRepository extends JpaRepository<Event, Long> {
                            @Param("own") boolean own,
                            @Param("team") boolean team,
                            @Param("currentUserId") Long currentUserId,
-                           @Param("teamUserIds") Collection<Long> teamUserIds);
+                           @Param("teamUserIds") Collection<Long> teamUserIds,
+                           @Param("teamIds") Collection<Long> teamIds);
 
     @Query("""
             select e from Event e
@@ -80,4 +82,8 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     List<Event> findForPortal(@Param("tenantId") Long tenantId,
                               @Param("contactIds") Collection<Long> contactIds,
                               @Param("accountIds") Collection<Long> accountIds);
+
+    List<Event> findByTenantIdAndOwnerUserIdAndStatusInAndDateToGreaterThanEqual(Long tenantId, Long ownerUserId,
+                                                                                Collection<Event.Status> statuses,
+                                                                                LocalDate dateTo);
 }

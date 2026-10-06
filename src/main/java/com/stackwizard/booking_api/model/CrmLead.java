@@ -54,6 +54,20 @@ public class CrmLead extends CrmAuditableEntity {
     @Column(name = "owner_user_id")
     private Long ownerUserId;
 
+    @Column(name = "team_id")
+    private Long teamId;
+
+    private String segment;
+
+    @Column(length = 2)
+    private String country;
+
+    @Column(name = "assignment_rule_id")
+    private Long assignmentRuleId;
+
+    @Column(name = "assigned_at")
+    private OffsetDateTime assignedAt;
+
     private String description;
 
     @Column(name = "disqualify_reason_id")

@@ -11,4 +11,6 @@ public interface CrmContactRepository extends JpaRepository<CrmContact, Long> {
     List<CrmContact> findByTenantIdAndAccountIdOrderByLastNameAsc(Long tenantId, Long accountId);
     List<CrmContact> findByTenantIdOrderByLastNameAsc(Long tenantId);
     List<CrmContact> findByTenantIdAndPlatformUserId(Long tenantId, java.util.UUID platformUserId);
+
+    Optional<CrmContact> findFirstByTenantIdAndEmailIgnoreCaseOrderByIdAsc(Long tenantId, String email);
 }

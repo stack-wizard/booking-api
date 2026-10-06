@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -11,16 +13,15 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "crm_team_member")
+@Table(name = "crm_account_relation")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CrmTeamMember {
+public class CrmAccountRelation {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,22 +29,30 @@ public class CrmTeamMember {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "team_id", nullable = false)
-    private Long teamId;
+    @Column(name = "from_account_id", nullable = false)
+    private Long fromAccountId;
 
-    @Column(name = "app_user_id", nullable = false)
-    private Long appUserId;
+    @Column(name = "to_account_id", nullable = false)
+    private Long toAccountId;
 
-    @Column(name = "team_lead", nullable = false)
-    private Boolean teamLead;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "relation_type", nullable = false)
+    private Type relationType;
 
-    @Column(name = "valid_from", nullable = false)
-    private LocalDate validFrom;
+    private String note;
 
-    /** Exclusive: the member left the team on this day. */
-    @Column(name = "valid_to")
-    private LocalDate validTo;
+    @Column(name = "created_by")
+    private Long createdBy;
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    public enum Type {
+        /** From is an agency booking on behalf of the client in to. */
+        AGENCY_FOR,
+        PARTNER,
+        /** From supplies services (AV, DMC, florist) to to. */
+        SUPPLIER,
+        OTHER
+    }
 }

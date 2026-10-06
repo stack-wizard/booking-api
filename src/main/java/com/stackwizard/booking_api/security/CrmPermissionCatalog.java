@@ -32,7 +32,8 @@ public final class CrmPermissionCatalog {
         manager.add(CrmPermission.REPORT_READ);
         manager.add(CrmPermission.QUOTE_APPROVE);
         PERMISSIONS.put(CrmRole.SALES_MANAGER, Collections.unmodifiableSet(manager));
-        SCOPES.put(CrmRole.SALES_MANAGER, CrmScope.TEAM);
+        // Team visibility comes from crm_team_member.team_lead, not from the Platform role.
+        SCOPES.put(CrmRole.SALES_MANAGER, CrmScope.OWN);
 
         PERMISSIONS.put(CrmRole.EVENT_COORDINATOR, Collections.unmodifiableSet(EnumSet.of(
                 CrmPermission.ACCOUNT_READ,

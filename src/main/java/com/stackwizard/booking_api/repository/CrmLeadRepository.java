@@ -19,6 +19,7 @@ public interface CrmLeadRepository extends JpaRepository<CrmLead, Long> {
                    :scopeAll = true
                    or (:scopeOwn = true and l.ownerUserId = :currentUserId)
                    or (:scopeTeam = true and l.ownerUserId in :teamUserIds)
+                   or (:scopeTeam = true and l.teamId in :teamIds)
               )
             order by l.createdAt desc
             """)
@@ -27,5 +28,17 @@ public interface CrmLeadRepository extends JpaRepository<CrmLead, Long> {
                              @Param("scopeOwn") boolean scopeOwn,
                              @Param("scopeTeam") boolean scopeTeam,
                              @Param("currentUserId") Long currentUserId,
-                             @Param("teamUserIds") Collection<Long> teamUserIds);
+                             @Param("teamUserIds") Collection<Long> teamUserIds,
+                            @Param("teamIds") Collection<Long> teamIds);
+
+    List<CrmLead> findByTenantIdAndOwnerUserIdAndStatusIn(Long tenantId, Long ownerUserId, Collection<CrmLead.Status> statuses);
+
+    @Query("""
+            select l.ownerUserId, count(l) from CrmLead l
+            where l.tenantId = :tenantId and l.ownerUserId in :userIds and l.status in :statuses
+            group by l.ownerUserId
+            """)
+    List<Object[]> countByOwner(@Param("tenantId") Long tenantId,
+                                @Param("userIds") Collection<Long> userIds,
+                                @Param("statuses") Collection<CrmLead.Status> statuses);
 }

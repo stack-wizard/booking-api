@@ -57,6 +57,9 @@ class CrmOpportunityLeadServiceTest {
     @Mock CrmContactRepository contactRepo;
     @Mock CrmPipelineRepository pipelineRepo;
     @Mock CrmAccessContext accessContext;
+    @Mock CrmTeamDirectory teamDirectory;
+    @Mock CrmSegmentService segmentService;
+    @Mock CrmLeadAssignmentService assignmentService;
 
     ObjectMapper objectMapper = new ObjectMapper();
     CrmOpportunityService opportunityService;
@@ -67,14 +70,15 @@ class CrmOpportunityLeadServiceTest {
         TenantContext.setTenantId(1L);
         opportunityService = new CrmOpportunityService(
                 opportunityRepo, stageRepo, requirementRepo, outcomeRepo, transitionRepo, accountRepo, contactRepo,
-                accessContext);
+                accessContext, teamDirectory);
         leadService = new CrmLeadService(
                 leadRepo, accountRepo, contactRepo, pipelineRepo, stageRepo, opportunityRepo, transitionRepo,
-                accessContext);
+                accessContext, teamDirectory, segmentService, assignmentService);
         doNothing().when(accessContext).require(any());
         lenient().when(accessContext.currentUserId()).thenReturn(10L);
         lenient().when(accessContext.scope()).thenReturn(CrmScope.ALL);
         lenient().when(accessContext.teamUserIds()).thenReturn(Set.of(10L));
+        lenient().when(accessContext.teamIds()).thenReturn(Set.of());
     }
 
     @AfterEach

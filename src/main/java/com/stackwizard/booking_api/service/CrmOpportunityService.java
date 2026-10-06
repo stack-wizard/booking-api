@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stackwizard.booking_api.dto.CrmStageChangeRequest;
+import com.stackwizard.booking_api.model.CrmAccount;
 import com.stackwizard.booking_api.model.CrmOpportunity;
 import com.stackwizard.booking_api.model.CrmOutcomeReason;
 import com.stackwizard.booking_api.model.CrmPipelineStage;
@@ -27,6 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -39,6 +41,7 @@ public class CrmOpportunityService {
     private final CrmAccountRepository accountRepo;
     private final CrmContactRepository contactRepo;
     private final CrmAccessContext accessContext;
+    private final CrmTeamDirectory teamDirectory;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CrmOpportunityService(CrmOpportunityRepository opportunityRepo,
@@ -48,7 +51,8 @@ public class CrmOpportunityService {
                                  CrmStageTransitionRepository transitionRepo,
                                  CrmAccountRepository accountRepo,
                                  CrmContactRepository contactRepo,
-                                 CrmAccessContext accessContext) {
+                                 CrmAccessContext accessContext,
+                                 CrmTeamDirectory teamDirectory) {
         this.opportunityRepo = opportunityRepo;
         this.stageRepo = stageRepo;
         this.requirementRepo = requirementRepo;
@@ -57,6 +61,7 @@ public class CrmOpportunityService {
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
         this.accessContext = accessContext;
+        this.teamDirectory = teamDirectory;
     }
 
     public List<CrmOpportunity> findAll(Long pipelineId) {
@@ -64,13 +69,13 @@ public class CrmOpportunityService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return opportunityRepo.findScoped(
                 TenantResolver.requireTenantId(), pipelineId,
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds());
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
     }
 
     public Optional<CrmOpportunity> findById(Long id) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         return opportunityRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId()));
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()));
     }
 
     @Transactional
@@ -92,6 +97,11 @@ public class CrmOpportunityService {
         if (opportunity.getAttrs() == null) {
             opportunity.setAttrs(objectMapper.createObjectNode());
         }
+        Long accountTeam = opportunity.getAccountId() == null ? null
+                : accountRepo.findByIdAndTenantId(opportunity.getAccountId(), tenantId).map(CrmAccount::getTeamId).orElse(null);
+        opportunity.setTeamId(teamDirectory.resolveTeam(tenantId, opportunity.getOwnerUserId(), opportunity.getTeamId(), accountTeam));
+        teamDirectory.requireAssignable(tenantId, opportunity.getOwnerUserId(), opportunity.getTeamId());
+        validateAgency(tenantId, opportunity.getAgencyAccountId(), opportunity.getAccountId());
         CrmPipelineStage stage = stageRepo.findByIdAndTenantId(opportunity.getStageId(), tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Stage not found: " + opportunity.getStageId()));
         if (!stage.getPipelineId().equals(opportunity.getPipelineId())) {
@@ -127,10 +137,18 @@ public class CrmOpportunityService {
         }
         existing.setExpectedCloseDate(changes.getExpectedCloseDate());
         existing.setSource(changes.getSource());
-        if (changes.getOwnerUserId() != null) {
-            existing.setOwnerUserId(changes.getOwnerUserId());
+        Long owner = changes.getOwnerUserId() != null ? changes.getOwnerUserId() : existing.getOwnerUserId();
+        boolean ownerChanged = !Objects.equals(owner, existing.getOwnerUserId());
+        Long team = changes.getTeamId() != null ? changes.getTeamId()
+                : ownerChanged ? teamDirectory.resolveTeam(existing.getTenantId(), owner, null, existing.getTeamId())
+                : existing.getTeamId();
+        if (ownerChanged || !Objects.equals(team, existing.getTeamId())) {
+            teamDirectory.requireAssignable(existing.getTenantId(), owner, team);
         }
-        existing.setTeamId(changes.getTeamId());
+        existing.setOwnerUserId(owner);
+        existing.setTeamId(team);
+        validateAgency(existing.getTenantId(), changes.getAgencyAccountId(), existing.getAccountId());
+        existing.setAgencyAccountId(changes.getAgencyAccountId());
         if (changes.getAttrs() != null) {
             existing.setAttrs(changes.getAttrs());
         }
@@ -282,5 +300,19 @@ public class CrmOpportunityService {
 
     private CrmOpportunity requireOwned(Long id) {
         return findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
+    }
+
+    private void validateAgency(Long tenantId, Long agencyAccountId, Long clientAccountId) {
+        if (agencyAccountId == null) {
+            return;
+        }
+        if (agencyAccountId.equals(clientAccountId)) {
+            throw new IllegalArgumentException("Agency and client account must differ");
+        }
+        CrmAccount agency = accountRepo.findByIdAndTenantId(agencyAccountId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Agency account not found: " + agencyAccountId));
+        if (agency.getAccountType() != CrmAccount.AccountType.AGENCY) {
+            throw new IllegalArgumentException(agency.getName() + " is not an agency account");
+        }
     }
 }

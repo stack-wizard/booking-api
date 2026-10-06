@@ -153,6 +153,38 @@ from product p
 where p.tenant_id = :tenant and p.name = 'Day Delegate Rate'
 on conflict (product_id) do nothing;
 
+-- Phase 7: sales teams (Sales → MICE / Leisure & Groups), segments routed to teams, lead assignment rules.
+-- Members come from Platform users after their first login, so add them in CRM Setup → Teams.
+insert into crm_team (tenant_id, name)
+select :tenant, 'Sales'
+where not exists (select 1 from crm_team where tenant_id = :tenant and lower(name) = 'sales');
+
+insert into crm_team (tenant_id, name, parent_team_id)
+select :tenant, t.name, (select id from crm_team where tenant_id = :tenant and lower(name) = 'sales')
+from (values ('MICE'), ('Leisure & Groups')) as t(name)
+where not exists (select 1 from crm_team c where c.tenant_id = :tenant and lower(c.name) = lower(t.name));
+
+insert into crm_segment (tenant_id, code, name, default_team_id, display_order)
+select :tenant, s.code, s.name, (select id from crm_team where tenant_id = :tenant and name = s.team), s.ord
+from (values ('CORPORATE', 'Corporate', 'MICE', 10),
+             ('ASSOCIATION', 'Associations', 'MICE', 20),
+             ('AGENCY', 'Agencies & DMC', 'Leisure & Groups', 30),
+             ('LEISURE', 'Leisure groups', 'Leisure & Groups', 40),
+             ('SOCIAL', 'Weddings & private', 'Leisure & Groups', 50)) as s(code, name, team, ord)
+where not exists (select 1 from crm_segment x where x.tenant_id = :tenant and lower(x.code) = lower(s.code));
+
+insert into crm_assignment_rule (tenant_id, name, priority, min_pax, target_team_id, strategy)
+select :tenant, 'Large events (150+ pax)', 10, 150, t.id, 'LEAST_LOADED'
+from crm_team t
+where t.tenant_id = :tenant and t.name = 'MICE'
+  and not exists (select 1 from crm_assignment_rule r where r.tenant_id = :tenant and r.name = 'Large events (150+ pax)');
+
+insert into crm_assignment_rule (tenant_id, name, priority, segment, target_team_id, strategy)
+select :tenant, 'Corporate inquiries', 20, 'CORPORATE', t.id, 'ROUND_ROBIN'
+from crm_team t
+where t.tenant_id = :tenant and t.name = 'MICE'
+  and not exists (select 1 from crm_assignment_rule r where r.tenant_id = :tenant and r.name = 'Corporate inquiries');
+
 commit;
 
 select r.name, r.area_sqm, string_agg(s.setup_style || ' ' || s.capacity, ', ' order by s.capacity desc) as setups

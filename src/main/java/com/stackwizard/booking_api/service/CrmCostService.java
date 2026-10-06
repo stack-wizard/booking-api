@@ -120,7 +120,7 @@ public class CrmCostService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         List<SalesDtos.EventProfit> events = new ArrayList<>();
         for (Event event : eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(opportunity.getTenantId(), opportunity.getId())) {
-            if (scope.allows(event.getOwnerUserId())) {
+            if (scope.allows(event.getOwnerUserId(), event.getTeamId())) {
                 events.add(profit(event));
             }
         }
@@ -203,7 +203,7 @@ public class CrmCostService {
     private CrmOpportunity requireOpportunity(Long opportunityId) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         return opportunityRepo.findByIdAndTenantId(opportunityId, TenantResolver.requireTenantId())
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId()))
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
     }
 

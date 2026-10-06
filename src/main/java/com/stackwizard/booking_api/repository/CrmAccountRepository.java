@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.repository;
 
+import java.util.List;
 import com.stackwizard.booking_api.model.CrmAccount;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -26,6 +27,7 @@ public interface CrmAccountRepository extends JpaRepository<CrmAccount, Long> {
                    :scopeAll = true
                    or (:scopeOwn = true and a.ownerUserId = :currentUserId)
                    or (:scopeTeam = true and a.ownerUserId in :teamUserIds)
+                   or (:scopeTeam = true and a.teamId in :teamIds)
               )
             """)
     Page<CrmAccount> search(@Param("tenantId") Long tenantId,
@@ -39,5 +41,12 @@ public interface CrmAccountRepository extends JpaRepository<CrmAccount, Long> {
                             @Param("scopeTeam") boolean scopeTeam,
                             @Param("currentUserId") Long currentUserId,
                             @Param("teamUserIds") Collection<Long> teamUserIds,
+                            @Param("teamIds") Collection<Long> teamIds,
                             Pageable pageable);
+
+    List<CrmAccount> findByTenantIdAndOwnerUserIdAndActiveTrue(Long tenantId, Long ownerUserId);
+
+    Optional<CrmAccount> findFirstByTenantIdAndNameIgnoreCaseAndActiveTrueOrderByIdAsc(Long tenantId, String name);
+
+    List<CrmAccount> findByTenantIdAndParentAccountIdOrderByNameAsc(Long tenantId, Long parentAccountId);
 }

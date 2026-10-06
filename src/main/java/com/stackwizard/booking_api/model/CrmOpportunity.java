@@ -57,6 +57,9 @@ public class CrmOpportunity extends CrmAuditableEntity {
     @Column(name = "team_id")
     private Long teamId;
 
+    @Column(name = "agency_account_id")
+    private Long agencyAccountId;
+
     private BigDecimal amount;
 
     @Column(nullable = false)

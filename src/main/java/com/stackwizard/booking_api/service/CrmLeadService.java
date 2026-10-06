@@ -39,6 +39,9 @@ public class CrmLeadService {
     private final CrmOpportunityRepository opportunityRepo;
     private final CrmStageTransitionRepository transitionRepo;
     private final CrmAccessContext accessContext;
+    private final CrmTeamDirectory teamDirectory;
+    private final CrmSegmentService segmentService;
+    private final CrmLeadAssignmentService assignmentService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CrmLeadService(CrmLeadRepository leadRepo,
@@ -48,7 +51,10 @@ public class CrmLeadService {
                           CrmPipelineStageRepository stageRepo,
                           CrmOpportunityRepository opportunityRepo,
                           CrmStageTransitionRepository transitionRepo,
-                          CrmAccessContext accessContext) {
+                          CrmAccessContext accessContext,
+                          CrmTeamDirectory teamDirectory,
+                          CrmSegmentService segmentService,
+                          CrmLeadAssignmentService assignmentService) {
         this.leadRepo = leadRepo;
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
@@ -57,6 +63,9 @@ public class CrmLeadService {
         this.opportunityRepo = opportunityRepo;
         this.transitionRepo = transitionRepo;
         this.accessContext = accessContext;
+        this.teamDirectory = teamDirectory;
+        this.segmentService = segmentService;
+        this.assignmentService = assignmentService;
     }
 
     public List<CrmLead> findAll() {
@@ -64,28 +73,36 @@ public class CrmLeadService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return leadRepo.findScoped(
                 TenantResolver.requireTenantId(),
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds());
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
     }
 
     public Optional<CrmLead> findById(Long id) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         return leadRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(l -> CrmOwnerScope.from(accessContext).allows(l.getOwnerUserId()));
+                .filter(l -> CrmOwnerScope.from(accessContext).allows(l.getOwnerUserId(), l.getTeamId()));
     }
 
     @Transactional
     public CrmLead create(CrmLead lead) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
+        Long tenantId = TenantResolver.requireTenantId();
         lead.setId(null);
-        lead.setTenantId(TenantResolver.requireTenantId());
+        lead.setTenantId(tenantId);
         if (lead.getStatus() == null) {
             lead.setStatus(CrmLead.Status.NEW);
         }
-        if (lead.getOwnerUserId() == null) {
-            lead.setOwnerUserId(accessContext.currentUserId());
-        }
         if (lead.getAttrs() == null) {
             lead.setAttrs(objectMapper.createObjectNode());
+        }
+        lead.setSegment(segmentService.normalize(tenantId, lead.getSegment()));
+        lead.setCountry(normalizeCountry(lead.getCountry()));
+        lead.setAssignmentRuleId(null);
+        if (lead.getOwnerUserId() == null && lead.getTeamId() == null) {
+            assignmentService.assign(lead, accessContext.currentUserId());
+        } else {
+            lead.setTeamId(teamDirectory.resolveTeam(tenantId, lead.getOwnerUserId(), lead.getTeamId(), null));
+            teamDirectory.requireAssignable(tenantId, lead.getOwnerUserId(), lead.getTeamId());
+            lead.setAssignedAt(OffsetDateTime.now());
         }
         return leadRepo.save(lead);
     }
@@ -111,8 +128,15 @@ public class CrmLeadService {
         if (changes.getStatus() != null) {
             existing.setStatus(changes.getStatus());
         }
-        if (changes.getOwnerUserId() != null) {
-            existing.setOwnerUserId(changes.getOwnerUserId());
+        if (changes.getSegment() != null) {
+            existing.setSegment(segmentService.normalize(existing.getTenantId(), changes.getSegment()));
+        }
+        if (changes.getCountry() != null) {
+            existing.setCountry(normalizeCountry(changes.getCountry()));
+        }
+        if (changes.getOwnerUserId() != null || changes.getTeamId() != null) {
+            applyAssignment(existing, changes.getOwnerUserId() != null ? changes.getOwnerUserId() : existing.getOwnerUserId(),
+                    changes.getTeamId());
         }
         if (changes.getAttrs() != null) {
             existing.setAttrs(changes.getAttrs());
@@ -133,6 +157,8 @@ public class CrmLeadService {
             throw new IllegalStateException("Disqualified lead cannot be converted");
         }
 
+        Long owner = lead.getOwnerUserId() != null ? lead.getOwnerUserId() : accessContext.currentUserId();
+        Long team = lead.getTeamId() != null ? lead.getTeamId() : teamDirectory.primaryTeamOf(tenantId, owner).orElse(null);
         CrmAccount account;
         if (request != null && request.getAccountId() != null) {
             account = accountRepo.findByIdAndTenantId(request.getAccountId(), tenantId)
@@ -150,7 +176,10 @@ public class CrmLeadService {
                     .tenantId(tenantId)
                     .name(name)
                     .accountType(CrmAccount.AccountType.COMPANY)
-                    .ownerUserId(lead.getOwnerUserId() != null ? lead.getOwnerUserId() : accessContext.currentUserId())
+                    .ownerUserId(owner)
+                    .teamId(team)
+                    .segment(lead.getSegment())
+                    .country(lead.getCountry())
                     .email(lead.getEmail())
                     .phone(lead.getPhone())
                     .active(true)
@@ -199,7 +228,8 @@ public class CrmLeadService {
                 .primaryContactId(contact.getId())
                 .pipelineId(pipeline.getId())
                 .stageId(firstStage.getId())
-                .ownerUserId(lead.getOwnerUserId() != null ? lead.getOwnerUserId() : accessContext.currentUserId())
+                .ownerUserId(owner)
+                .teamId(team)
                 .currency("EUR")
                 .source(lead.getSource())
                 .status(CrmOpportunity.Status.OPEN)
@@ -221,6 +251,58 @@ public class CrmLeadService {
         lead.setConvertedOpportunityId(opportunity.getId());
         lead.setConvertedAt(OffsetDateTime.now());
         return leadRepo.save(lead);
+    }
+
+    /** Runs the assignment rules again, e.g. for a lead waiting in a team queue. */
+    @Transactional
+    public CrmLead autoAssign(Long id) {
+        accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
+        CrmLead lead = requireOwned(id);
+        requireOpen(lead);
+        CrmLeadAssignmentService.Decision decision = assignmentService.assign(lead, accessContext.currentUserId());
+        teamDirectory.requireAssignable(lead.getTenantId(), decision.ownerUserId(), decision.teamId());
+        return leadRepo.save(lead);
+    }
+
+    /** Hands the lead to a rep and/or team; a team without owner puts it in that team's queue. */
+    @Transactional
+    public CrmLead assign(Long id, Long ownerUserId, Long teamId) {
+        accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
+        CrmLead lead = requireOwned(id);
+        requireOpen(lead);
+        if (ownerUserId == null && teamId == null) {
+            throw new IllegalArgumentException("ownerUserId or teamId is required");
+        }
+        applyAssignment(lead, ownerUserId, teamId);
+        return leadRepo.save(lead);
+    }
+
+    private void applyAssignment(CrmLead lead, Long ownerUserId, Long teamId) {
+        Long team = teamDirectory.resolveTeam(lead.getTenantId(), ownerUserId, teamId, lead.getTeamId());
+        if (!java.util.Objects.equals(ownerUserId, lead.getOwnerUserId()) || !java.util.Objects.equals(team, lead.getTeamId())
+                || lead.getAssignedAt() == null) {
+            teamDirectory.requireAssignable(lead.getTenantId(), ownerUserId, team);
+            lead.setAssignedAt(OffsetDateTime.now());
+        }
+        lead.setOwnerUserId(ownerUserId);
+        lead.setTeamId(team);
+    }
+
+    private static void requireOpen(CrmLead lead) {
+        if (lead.getStatus() == CrmLead.Status.CONVERTED || lead.getStatus() == CrmLead.Status.DISQUALIFIED) {
+            throw new IllegalStateException("Lead is " + lead.getStatus() + " and cannot be reassigned");
+        }
+    }
+
+    private static String normalizeCountry(String country) {
+        if (country == null || country.isBlank()) {
+            return null;
+        }
+        String value = country.trim().toUpperCase();
+        if (value.length() != 2) {
+            throw new IllegalArgumentException("country must be an ISO 3166-1 alpha-2 code");
+        }
+        return value;
     }
 
     private CrmLead requireOwned(Long id) {

@@ -50,6 +50,21 @@ public class CrmTeamController {
         return ResponseEntity.created(URI.create("/api/crm/teams/" + id + "/members/" + saved.getId())).body(saved);
     }
 
+    @PutMapping("/members/{memberId}")
+    public CrmTeamMember updateMember(@PathVariable Long memberId, @RequestBody CrmTeamMember member) {
+        return service.updateMember(memberId, member);
+    }
+
+    @GetMapping("/users")
+    public List<CrmTeamService.CrmUser> users() {
+        return service.users();
+    }
+
+    @GetMapping("/my-scope")
+    public CrmTeamService.MyScope myScope() {
+        return service.myScope();
+    }
+
     @DeleteMapping("/members/{memberId}")
     public ResponseEntity<Void> removeMember(@PathVariable Long memberId) {
         service.removeMember(memberId);

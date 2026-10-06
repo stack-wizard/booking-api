@@ -1,8 +1,11 @@
 package com.stackwizard.booking_api.controller;
 
+import com.stackwizard.booking_api.dto.CrmTeamDtos;
 import com.stackwizard.booking_api.model.CrmAccount;
 import com.stackwizard.booking_api.model.CrmAccountContactRole;
+import com.stackwizard.booking_api.model.CrmAccountRelation;
 import com.stackwizard.booking_api.model.CrmContact;
+import com.stackwizard.booking_api.service.CrmAccountRelationService;
 import com.stackwizard.booking_api.service.CrmAccountService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +17,27 @@ import java.util.List;
 @RequestMapping("/api/crm/accounts")
 public class CrmAccountController {
     private final CrmAccountService service;
+    private final CrmAccountRelationService relationService;
 
-    public CrmAccountController(CrmAccountService service) {
+    public CrmAccountController(CrmAccountService service, CrmAccountRelationService relationService) {
         this.service = service;
+        this.relationService = relationService;
+    }
+
+    @GetMapping("/{id}/relations")
+    public List<CrmTeamDtos.RelationView> relations(@PathVariable Long id) {
+        return relationService.forAccount(id);
+    }
+
+    @PostMapping("/{id}/relations")
+    public CrmAccountRelation addRelation(@PathVariable Long id, @RequestBody CrmTeamDtos.RelationRequest request) {
+        return relationService.create(id, request);
+    }
+
+    @DeleteMapping("/relations/{relationId}")
+    public ResponseEntity<Void> deleteRelation(@PathVariable Long relationId) {
+        relationService.delete(relationId);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping

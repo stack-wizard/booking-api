@@ -5,18 +5,22 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
 public interface CrmTeamMemberRepository extends JpaRepository<CrmTeamMember, Long> {
-    List<CrmTeamMember> findByTenantIdAndTeamId(Long tenantId, Long teamId);
+    List<CrmTeamMember> findByTenantIdAndTeamIdOrderByValidFromDescIdDesc(Long tenantId, Long teamId);
     Optional<CrmTeamMember> findByIdAndTenantId(Long id, Long tenantId);
+    Optional<CrmTeamMember> findByTenantIdAndTeamIdAndAppUserIdAndValidToIsNull(Long tenantId, Long teamId, Long appUserId);
+    List<CrmTeamMember> findByTenantIdAndAppUserIdAndValidToIsNull(Long tenantId, Long appUserId);
 
     @Query("""
-            select distinct m2.appUserId
-            from CrmTeamMember m1
-            join CrmTeamMember m2 on m2.teamId = m1.teamId and m2.tenantId = m1.tenantId
-            where m1.tenantId = :tenantId and m1.appUserId = :userId
+            select m from CrmTeamMember m
+            where m.tenantId = :tenantId
+              and m.validFrom <= :day
+              and (m.validTo is null or m.validTo > :day)
+            order by m.validFrom asc, m.id asc
             """)
-    List<Long> findTeamMateUserIds(@Param("tenantId") Long tenantId, @Param("userId") Long userId);
+    List<CrmTeamMember> findActive(@Param("tenantId") Long tenantId, @Param("day") LocalDate day);
 }

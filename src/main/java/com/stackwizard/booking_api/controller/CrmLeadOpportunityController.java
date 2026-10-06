@@ -2,6 +2,7 @@ package com.stackwizard.booking_api.controller;
 
 import com.stackwizard.booking_api.dto.CrmLeadConvertRequest;
 import com.stackwizard.booking_api.dto.CrmStageChangeRequest;
+import com.stackwizard.booking_api.dto.CrmTeamDtos;
 import com.stackwizard.booking_api.model.CrmLead;
 import com.stackwizard.booking_api.model.CrmOpportunity;
 import com.stackwizard.booking_api.model.CrmStageTransition;
@@ -43,6 +44,16 @@ public class CrmLeadOpportunityController {
     @PutMapping("/leads/{id}")
     public CrmLead updateLead(@PathVariable Long id, @RequestBody CrmLead lead) {
         return leadService.update(id, lead);
+    }
+
+    @PostMapping("/leads/{id}/assign")
+    public CrmLead assignLead(@PathVariable Long id, @RequestBody CrmTeamDtos.AssignRequest request) {
+        return leadService.assign(id, request.ownerUserId(), request.teamId());
+    }
+
+    @PostMapping("/leads/{id}/auto-assign")
+    public CrmLead autoAssignLead(@PathVariable Long id) {
+        return leadService.autoAssign(id);
     }
 
     @PostMapping("/leads/{id}/convert")
