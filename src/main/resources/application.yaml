@@ -52,3 +52,14 @@ booking:
   opera:
     check-in:
       enabled: ${BOOKING_OPERA_CHECKIN_ENABLED:true}
+
+crm:
+  portal:
+    base-url: ${CRM_PORTAL_BASE_URL:}
+  quotes:
+    approval-threshold-percent: ${CRM_QUOTE_APPROVAL_THRESHOLD_PERCENT:10}
+    validity-days: ${CRM_QUOTE_VALIDITY_DAYS:14}
+  contracts:
+    deposit-percent: ${CRM_CONTRACT_DEPOSIT_PERCENT:30}
+  events:
+    definite-requires-accepted-quote: ${CRM_DEFINITE_REQUIRES_ACCEPTED_QUOTE:true}

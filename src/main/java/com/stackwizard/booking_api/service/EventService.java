@@ -19,7 +19,10 @@ import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmOwnerScope;
 import com.stackwizard.booking_api.security.CrmPermission;
 import com.stackwizard.booking_api.security.TenantResolver;
+import com.stackwizard.booking_api.model.SalesQuote;
+import com.stackwizard.booking_api.repository.SalesQuoteRepository;
 import org.slf4j.Logger;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -65,6 +68,8 @@ public class EventService {
     private final EventItemPricing itemPricing;
     private final CrmAccessContext accessContext;
     private final TransactionTemplate transactionTemplate;
+    private final SalesQuoteRepository quoteRepo;
+    private final boolean definiteRequiresAcceptedQuote;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public EventService(EventRepository eventRepo,
@@ -77,7 +82,9 @@ public class EventService {
                         EventReservationSync reservationSync,
                         EventItemPricing itemPricing,
                         CrmAccessContext accessContext,
-                        PlatformTransactionManager transactionManager) {
+                        PlatformTransactionManager transactionManager,
+                        SalesQuoteRepository quoteRepo,
+                        @Value("${crm.events.definite-requires-accepted-quote:true}") boolean definiteRequiresAcceptedQuote) {
         this.eventRepo = eventRepo;
         this.historyRepo = historyRepo;
         this.functionRepo = functionRepo;
@@ -89,6 +96,8 @@ public class EventService {
         this.itemPricing = itemPricing;
         this.accessContext = accessContext;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.quoteRepo = quoteRepo;
+        this.definiteRequiresAcceptedQuote = definiteRequiresAcceptedQuote;
     }
 
     public List<Event> findAll(Event.Status status, Long accountId, LocalDate from, LocalDate to) {
@@ -103,6 +112,11 @@ public class EventService {
         accessContext.require(CrmPermission.EVENT_READ);
         return eventRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
                 .filter(e -> CrmOwnerScope.from(accessContext).allows(e.getOwnerUserId()));
+    }
+
+    /** Tenant-scoped lookup without the caller's CRM scope, for scheduled jobs and the client portal. */
+    public Optional<Event> findForSystem(Long tenantId, Long id) {
+        return eventRepo.findByIdAndTenantId(id, tenantId);
     }
 
     public List<Event> forOpportunity(Long opportunityId) {
@@ -273,7 +287,13 @@ public class EventService {
                 requireFutureDecisionDate(event);
                 requireSpace(event, target);
             }
-            case DEFINITE -> requireSpace(event, target);
+            case DEFINITE -> {
+                requireSpace(event, target);
+                if (definiteRequiresAcceptedQuote && !quoteRepo.existsByTenantIdAndEventIdAndStatus(
+                        event.getTenantId(), event.getId(), SalesQuote.Status.ACCEPTED)) {
+                    throw new IllegalStateException("An accepted quote is required before DEFINITE");
+                }
+            }
             case ACTUAL -> {
                 if (event.getActualPax() == null) {
                     throw new IllegalStateException("actualPax is required before ACTUAL");

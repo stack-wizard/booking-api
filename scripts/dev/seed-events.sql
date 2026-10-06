@@ -131,6 +131,28 @@ join product pkg on pkg.tenant_id = :tenant and pkg.name = c.pkg
 join product comp on comp.tenant_id = :tenant and comp.name = c.component
 where not exists (select 1 from product_component pc where pc.package_product_id = pkg.id);
 
+-- Phase 5: quote groups, advance invoices need a DEPOSIT product.
+update product set sales_group = 'MEETING'
+where tenant_id = :tenant and name like '%rent' and sales_group is null;
+update product set sales_group = 'F_AND_B'
+where tenant_id = :tenant and name in ('Coffee break','Business lunch','Gala dinner','Welcome drink') and sales_group is null;
+update product set sales_group = 'AV'
+where tenant_id = :tenant and name = 'Projector & screen' and sales_group is null;
+
+insert into product (tenant_id, name, default_uom, product_type, tax1_percent, display_order, description)
+select :tenant, 'Deposit', 'UNIT', 'DEPOSIT', 25, 900, 'Advance payment'
+where not exists (select 1 from product p where p.tenant_id = :tenant and upper(p.product_type) = 'DEPOSIT');
+
+-- Phase 4 CMS: the DDR is published for the web shop.
+insert into product_package_listing (tenant_id, product_id, public_name, public_description, min_pax, max_pax,
+                                     duration, default_start_time, setup_style, published)
+select :tenant, p.id, 'Day Delegate Package',
+       'Meeting room for the day, two coffee breaks and a business lunch.', 10, 120,
+       'FULL_DAY', '09:00', 'THEATRE', true
+from product p
+where p.tenant_id = :tenant and p.name = 'Day Delegate Rate'
+on conflict (product_id) do nothing;
+
 commit;
 
 select r.name, r.area_sqm, string_agg(s.setup_style || ' ' || s.capacity, ', ' order by s.capacity desc) as setups

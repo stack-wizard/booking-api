@@ -12,6 +12,17 @@ Migracija **V100**. Ovisi o Fazi 3 (`event_function`, `event_function_item`).
 - `PER_PAX` s qty 1 → `PER_GUARANTEED_PAX`; ostalo `FIXED` s qty iz quotea.
 - Admin: zasebna stranica `/packages` (popis proizvoda, način cijene, komponente, *Price check* s razlikom), ne tab na Products.
 
+### V101 — web listing paketa (CMS)
+
+- `product_package_listing` (1:1 s paketom, `on delete cascade`): javni naziv i opis, `valid_from/to`, `min/max_pax`, `duration` FULL_DAY/HALF_DAY/CUSTOM, `default_start_time`, `setup_style`, `published`.
+- Admin: kartica *Web listing* na `/packages` (spremanje i provjera dostupnosti).
+- Katalog za CMS / web shop (m2m JWT sa scopeom `booking.api` + `X-Tenant-Id`, **nije** permitAll):
+  - `GET /api/catalog/packages?date=&currency=` — objavljeni i važeći paketi s cijenom po osobi
+  - `GET /api/catalog/packages/{id}`
+  - `GET /api/catalog/packages/{id}/availability?date=&pax=&startTime=` — prostori koji primaju `pax` u `setup_style` i slobodni su u prozoru (raspon funkcijskih komponenti, inače 480 / 240 min) + cijena. Koristi postojeći `SpaceService.searchSpaces`, nema novog availability enginea.
+- `PUT /api/products/{id}/sales-group` — grupa pod kojom proizvod ide na ponudu (Faza 5).
+- dev seed: DDR objavljen kao *Day Delegate Package*.
+
 Paket je `product`, ne nova tablica. `product.product_type` je fiskalna klasifikacija (SEALABLE_PRODUCT / DEPOSIT / DEPOSIT_STORNO / PENALTY) po kojoj se mapiraju Opera charge kodovi — paket ne ide tamo.
 
 ## V100

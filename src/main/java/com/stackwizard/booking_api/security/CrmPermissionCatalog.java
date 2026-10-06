@@ -30,6 +30,7 @@ public final class CrmPermissionCatalog {
         manager.add(CrmPermission.OPPORTUNITY_CLOSE);
         manager.add(CrmPermission.PIPELINE_CONFIG);
         manager.add(CrmPermission.REPORT_READ);
+        manager.add(CrmPermission.QUOTE_APPROVE);
         PERMISSIONS.put(CrmRole.SALES_MANAGER, Collections.unmodifiableSet(manager));
         SCOPES.put(CrmRole.SALES_MANAGER, CrmScope.TEAM);
 

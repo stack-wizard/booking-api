@@ -5,4 +5,7 @@ import org.springframework.web.multipart.MultipartFile;
 public interface MediaStorageService {
     String upload(String category, Long tenantId, String baseName, MultipartFile file);
     String uploadPublic(String category, Long tenantId, String baseName, MultipartFile file);
+
+    /** Reads back an object by the URL {@link #upload} returned. */
+    byte[] download(String storedUrl);
 }

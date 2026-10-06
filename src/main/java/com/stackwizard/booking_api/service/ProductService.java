@@ -9,7 +9,6 @@ import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -50,12 +49,7 @@ public class ProductService {
 
     @Transactional(readOnly = true)
     public List<Product> findAll() {
-        return repo.findAll(Sort.by(
-                Sort.Order.asc("tenantId"),
-                Sort.Order.asc("displayOrder"),
-                Sort.Order.asc("name"),
-                Sort.Order.asc("id")
-        ));
+        return repo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(TenantResolver.requireTenantId());
     }
 
     @Transactional(readOnly = true)

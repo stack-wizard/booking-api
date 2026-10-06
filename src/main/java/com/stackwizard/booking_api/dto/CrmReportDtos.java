@@ -45,6 +45,43 @@ public final class CrmReportDtos {
 
     @Data
     @Builder
+    public static class RevenueRow {
+        private String dimension;
+        private String key;
+        private Long accountId;
+        private long events;
+        private BigDecimal revenue;
+        private BigDecimal cost;
+        private BigDecimal margin;
+        private BigDecimal marginPercent;
+    }
+
+    @Data
+    @Builder
+    public static class RevenueResponse {
+        private List<RevenueRow> byAccount;
+        private List<RevenueRow> bySegment;
+    }
+
+    @Data
+    @Builder
+    public static class UtilisationRow {
+        private Long resourceId;
+        private String resourceName;
+        private double bookedHours;
+        private double availableHours;
+        private BigDecimal utilisation;
+    }
+
+    @Data
+    @Builder
+    public static class UtilisationResponse {
+        private int days;
+        private List<UtilisationRow> spaces;
+    }
+
+    @Data
+    @Builder
     public static class FunnelResponse {
         private List<FunnelStageRow> stages;
     }
@@ -54,6 +91,7 @@ public final class CrmReportDtos {
     public static class ConversionResponse {
         private List<ConversionRow> byOwner;
         private List<ConversionRow> bySegment;
+        private List<ConversionRow> byPipeline;
     }
 
     @Data

@@ -43,6 +43,8 @@ public class SecurityConfig {
                 .requestMatchers(
                     "/api/public/reservation-requests/**",
                     "/booking-api/api/public/reservation-requests/**",
+                    "/api/public/portal/**",
+                    "/booking-api/api/public/portal/**",
                     "/actuator/health",
                     "/booking-api/actuator/health",
                     "/actuator/info",

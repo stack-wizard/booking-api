@@ -2,6 +2,7 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.repository.ResourceRepository;
+import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,7 +14,7 @@ public class ResourceService {
 
     public ResourceService(ResourceRepository repo) { this.repo = repo; }
 
-    public List<Resource> findAll() { return repo.findAll(); }
+    public List<Resource> findAll() { return repo.findByTenantId(TenantResolver.requireTenantId()); }
     public Optional<Resource> findById(Long id) { return repo.findById(id); }
     public Resource save(Resource r) { return repo.save(r); }
     public void deleteById(Long id) { repo.deleteById(id); }

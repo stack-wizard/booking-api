@@ -111,10 +111,182 @@ public class CrmReportService {
                 order by 1
                 """, tenantId, from, to, "segment");
 
+        List<CrmReportDtos.ConversionRow> byPipeline = conversionRows("""
+                select p.name as dim_key,
+                       count(*) filter (where o.status = 'WON') as won,
+                       count(*) filter (where o.status = 'LOST') as lost,
+                       count(*) filter (where o.status = 'TURNED_DOWN') as turned_down,
+                       count(*) filter (where o.status = 'CANCELLED') as cancelled
+                from crm_opportunity o
+                join crm_pipeline p on p.id = o.pipeline_id
+                where o.tenant_id = :tenantId
+                  and o.status in ('WON','LOST','TURNED_DOWN','CANCELLED')
+                  and (cast(:fromTs as timestamptz) is null or o.closed_at >= cast(:fromTs as timestamptz))
+                  and (cast(:toTs as timestamptz) is null or o.closed_at < cast(:toTs as timestamptz))
+                group by p.name
+                order by 1
+                """, tenantId, from, to, "pipeline");
+
         return CrmReportDtos.ConversionResponse.builder()
                 .byOwner(byOwner)
                 .bySegment(bySegment)
+                .byPipeline(byPipeline)
                 .build();
+    }
+
+    /**
+     * DEFINITE and ACTUAL events starting in the range. Revenue is the accepted quote total, otherwise the
+     * event's priced lines; cost is item cost plus crm_cost_item.
+     */
+    @Transactional(readOnly = true)
+    public CrmReportDtos.RevenueResponse revenue(LocalDate from, LocalDate to) {
+        accessContext.require(CrmPermission.REPORT_READ);
+        Long tenantId = TenantResolver.requireTenantId();
+        String sql = """
+                with ev as (
+                  select e.id, e.account_id,
+                         coalesce(q.total_offered,
+                                  coalesce((select sum(r.gross_amount) from reservation r
+                                            join event_function f on f.id = r.event_function_id
+                                            where f.event_id = e.id and r.status <> 'CANCELLED'), 0)
+                                + coalesce((select sum(i.gross_amount) from event_function_item i
+                                            join event_function f on f.id = i.event_function_id
+                                            where f.event_id = e.id), 0)) as revenue,
+                         coalesce((select sum(i.cost_amount) from event_function_item i
+                                   join event_function f on f.id = i.event_function_id
+                                   where f.event_id = e.id), 0)
+                       + coalesce((select sum(c.amount) from crm_cost_item c where c.event_id = e.id), 0) as cost
+                  from event e
+                  left join lateral (
+                    select sq.total_offered from sales_quote sq
+                    where sq.event_id = e.id and sq.status = 'ACCEPTED'
+                    order by sq.id desc limit 1
+                  ) q on true
+                  where e.tenant_id = :tenantId
+                    and e.status in ('DEFINITE','ACTUAL')
+                    and (cast(:fromDate as date) is null or e.date_from >= cast(:fromDate as date))
+                    and (cast(:toDate as date) is null or e.date_from <= cast(:toDate as date))
+                )
+                select a.id, a.name, coalesce(a.segment, 'unspecified') as segment,
+                       count(ev.id), coalesce(sum(ev.revenue), 0), coalesce(sum(ev.cost), 0)
+                from ev
+                join crm_account a on a.id = ev.account_id
+                group by a.id, a.name, a.segment
+                order by 5 desc, a.name
+                """;
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("tenantId", tenantId);
+        query.setParameter("fromDate", from);
+        query.setParameter("toDate", to);
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+        List<CrmReportDtos.RevenueRow> byAccount = new ArrayList<>();
+        java.util.Map<String, BigDecimal[]> segments = new java.util.TreeMap<>();
+        java.util.Map<String, Long> segmentEvents = new java.util.HashMap<>();
+        for (Object[] row : rows) {
+            BigDecimal revenue = toDecimal(row[4]);
+            BigDecimal cost = toDecimal(row[5]);
+            long events = ((Number) row[3]).longValue();
+            byAccount.add(revenueRow("account", (String) row[1], ((Number) row[0]).longValue(), events, revenue, cost));
+            String segment = (String) row[2];
+            BigDecimal[] sum = segments.computeIfAbsent(segment, k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
+            sum[0] = sum[0].add(revenue);
+            sum[1] = sum[1].add(cost);
+            segmentEvents.merge(segment, events, Long::sum);
+        }
+        List<CrmReportDtos.RevenueRow> bySegment = segments.entrySet().stream()
+                .map(e -> revenueRow("segment", e.getKey(), null, segmentEvents.get(e.getKey()), e.getValue()[0], e.getValue()[1]))
+                .toList();
+        return CrmReportDtos.RevenueResponse.builder().byAccount(byAccount).bySegment(bySegment).build();
+    }
+
+    /**
+     * Booked hours (active allocations clipped to the range) against open hours of the booking calendar
+     * for every space that has setup capacities.
+     */
+    @Transactional(readOnly = true)
+    public CrmReportDtos.UtilisationResponse spaceUtilisation(LocalDate from, LocalDate to) {
+        accessContext.require(CrmPermission.REPORT_READ);
+        Long tenantId = TenantResolver.requireTenantId();
+        LocalDate start = from != null ? from : LocalDate.now().withDayOfMonth(1);
+        LocalDate end = to != null ? to : start.plusMonths(1).minusDays(1);
+        if (end.isBefore(start)) {
+            throw new IllegalArgumentException("to must not be before from");
+        }
+        int days = (int) java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
+        String sql = """
+                with spaces as (
+                  select distinct r.id, r.name, r.location_id
+                  from resource r
+                  join resource_setup_capacity c on c.resource_id = r.id and c.tenant_id = r.tenant_id
+                  where r.tenant_id = :tenantId
+                ),
+                booked as (
+                  select a.allocated_resource_id as resource_id,
+                         sum(extract(epoch from (least(a.ends_at, cast(:rangeEnd as timestamp))
+                                               - greatest(a.starts_at, cast(:rangeStart as timestamp)))) / 3600.0) as hours
+                  from allocation a
+                  where a.tenant_id = :tenantId
+                    and a.starts_at < cast(:rangeEnd as timestamp)
+                    and a.ends_at > cast(:rangeStart as timestamp)
+                    and (upper(a.status) = 'CONFIRMED'
+                         or (upper(a.status) = 'HOLD' and (a.expires_at is null or a.expires_at > now())))
+                  group by a.allocated_resource_id
+                )
+                select s.id, s.name, coalesce(b.hours, 0),
+                       coalesce((select extract(epoch from (bc.close_time - bc.open_time)) / 3600.0
+                                 from booking_calendar bc
+                                 where bc.tenant_id = :tenantId
+                                   and (bc.location_node_id = s.location_id or bc.location_node_id is null)
+                                 order by (bc.location_node_id is null), bc.id
+                                 limit 1), 24) as open_hours
+                from spaces s
+                left join booked b on b.resource_id = s.id
+                order by s.name
+                """;
+        Query query = entityManager.createNativeQuery(sql);
+        query.setParameter("tenantId", tenantId);
+        query.setParameter("rangeStart", start.atStartOfDay());
+        query.setParameter("rangeEnd", end.plusDays(1).atStartOfDay());
+        @SuppressWarnings("unchecked")
+        List<Object[]> rows = query.getResultList();
+        List<CrmReportDtos.UtilisationRow> spaces = new ArrayList<>();
+        for (Object[] row : rows) {
+            double booked = ((Number) row[2]).doubleValue();
+            double openHours = ((Number) row[3]).doubleValue();
+            double available = openHours > 0 ? openHours * days : 24.0 * days;
+            spaces.add(CrmReportDtos.UtilisationRow.builder()
+                    .resourceId(((Number) row[0]).longValue())
+                    .resourceName((String) row[1])
+                    .bookedHours(Math.round(booked * 100) / 100.0)
+                    .availableHours(Math.round(available * 100) / 100.0)
+                    .utilisation(BigDecimal.valueOf(Math.min(1.0, booked / available)).setScale(4, RoundingMode.HALF_UP))
+                    .build());
+        }
+        return CrmReportDtos.UtilisationResponse.builder().days(days).spaces(spaces).build();
+    }
+
+    static CrmReportDtos.RevenueRow revenueRow(String dimension, String key, Long accountId, long events,
+                                               BigDecimal revenue, BigDecimal cost) {
+        BigDecimal margin = revenue.subtract(cost);
+        return CrmReportDtos.RevenueRow.builder()
+                .dimension(dimension)
+                .key(key)
+                .accountId(accountId)
+                .events(events)
+                .revenue(revenue.setScale(2, RoundingMode.HALF_UP))
+                .cost(cost.setScale(2, RoundingMode.HALF_UP))
+                .margin(margin.setScale(2, RoundingMode.HALF_UP))
+                .marginPercent(revenue.signum() == 0 ? null
+                        : margin.multiply(BigDecimal.valueOf(100)).divide(revenue, 2, RoundingMode.HALF_UP))
+                .build();
+    }
+
+    private static BigDecimal toDecimal(Object value) {
+        if (value == null) {
+            return BigDecimal.ZERO;
+        }
+        return value instanceof BigDecimal b ? b : new BigDecimal(value.toString());
     }
 
     @Transactional(readOnly = true)

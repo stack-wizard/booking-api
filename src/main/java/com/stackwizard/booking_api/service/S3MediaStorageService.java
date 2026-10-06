@@ -6,6 +6,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetUrlRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
@@ -68,6 +69,37 @@ public class S3MediaStorageService implements MediaStorageService {
                 .bucket(mediaS3Properties.getBucket())
                 .key(key)
                 .build()).toExternalForm();
+    }
+
+    @Override
+    public byte[] download(String storedUrl) {
+        if (!StringUtils.hasText(storedUrl)) {
+            throw new IllegalArgumentException("storage key is required");
+        }
+        String key = objectKey(storedUrl, mediaS3Properties.getBucket());
+        try {
+            return s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(mediaS3Properties.getBucket())
+                    .key(key)
+                    .build()).asByteArray();
+        } catch (Exception ex) {
+            throw new IllegalStateException("Failed to download media from S3", ex);
+        }
+    }
+
+    /** Object key from a path-style (/bucket/key) or virtual-hosted (/key) URL. */
+    static String objectKey(String storedUrl, String bucket) {
+        String path = storedUrl;
+        try {
+            path = java.net.URI.create(storedUrl).getRawPath();
+        } catch (IllegalArgumentException ignored) {
+            // not a URL: treat as a key
+        }
+        path = java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8).replaceAll("^/+", "");
+        if (StringUtils.hasText(bucket) && path.startsWith(bucket + "/")) {
+            path = path.substring(bucket.length() + 1);
+        }
+        return path;
     }
 
     private String extensionOrDefault(String filename, String defaultExt) {

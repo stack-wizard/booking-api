@@ -34,6 +34,20 @@ public class CrmReportController {
         return service.conversion(from, to);
     }
 
+    @GetMapping("/revenue")
+    public CrmReportDtos.RevenueResponse revenue(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.revenue(from, to);
+    }
+
+    @GetMapping("/space-utilisation")
+    public CrmReportDtos.UtilisationResponse spaceUtilisation(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        return service.spaceUtilisation(from, to);
+    }
+
     @GetMapping("/stage-duration")
     public CrmReportDtos.StageDurationResponse stageDuration(
             @RequestParam Long pipelineId,

@@ -73,6 +73,17 @@ public class PackageService {
         return new PackageDefinition(pricing, saved);
     }
 
+    /** Quote group of the product; DISCOUNT is reserved for manual quote lines. */
+    @Transactional
+    public Product setSalesGroup(Long productId, com.stackwizard.booking_api.model.SalesQuoteLine.Group group) {
+        if (group == com.stackwizard.booking_api.model.SalesQuoteLine.Group.DISCOUNT) {
+            throw new IllegalArgumentException("DISCOUNT is not a product sales group");
+        }
+        Product product = requireProduct(TenantResolver.requireTenantId(), productId);
+        product.setSalesGroup(group);
+        return productRepo.save(product);
+    }
+
     @Transactional(readOnly = true)
     public PackageQuote quote(Long packageProductId, LocalDate date, Integer pax, String currency) {
         Long tenantId = TenantResolver.requireTenantId();

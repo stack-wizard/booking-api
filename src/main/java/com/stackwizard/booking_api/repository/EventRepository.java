@@ -44,4 +44,40 @@ public interface EventRepository extends JpaRepository<Event, Long> {
               and e.decisionDate < :today
             """)
     List<Event> findExpiredTentative(@Param("today") LocalDate today);
+
+    @Query("""
+            select e from Event e
+            where e.status = com.stackwizard.booking_api.model.Event.Status.TENTATIVE
+              and e.decisionDate between :from and :to
+            """)
+    List<Event> findDecisionDueBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("""
+            select e from Event e
+            where e.status in (com.stackwizard.booking_api.model.Event.Status.TENTATIVE,
+                               com.stackwizard.booking_api.model.Event.Status.DEFINITE)
+              and e.guaranteedPax is null
+              and e.guaranteeDueDate between :from and :to
+            """)
+    List<Event> findGuaranteeDueBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("""
+            select e from Event e
+            where e.status = com.stackwizard.booking_api.model.Event.Status.DEFINITE
+              and e.dateFrom between :from and :to
+              and not exists (select o.id from EventOrder o
+                              where o.eventId = e.id
+                                and o.status = com.stackwizard.booking_api.model.EventOrder.Status.ISSUED)
+            """)
+    List<Event> findDefiniteWithoutBeoStartingBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("""
+            select e from Event e
+            where e.tenantId = :tenantId
+              and (e.primaryContactId in :contactIds or e.accountId in :accountIds)
+            order by e.dateFrom desc, e.id desc
+            """)
+    List<Event> findForPortal(@Param("tenantId") Long tenantId,
+                              @Param("contactIds") Collection<Long> contactIds,
+                              @Param("accountIds") Collection<Long> accountIds);
 }

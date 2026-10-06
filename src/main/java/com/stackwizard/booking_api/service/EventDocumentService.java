@@ -146,7 +146,7 @@ public class EventDocumentService {
             builder.run();
             return out.toByteArray();
         } catch (Exception ex) {
-            throw new IllegalStateException("Could not render BEO PDF: " + ex.getMessage(), ex);
+            throw new IllegalStateException("Could not render PDF: " + ex.getMessage(), ex);
         }
     }
 
@@ -381,7 +381,7 @@ public class EventDocumentService {
         return hasA ? a : hasB ? b : null;
     }
 
-    private static String esc(String value) {
+    static String esc(String value) {
         return value == null ? "" : HtmlUtils.htmlEscape(value, StandardCharsets.UTF_8.name());
     }
 

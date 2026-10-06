@@ -20,3 +20,7 @@ media:
 booking:
   dev:
     reference-date: 2026-04-01
+
+crm:
+  portal:
+    base-url: ${CRM_PORTAL_BASE_URL:http://127.0.0.1:5173/booking-admin/portal/}

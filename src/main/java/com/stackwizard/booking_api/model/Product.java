@@ -83,6 +83,10 @@ public class Product {
     @Column(name = "package_pricing")
     private PackagePricing packagePricing;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sales_group")
+    private SalesQuoteLine.Group salesGroup;
+
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("sortOrder ASC, id ASC")
     @Builder.Default

@@ -10,5 +10,6 @@ public enum CrmPermission {
     ACTIVITY_WRITE,
     REPORT_READ,
     EVENT_READ,
-    EVENT_WRITE
+    EVENT_WRITE,
+    QUOTE_APPROVE
 }

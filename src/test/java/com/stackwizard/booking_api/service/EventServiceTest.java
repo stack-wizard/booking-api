@@ -3,6 +3,8 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.EventDtos;
 import com.stackwizard.booking_api.model.CrmOutcomeReason;
 import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.SalesQuote;
+import com.stackwizard.booking_api.repository.SalesQuoteRepository;
 import com.stackwizard.booking_api.model.EventStatusHistory;
 import com.stackwizard.booking_api.repository.CrmAccountRepository;
 import com.stackwizard.booking_api.repository.CrmContactRepository;
@@ -50,6 +52,7 @@ class EventServiceTest {
     @Mock EventItemPricing itemPricing;
     @Mock CrmAccessContext accessContext;
     @Mock PlatformTransactionManager transactionManager;
+    @Mock SalesQuoteRepository quoteRepo;
 
     EventService service;
 
@@ -60,7 +63,7 @@ class EventServiceTest {
         when(accessContext.currentUserId()).thenReturn(7L);
         when(eventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
-                opportunityRepo, reservationSync, itemPricing, accessContext, transactionManager);
+                opportunityRepo, reservationSync, itemPricing, accessContext, transactionManager, quoteRepo, true);
     }
 
     @AfterEach
@@ -94,6 +97,20 @@ class EventServiceTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("INQUIRY to DEFINITE");
         verify(reservationSync, never()).syncEvent(any());
+    }
+
+    @Test
+    void definiteRequiresAcceptedQuote() {
+        event(Event.Status.TENTATIVE).setDecisionDate(LocalDate.now().plusDays(3));
+        when(functionRepo.existsByTenantIdAndEventIdAndResourceIdIsNotNull(1L, 5L)).thenReturn(true);
+        when(quoteRepo.existsByTenantIdAndEventIdAndStatus(1L, 5L, SalesQuote.Status.ACCEPTED)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.changeStatus(5L, to(Event.Status.DEFINITE, null)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("accepted quote");
+
+        when(quoteRepo.existsByTenantIdAndEventIdAndStatus(1L, 5L, SalesQuote.Status.ACCEPTED)).thenReturn(true);
+        assertThat(service.changeStatus(5L, to(Event.Status.DEFINITE, null)).getStatus()).isEqualTo(Event.Status.DEFINITE);
     }
 
     @Test
