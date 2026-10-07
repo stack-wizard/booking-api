@@ -7,4 +7,6 @@ public interface ResourceCompositionRepository extends JpaRepository<ResourceCom
     java.util.List<ResourceComposition> findByParentResourceId(Long parentResourceId);
     java.util.List<ResourceComposition> findByParentResourceIdIn(java.util.List<Long> parentResourceIds);
     java.util.List<ResourceComposition> findByMemberResourceIdIn(java.util.List<Long> memberResourceIds);
+    java.util.List<ResourceComposition> findByTenantId(Long tenantId);
+    java.util.Optional<ResourceComposition> findByIdAndTenantId(Long id, Long tenantId);
 }

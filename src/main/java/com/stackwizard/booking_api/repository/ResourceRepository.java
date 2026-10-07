@@ -11,6 +11,7 @@ import java.util.Optional;
 public interface ResourceRepository extends JpaRepository<Resource, Long> {
     List<Resource> findByTenantId(Long tenantId);
     List<Resource> findByTenantIdAndLocationId(Long tenantId, Long locationId);
+    Optional<Resource> findByIdAndTenantId(Long id, Long tenantId);
 
     @Query("select r from Resource r join fetch r.resourceType where r.id = :id")
     Optional<Resource> findByIdWithType(@Param("id") Long id);
