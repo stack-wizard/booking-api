@@ -17,11 +17,25 @@ public class BookingDevProperties {
      */
     private LocalDate referenceDate;
 
+    /**
+     * When true (default), startup on profile {@code dev}/{@code local} seeds one demo sales flow
+     * for the Opera hotel {@code DH} tenant if that hotel exists. No-op when DH is missing — safe for AWS.
+     */
+    private boolean dhSalesFlowSeed = true;
+
     public LocalDate getReferenceDate() {
         return referenceDate;
     }
 
     public void setReferenceDate(LocalDate referenceDate) {
         this.referenceDate = referenceDate;
+    }
+
+    public boolean isDhSalesFlowSeed() {
+        return dhSalesFlowSeed;
+    }
+
+    public void setDhSalesFlowSeed(boolean dhSalesFlowSeed) {
+        this.dhSalesFlowSeed = dhSalesFlowSeed;
     }
 }
