@@ -9,5 +9,6 @@ spring:
 # booking:
 #   dev:
 #     reference-date: 2026-04-01
-#     # Demo sales flow for Opera hotel DH (startup no-op if DH missing). Default true; works on AWS prod profile too.
+#     # Demo sales flow for Platform tenant 11111111-… (via platform_tenant_mapping). Default true.
 #     # dh-sales-flow-seed: false
+#     # dh-sales-flow-platform-tenant-id: 11111111-1111-1111-1111-111111111111

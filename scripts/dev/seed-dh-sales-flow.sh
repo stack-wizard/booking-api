@@ -25,14 +25,15 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
   exit 0
 fi
 
-TENANT="$(psql_q -tAc "select tenant_id from opera_hotel where upper(hotel_code) = 'DH' and active order by id limit 1" | tr -d '[:space:]')"
+PLATFORM_TENANT="${PLATFORM_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
+TENANT="$(psql_q -tAc "select tenant_id from platform_tenant_mapping where platform_tenant_id = '${PLATFORM_TENANT}'::uuid limit 1" | tr -d '[:space:]')"
 
 if [[ -z "$TENANT" ]]; then
-  echo "Opera hotel DH not found — skipping sales-flow seed (safe for non-DH environments)."
+  echo "Platform tenant ${PLATFORM_TENANT} is not mapped — skipping (log into admin once, then re-run)."
   exit 0
 fi
 
-echo "Seeding DH sales flow for tenant_id=$TENANT"
+echo "Seeding demo sales flow for platform=${PLATFORM_TENANT} → tenant_id=$TENANT"
 
 # Catalog (spaces, packages, teams) — idempotent; same script used for the CRM demo tenant.
 psql_q -v tenant="$TENANT" < "$ROOT/scripts/dev/seed-events.sql" >/dev/null

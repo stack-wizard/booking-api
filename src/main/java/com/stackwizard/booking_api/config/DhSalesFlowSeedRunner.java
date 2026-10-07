@@ -5,8 +5,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
@@ -17,14 +17,18 @@ import org.springframework.transaction.support.TransactionTemplate;
 import javax.sql.DataSource;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.util.UUID;
 
 /**
- * Seeds catalog + one won sales flow for the Opera hotel {@code DH} tenant, using the same datasource
- * as the app ({@code application-*.yaml} / SSM {@code SPRING_APPLICATION_JSON}).
+ * Seeds catalog + one won sales flow for a Platform tenant, using the app datasource
+ * ({@code application-*.yaml} / SSM {@code SPRING_APPLICATION_JSON}).
  * <p>
- * Not tied to a Spring profile — AWS forotel stacks run with {@code SPRING_PROFILES_ACTIVE=prod}.
- * Gated by {@code booking.dev.dh-sales-flow-seed} (default true). If DH is missing, logs and exits;
- * failures never block startup. Disable on real prod via SSM if needed.
+ * Resolves Platform UUID → local {@code tenant_id} via {@code platform_tenant_mapping}
+ * (same path as {@code X-Tenant-Id}). Not an Opera hotel code. Mapping is created automatically
+ * on first admin login — there is no mapping screen in the UI.
+ * <p>
+ * Gated by {@code booking.dev.dh-sales-flow-seed} (default true). Missing mapping → log and skip.
+ * Failures never block startup.
  */
 @Component
 @Order(1000)
@@ -53,36 +57,45 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         if (!properties.isDhSalesFlowSeed()) {
-            log.info("DH sales-flow seed disabled (booking.dev.dh-sales-flow-seed=false)");
+            log.info("Demo sales-flow seed disabled (booking.dev.dh-sales-flow-seed=false)");
             return;
         }
         try {
             tx.executeWithoutResult(status -> seed());
         } catch (Exception ex) {
-            // Never block app boot on demo data — log and continue.
-            log.warn("DH sales-flow seed failed (app continues): {}", ex.getMessage(), ex);
+            log.warn("Demo sales-flow seed failed (app continues): {}", ex.getMessage(), ex);
         }
     }
 
     private void seed() {
         Boolean locked = jdbc.queryForObject("select pg_try_advisory_xact_lock(?)", Boolean.class, ADVISORY_LOCK_KEY);
         if (!Boolean.TRUE.equals(locked)) {
-            log.info("DH sales-flow seed skipped — another instance holds the lock");
+            log.info("Demo sales-flow seed skipped — another instance holds the lock");
+            return;
+        }
+
+        UUID platformTenantId = properties.getDhSalesFlowPlatformTenantId();
+        if (platformTenantId == null) {
+            log.info("Demo sales-flow platform tenant id is not set — skipping");
             return;
         }
 
         Long tenantId = jdbc.query(
                 """
                 select tenant_id
-                from opera_hotel
-                where upper(hotel_code) = 'DH' and active
-                order by id
+                from platform_tenant_mapping
+                where platform_tenant_id = ?
                 limit 1
                 """,
-                rs -> rs.next() ? rs.getLong(1) : null
+                rs -> rs.next() ? rs.getLong(1) : null,
+                platformTenantId
         );
         if (tenantId == null) {
-            log.info("Opera hotel DH not found — skipping sales-flow seed (ok for non-DH environments)");
+            log.info(
+                    "Platform tenant {} is not mapped yet — skipping sales-flow seed "
+                            + "(log into booking-admin with that tenant once, then restart)",
+                    platformTenantId
+            );
             return;
         }
 
@@ -95,14 +108,14 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
                 tenantId
         );
         if (already != null && already > 0) {
-            log.info("DH sales-flow demo already present for tenant {} — skipping", tenantId);
+            log.info("Demo sales-flow already present for tenant_id={} (platform {}) — skipping", tenantId, platformTenantId);
             return;
         }
 
-        log.info("Seeding DH sales flow for tenant_id={}", tenantId);
+        log.info("Seeding demo sales flow for platform={} → tenant_id={}", platformTenantId, tenantId);
         runScript("db/seed/events_catalog.sql", tenantId);
         runScript("db/seed/dh_sales_flow.sql", tenantId);
-        log.info("DH sales-flow seed done for tenant_id={}", tenantId);
+        log.info("Demo sales-flow seed done for tenant_id={}", tenantId);
     }
 
     private void runScript(String classpathLocation, long tenantId) {
@@ -112,7 +125,6 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
                     .replace("__TENANT_ID__", Long.toString(tenantId));
             Connection connection = DataSourceUtils.getConnection(dataSource);
             try {
-                // Participate in the outer Spring transaction (same connection as advisory lock).
                 ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));
             } finally {
                 DataSourceUtils.releaseConnection(connection, dataSource);

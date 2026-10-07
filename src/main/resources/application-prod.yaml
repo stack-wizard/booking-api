@@ -6,6 +6,6 @@ spring:
     driver-class-name: org.postgresql.Driver
 
 # AWS forotel-* stacks set SPRING_PROFILES_ACTIVE=prod (see forotel-infrastructure master.yaml).
-# DH demo seed still runs when booking.dev.dh-sales-flow-seed is true (default) and opera_hotel DH exists.
-# To disable on forotel-prod, set in SSM SPRING_APPLICATION_JSON:
+# Demo sales-flow seed resolves Platform UUID → tenant_id via platform_tenant_mapping (default 11111111-…).
+# To disable on forotel-prod:
 #   "booking": { "dev": { "dh-sales-flow-seed": false } }

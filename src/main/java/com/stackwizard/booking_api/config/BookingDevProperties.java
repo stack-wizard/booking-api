@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 /**
  * Development-only knobs. {@link #referenceDate} is only honored when running with profile {@code dev} or {@code local}
@@ -11,6 +12,10 @@ import java.time.LocalDate;
 @ConfigurationProperties(prefix = "booking.dev")
 public class BookingDevProperties {
 
+    /** Well-known Platform tenant used by local/E2E and forotel-dev admin selector. */
+    public static final UUID DEFAULT_DEMO_PLATFORM_TENANT_ID =
+            UUID.fromString("11111111-1111-1111-1111-111111111111");
+
     /**
      * When set and profile is dev/local, used instead of {@link LocalDate#now()} for selected defaults
      * (e.g. resource map {@code /periods} when {@code fromDate} is omitted).
@@ -18,11 +23,16 @@ public class BookingDevProperties {
     private LocalDate referenceDate;
 
     /**
-     * When true (default), startup seeds one demo sales flow for the Opera hotel {@code DH} tenant
-     * if that hotel exists. No-op when DH is missing. Not profile-gated — AWS uses Spring profile {@code prod}.
-     * Set {@code false} in SSM on environments that must not get demo data.
+     * When true (default), startup seeds one demo sales flow for {@link #dhSalesFlowPlatformTenantId}
+     * if that Platform tenant is mapped. No-op when mapping is missing. Disable via SSM on real prod.
      */
     private boolean dhSalesFlowSeed = true;
+
+    /**
+     * Platform tenant UUID ({@code X-Tenant-Id}). Resolved to local {@code tenant_id} via
+     * {@code platform_tenant_mapping} — not an Opera hotel code.
+     */
+    private UUID dhSalesFlowPlatformTenantId = DEFAULT_DEMO_PLATFORM_TENANT_ID;
 
     public LocalDate getReferenceDate() {
         return referenceDate;
@@ -38,5 +48,13 @@ public class BookingDevProperties {
 
     public void setDhSalesFlowSeed(boolean dhSalesFlowSeed) {
         this.dhSalesFlowSeed = dhSalesFlowSeed;
+    }
+
+    public UUID getDhSalesFlowPlatformTenantId() {
+        return dhSalesFlowPlatformTenantId;
+    }
+
+    public void setDhSalesFlowPlatformTenantId(UUID dhSalesFlowPlatformTenantId) {
+        this.dhSalesFlowPlatformTenantId = dhSalesFlowPlatformTenantId;
     }
 }
