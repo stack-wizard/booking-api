@@ -9,6 +9,6 @@ spring:
 # booking:
 #   dev:
 #     reference-date: 2026-04-01
-#     # Demo sales flow for Platform tenant 11111111-… (via platform_tenant_mapping). Default true.
+#     # Demo sales flow for Platform "Demo Hotel (DH)" 21111111-… (hotel_code DH). Default true.
 #     # dh-sales-flow-seed: false
-#     # dh-sales-flow-platform-tenant-id: 11111111-1111-1111-1111-111111111111
+#     # dh-sales-flow-platform-tenant-id: 21111111-1111-1111-1111-111111111111

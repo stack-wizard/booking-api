@@ -12,9 +12,12 @@ import java.util.UUID;
 @ConfigurationProperties(prefix = "booking.dev")
 public class BookingDevProperties {
 
-    /** Well-known Platform tenant used by local/E2E and forotel-dev admin selector. */
+    /**
+     * Platform tenant "Demo Hotel (DH)" — has hotel code {@code DH} under group {@code 11111111-…}.
+     * Seed targets this property tenant, not the parent group.
+     */
     public static final UUID DEFAULT_DEMO_PLATFORM_TENANT_ID =
-            UUID.fromString("11111111-1111-1111-1111-111111111111");
+            UUID.fromString("21111111-1111-1111-1111-111111111111");
 
     /**
      * When set and profile is dev/local, used instead of {@link LocalDate#now()} for selected defaults

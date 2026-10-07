@@ -25,7 +25,8 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
   exit 0
 fi
 
-PLATFORM_TENANT="${PLATFORM_TENANT_ID:-11111111-1111-1111-1111-111111111111}"
+# Platform "Demo Hotel (DH)" — hotel_code DH (not the parent Demo Hotel Group).
+PLATFORM_TENANT="${PLATFORM_TENANT_ID:-21111111-1111-1111-1111-111111111111}"
 TENANT="$(psql_q -tAc "select tenant_id from platform_tenant_mapping where platform_tenant_id = '${PLATFORM_TENANT}'::uuid limit 1" | tr -d '[:space:]')"
 
 if [[ -z "$TENANT" ]]; then

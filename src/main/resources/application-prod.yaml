@@ -6,6 +6,6 @@ spring:
     driver-class-name: org.postgresql.Driver
 
 # AWS forotel-* stacks set SPRING_PROFILES_ACTIVE=prod (see forotel-infrastructure master.yaml).
-# Demo sales-flow seed resolves Platform UUID → tenant_id via platform_tenant_mapping (default 11111111-…).
+# Demo sales-flow seed resolves Platform UUID → tenant_id via platform_tenant_mapping (default 21111111-… = Demo Hotel DH).
 # To disable on forotel-prod:
 #   "booking": { "dev": { "dh-sales-flow-seed": false } }
