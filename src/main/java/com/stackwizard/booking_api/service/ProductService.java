@@ -221,7 +221,9 @@ public class ProductService {
         target.setName(source.getName());
         target.setDisplayOrder(source.getDisplayOrder());
         target.setDescription(trimToNull(source.getDescription()));
-        target.setResource(source.getResource());
+        if (source.getResource() != null || target.getId() == null) {
+            target.setResource(source.getResource());
+        }
         target.setDefaultUom(source.getDefaultUom());
         target.setProductType(source.getProductType());
         target.setTax1Percent(source.getTax1Percent());

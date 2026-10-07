@@ -20,6 +20,13 @@ from price_profile pp
 where pp.tenant_id = :tenant and pp.name = 'Events EUR'
   and not exists (select 1 from price_profile_date d where d.price_profile_id = pp.id);
 
+-- Next season starts empty; prices are copied into it from the Products screen.
+insert into price_profile_date (price_profile_id, date_from, date_to, description)
+select pp.id, date '2028-01-01', date '2028-12-31', 'EVENTS 2028'
+from price_profile pp
+where pp.tenant_id = :tenant and pp.name = 'Events EUR'
+  and not exists (select 1 from price_profile_date d where d.price_profile_id = pp.id and d.date_from = date '2028-01-01');
+
 -- Products: rent (per space), catering, equipment.
 create temporary table seed_product (name text, uom text, extra text[], price numeric, extra_prices numeric[], tax numeric, ord int) on commit drop;
 insert into seed_product values
@@ -58,7 +65,7 @@ cross join lateral (
   select e.uom, e.price from unnest(s.extra, s.extra_prices) as e(uom, price)
 ) x
 join price_profile pp on pp.tenant_id = :tenant and pp.name = 'Events EUR'
-join price_profile_date d on d.price_profile_id = pp.id
+join price_profile_date d on d.price_profile_id = pp.id and d.date_from = date '2026-01-01'
 where not exists (
   select 1 from price_list l where l.product_id = p.id and upper(l.uom) = upper(x.uom) and l.price_profile_id = pp.id
 );

@@ -97,4 +97,15 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
                                                            @Param("tenantId") Long tenantId,
                                                            @Param("date") LocalDate date,
                                                            @Param("requestType") ReservationRequest.Type requestType);
+
+    @Query("""
+            select p
+            from PriceListEntry p
+            join fetch p.priceProfile prof
+            join fetch p.priceProfileDate pd
+            where p.productId = :productId
+              and prof.tenantId = :tenantId
+            order by prof.name, pd.dateFrom, p.uom, p.startTime
+            """)
+    List<PriceListEntry> findForProduct(@Param("productId") Long productId, @Param("tenantId") Long tenantId);
 }
