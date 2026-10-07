@@ -18,8 +18,9 @@ public class BookingDevProperties {
     private LocalDate referenceDate;
 
     /**
-     * When true (default), startup on profile {@code dev}/{@code local} seeds one demo sales flow
-     * for the Opera hotel {@code DH} tenant if that hotel exists. No-op when DH is missing — safe for AWS.
+     * When true (default), startup seeds one demo sales flow for the Opera hotel {@code DH} tenant
+     * if that hotel exists. No-op when DH is missing. Not profile-gated — AWS uses Spring profile {@code prod}.
+     * Set {@code false} in SSM on environments that must not get demo data.
      */
     private boolean dhSalesFlowSeed = true;
 

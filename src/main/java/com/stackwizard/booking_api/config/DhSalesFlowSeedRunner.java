@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.ByteArrayResource;
@@ -23,10 +22,11 @@ import java.sql.Connection;
  * Seeds catalog + one won sales flow for the Opera hotel {@code DH} tenant, using the same datasource
  * as the app ({@code application-*.yaml} / SSM {@code SPRING_APPLICATION_JSON}).
  * <p>
- * Active only on {@code dev} and {@code local}. If DH is missing, logs and exits — never fails startup.
+ * Not tied to a Spring profile — AWS forotel stacks run with {@code SPRING_PROFILES_ACTIVE=prod}.
+ * Gated by {@code booking.dev.dh-sales-flow-seed} (default true). If DH is missing, logs and exits;
+ * failures never block startup. Disable on real prod via SSM if needed.
  */
 @Component
-@Profile({"dev", "local"})
 @Order(1000)
 public class DhSalesFlowSeedRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(DhSalesFlowSeedRunner.class);

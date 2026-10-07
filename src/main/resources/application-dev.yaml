@@ -9,5 +9,5 @@ spring:
 # booking:
 #   dev:
 #     reference-date: 2026-04-01
-#     # Demo sales flow for Opera hotel DH (startup no-op if DH missing). Default true on profile dev/local.
-#     dh-sales-flow-seed: true
+#     # Demo sales flow for Opera hotel DH (startup no-op if DH missing). Default true; works on AWS prod profile too.
+#     # dh-sales-flow-seed: false
