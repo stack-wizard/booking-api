@@ -24,11 +24,12 @@ import java.util.UUID;
  * ({@code application-*.yaml} / SSM {@code SPRING_APPLICATION_JSON}).
  * <p>
  * Resolves Platform UUID → local {@code tenant_id} via {@code platform_tenant_mapping}
- * (same path as {@code X-Tenant-Id}). Not an Opera hotel code. Mapping is created automatically
- * on first admin login — there is no mapping screen in the UI.
+ * (same path as {@code X-Tenant-Id}). Catalog and CRM go to the chain, spaces and functions to the hotel.
  * <p>
- * Gated by {@code booking.dev.dh-sales-flow-seed} (default true). Missing mapping → log and skip.
- * Failures never block startup.
+ * After parent/child tenancy, an older seed on the hotel alone is wiped and re-seeded onto the organization
+ * with {@code property_tenant_id} set. A correct seed is left alone. Gated by
+ * {@code booking.dev.dh-sales-flow-seed} (default true). Missing mapping → log and skip. Failures never
+ * block startup.
  */
 @Component
 @Order(1000)
@@ -80,49 +81,100 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
             return;
         }
 
-        Long tenantId = jdbc.query(
-                """
-                select tenant_id
-                from platform_tenant_mapping
-                where platform_tenant_id = ?
-                limit 1
-                """,
-                rs -> rs.next() ? rs.getLong(1) : null,
-                platformTenantId
-        );
-        if (tenantId == null) {
+        Scope scope = resolveScope(platformTenantId);
+        if (scope == null) {
             log.info(
                     "Platform tenant {} is not mapped yet — skipping sales-flow seed "
-                            + "(log into booking-admin with that tenant once, then restart)",
+                            + "(onboard the tenant in booking-admin /setup first, then restart)",
                     platformTenantId
             );
             return;
         }
 
-        Integer already = jdbc.queryForObject(
-                """
-                select count(*)::int from event
-                where tenant_id = ? and attrs->>'seed' = 'DH_SALES_FLOW'
-                """,
-                Integer.class,
-                tenantId
-        );
-        if (already != null && already > 0) {
-            log.info("Demo sales-flow already present for tenant_id={} (platform {}) — skipping", tenantId, platformTenantId);
+        if (isCorrectSeedPresent(scope.orgTenantId(), scope.propertyTenantId())) {
+            log.info(
+                    "Demo sales-flow already present for org={} property={} (platform {}) — skipping",
+                    scope.orgTenantId(), scope.propertyTenantId(), platformTenantId
+            );
             return;
         }
 
-        log.info("Seeding demo sales flow for platform={} → tenant_id={}", platformTenantId, tenantId);
-        runScript("db/seed/events_catalog.sql", tenantId);
-        runScript("db/seed/dh_sales_flow.sql", tenantId);
-        log.info("Demo sales-flow seed done for tenant_id={}", tenantId);
+        log.info(
+                "Resetting demo sales-flow for platform={} → org={} property={}",
+                platformTenantId, scope.orgTenantId(), scope.propertyTenantId()
+        );
+        runScript("db/seed/dh_sales_flow_wipe.sql", scope.orgTenantId(), scope.propertyTenantId());
+        runScript("db/seed/events_catalog.sql", scope.orgTenantId(), scope.propertyTenantId());
+        runScript("db/seed/dh_sales_flow.sql", scope.orgTenantId(), scope.propertyTenantId());
+        log.info("Demo sales-flow seed done for org={}", scope.orgTenantId());
     }
 
-    private void runScript(String classpathLocation, long tenantId) {
+    private record Scope(long orgTenantId, long propertyTenantId) {
+    }
+
+    private Scope resolveScope(UUID platformTenantId) {
+        return jdbc.query(
+                """
+                select m.tenant_id, m.kind, m.parent_tenant_id
+                from platform_tenant_mapping m
+                where m.platform_tenant_id = ?
+                limit 1
+                """,
+                rs -> {
+                    if (!rs.next()) {
+                        return null;
+                    }
+                    long tenantId = rs.getLong(1);
+                    String kind = rs.getString(2);
+                    long parentTenantId = rs.getLong(3);
+                    boolean hasParent = !rs.wasNull();
+                    if ("PROPERTY".equals(kind) && hasParent) {
+                        return new Scope(parentTenantId, tenantId);
+                    }
+                    long propertyTenantId = firstHotelOf(tenantId);
+                    return new Scope(tenantId, propertyTenantId);
+                },
+                platformTenantId
+        );
+    }
+
+    /** True when the demo event sits on the organization and points at the hotel. */
+    private boolean isCorrectSeedPresent(long orgTenantId, long propertyTenantId) {
+        Integer count = jdbc.queryForObject(
+                """
+                select count(*)::int from event
+                where tenant_id = ?
+                  and attrs->>'seed' = 'DH_SALES_FLOW'
+                  and property_tenant_id is not distinct from ?
+                """,
+                Integer.class,
+                orgTenantId,
+                propertyTenantId
+        );
+        return count != null && count > 0;
+    }
+
+    private long firstHotelOf(long orgTenantId) {
+        Long hotel = jdbc.query(
+                """
+                select tenant_id from platform_tenant_mapping
+                where parent_tenant_id = ?
+                order by hotel_code, tenant_id
+                limit 1
+                """,
+                rs -> rs.next() ? rs.getLong(1) : null,
+                orgTenantId
+        );
+        return hotel != null ? hotel : orgTenantId;
+    }
+
+    private void runScript(String classpathLocation, long orgTenantId, long propertyTenantId) {
         try {
             String sql = new ClassPathResource(classpathLocation)
                     .getContentAsString(StandardCharsets.UTF_8)
-                    .replace("__TENANT_ID__", Long.toString(tenantId));
+                    .replace("__ORG_TENANT_ID__", Long.toString(orgTenantId))
+                    .replace("__PROPERTY_TENANT_ID__", Long.toString(propertyTenantId))
+                    .replace("__TENANT_ID__", Long.toString(orgTenantId));
             Connection connection = DataSourceUtils.getConnection(dataSource);
             try {
                 ScriptUtils.executeSqlScript(connection, new ByteArrayResource(sql.getBytes(StandardCharsets.UTF_8)));

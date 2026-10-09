@@ -18,9 +18,10 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
               and (:pipelineId is null or o.pipelineId = :pipelineId)
               and (
                    :scopeAll = true
-                   or (:scopeOwn = true and o.ownerUserId = :currentUserId)
-                   or (:scopeTeam = true and o.ownerUserId in :teamUserIds)
-                   or (:scopeTeam = true and o.teamId in :teamIds)
+                   or ((:scopeOwn = true or :scopeTeam = true) and o.ownerUserId = :currentUserId)
+                   or (:scopeTeam = true
+                       and (o.ownerUserId in :teamUserIds or o.teamId in :teamIds)
+                       and (:allHotels = true or o.propertyTenantId in :propertyIds))
               )
             order by o.createdAt desc
             """)
@@ -31,7 +32,9 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
                                     @Param("scopeTeam") boolean scopeTeam,
                                     @Param("currentUserId") Long currentUserId,
                                     @Param("teamUserIds") Collection<Long> teamUserIds,
-                            @Param("teamIds") Collection<Long> teamIds);
+                                    @Param("teamIds") Collection<Long> teamIds,
+                                    @Param("allHotels") boolean allHotels,
+                                    @Param("propertyIds") Collection<Long> propertyIds);
 
     List<CrmOpportunity> findByTenantIdAndOwnerUserIdAndStatus(Long tenantId, Long ownerUserId, CrmOpportunity.Status status);
 }

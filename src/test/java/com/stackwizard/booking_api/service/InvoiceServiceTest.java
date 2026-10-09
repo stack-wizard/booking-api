@@ -92,7 +92,8 @@ class InvoiceServiceTest {
                 priceListRepo,
                 fiscalBusinessPremiseService,
                 fiscalCashRegisterService,
-                appUserRepo
+                appUserRepo,
+                TenantHierarchyTestSupport.standalone()
         );
     }
 

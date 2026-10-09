@@ -40,19 +40,19 @@ public class CrmPipelineService {
 
     public List<CrmPipeline> findAll() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return pipelineRepo.findByTenantIdOrderByNameAsc(TenantResolver.requireTenantId());
+        return pipelineRepo.findByTenantIdOrderByNameAsc(TenantResolver.requireOrgTenantId());
     }
 
     public Optional<CrmPipeline> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return pipelineRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId());
+        return pipelineRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmPipeline create(CrmPipeline pipeline) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
         pipeline.setId(null);
-        pipeline.setTenantId(TenantResolver.requireTenantId());
+        pipeline.setTenantId(TenantResolver.requireOrgTenantId());
         if (pipeline.getIsDefault() == null) {
             pipeline.setIsDefault(false);
         }
@@ -68,7 +68,7 @@ public class CrmPipelineService {
     @Transactional
     public CrmPipeline update(Long id, CrmPipeline changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmPipeline existing = pipelineRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmPipeline existing = pipelineRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Pipeline not found: " + id));
         existing.setCode(changes.getCode());
         existing.setName(changes.getName());
@@ -87,7 +87,7 @@ public class CrmPipelineService {
 
     public List<CrmPipelineStage> stages(Long pipelineId) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         pipelineRepo.findByIdAndTenantId(pipelineId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Pipeline not found: " + pipelineId));
         return stageRepo.findByTenantIdAndPipelineIdOrderByDisplayOrderAsc(tenantId, pipelineId);
@@ -96,7 +96,7 @@ public class CrmPipelineService {
     @Transactional
     public CrmPipelineStage createStage(Long pipelineId, CrmPipelineStage stage) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         pipelineRepo.findByIdAndTenantId(pipelineId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Pipeline not found: " + pipelineId));
         stage.setId(null);
@@ -114,7 +114,7 @@ public class CrmPipelineService {
     @Transactional
     public CrmPipelineStage updateStage(Long stageId, CrmPipelineStage changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmPipelineStage existing = stageRepo.findByIdAndTenantId(stageId, TenantResolver.requireTenantId())
+        CrmPipelineStage existing = stageRepo.findByIdAndTenantId(stageId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Stage not found: " + stageId));
         existing.setCode(changes.getCode());
         existing.setName(changes.getName());
@@ -130,13 +130,13 @@ public class CrmPipelineService {
 
     public List<CrmStageRequirement> requirements(Long stageId) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return requirementRepo.findByTenantIdAndStageId(TenantResolver.requireTenantId(), stageId);
+        return requirementRepo.findByTenantIdAndStageId(TenantResolver.requireOrgTenantId(), stageId);
     }
 
     @Transactional
     public CrmStageRequirement createRequirement(Long stageId, CrmStageRequirement requirement) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         stageRepo.findByIdAndTenantId(stageId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Stage not found: " + stageId));
         requirement.setId(null);
@@ -151,21 +151,21 @@ public class CrmPipelineService {
     @Transactional
     public void deleteRequirement(Long id) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmStageRequirement existing = requirementRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmStageRequirement existing = requirementRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Requirement not found: " + id));
         requirementRepo.delete(existing);
     }
 
     public List<CrmOutcomeReason> outcomeReasons() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return outcomeRepo.findByTenantIdOrderByDisplayOrderAsc(TenantResolver.requireTenantId());
+        return outcomeRepo.findByTenantIdOrderByDisplayOrderAsc(TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmOutcomeReason createOutcomeReason(CrmOutcomeReason reason) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
         reason.setId(null);
-        reason.setTenantId(TenantResolver.requireTenantId());
+        reason.setTenantId(TenantResolver.requireOrgTenantId());
         if (reason.getDisplayOrder() == null) {
             reason.setDisplayOrder(0);
         }
@@ -178,7 +178,7 @@ public class CrmPipelineService {
     @Transactional
     public CrmOutcomeReason updateOutcomeReason(Long id, CrmOutcomeReason changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmOutcomeReason existing = outcomeRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmOutcomeReason existing = outcomeRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Outcome reason not found: " + id));
         existing.setKind(changes.getKind());
         existing.setCode(changes.getCode());

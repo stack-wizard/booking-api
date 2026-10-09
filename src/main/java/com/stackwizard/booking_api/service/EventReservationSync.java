@@ -47,7 +47,7 @@ public class EventReservationSync {
 
     @Transactional
     public void syncEvent(Event event) {
-        for (EventFunction function : functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        for (EventFunction function : functionRepo.findForEvent(
                 event.getTenantId(), event.getId())) {
             syncFunction(event, function);
         }
@@ -55,7 +55,7 @@ public class EventReservationSync {
 
     @Transactional
     public void syncFunction(Event event, EventFunction function) {
-        List<Reservation> active = reservationRepo.findActiveByEventFunctionId(event.getTenantId(), function.getId());
+        List<Reservation> active = reservationRepo.findActiveByEventFunctionId(function.getTenantId(), function.getId());
         if (!event.getStatus().holdsSpace() || function.getResourceId() == null) {
             reservationService.releaseEventLines(active);
             return;
@@ -85,7 +85,7 @@ public class EventReservationSync {
     @Transactional
     public void detachFunction(Event event, EventFunction function) {
         List<Reservation> lines = reservationRepo.findByTenantIdAndEventFunctionIdIn(
-                event.getTenantId(), List.of(function.getId()));
+                function.getTenantId(), List.of(function.getId()));
         if (lines.isEmpty()) {
             return;
         }
@@ -94,11 +94,14 @@ public class EventReservationSync {
         reservationRepo.deleteAll(lines);
     }
 
-    public List<Reservation> activeLines(Long tenantId, List<Long> functionIds) {
-        if (functionIds.isEmpty()) {
-            return List.of();
-        }
-        return reservationRepo.findByTenantIdAndEventFunctionIdIn(tenantId, functionIds).stream()
+    /** Active lines of the functions; every line belongs to the hotel that hosts its function. */
+    public List<Reservation> activeLines(List<EventFunction> functions) {
+        List<Reservation> lines = new java.util.ArrayList<>();
+        functions.stream()
+                .collect(java.util.stream.Collectors.groupingBy(EventFunction::getTenantId,
+                        java.util.stream.Collectors.mapping(EventFunction::getId, java.util.stream.Collectors.toList())))
+                .forEach((tenantId, ids) -> lines.addAll(reservationRepo.findByTenantIdAndEventFunctionIdIn(tenantId, ids)));
+        return lines.stream()
                 .filter(r -> !"CANCELLED".equalsIgnoreCase(r.getStatus()))
                 .toList();
     }
@@ -122,7 +125,7 @@ public class EventReservationSync {
         CrmContact contact = event.getPrimaryContactId() == null ? null
                 : contactRepo.findByIdAndTenantId(event.getPrimaryContactId(), event.getTenantId()).orElse(null);
         return new ReservationService.EventLineCommand(
-                event.getTenantId(),
+                function.getTenantId(),
                 function.getId(),
                 function.getResourceId(),
                 function.getOccupancyStartsAt(),

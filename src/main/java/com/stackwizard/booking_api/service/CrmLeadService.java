@@ -72,20 +72,20 @@ public class CrmLeadService {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return leadRepo.findScoped(
-                TenantResolver.requireTenantId(),
+                TenantResolver.requireOrgTenantId(),
                 scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
     }
 
     public Optional<CrmLead> findById(Long id) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
-        return leadRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        return leadRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .filter(l -> CrmOwnerScope.from(accessContext).allows(l.getOwnerUserId(), l.getTeamId()));
     }
 
     @Transactional
     public CrmLead create(CrmLead lead) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         lead.setId(null);
         lead.setTenantId(tenantId);
         if (lead.getStatus() == null) {
@@ -148,7 +148,7 @@ public class CrmLeadService {
     @Transactional
     public CrmLead convert(Long id, CrmLeadConvertRequest request) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmLead lead = requireOwned(id);
         if (lead.getStatus() == CrmLead.Status.CONVERTED) {
             throw new IllegalStateException("Lead already converted");

@@ -1,4 +1,4 @@
--- JDBC seed (classpath). Placeholder __TENANT_ID__ replaced at runtime. Not a Flyway migration.
+-- JDBC seed (classpath). Placeholders replaced at runtime: __TENANT_ID__ = chain (catalog, CRM), __PROPERTY_TENANT_ID__ = hotel (spaces, capacity). Not a Flyway migration.
 -- Dev seed for event management (Faza 3/4). Not a migration; safe to re-run.
 -- Usage: docker exec -i booking-postgres psql -U booking_user -d booking_db -v tenant=2 < scripts/dev/seed-events.sql
 -- Also called by scripts/dev/seed-dh-sales-flow.sh when Opera hotel DH exists (never via Flyway/deploy).
@@ -77,17 +77,17 @@ insert into seed_space values
 
 insert into resource (tenant_id, resource_type_id, kind, code, name, status, unit_count, cap_total, product_id,
                       can_book_alone, display_order, area_sqm, floor, natural_light)
-select __TENANT_ID__, rt.id, 'EXACT', s.code, s.name, 'ACTIVE', 1, 0, p.id, true, s.ord, s.area, s.floor, s.light
+select __PROPERTY_TENANT_ID__, rt.id, 'EXACT', s.code, s.name, 'ACTIVE', 1, 0, p.id, true, s.ord, s.area, s.floor, s.light
 from seed_space s
 join resource_type rt on rt.code = s.type_code
 join product p on p.tenant_id = __TENANT_ID__ and p.name = s.product
 on conflict (tenant_id, code) do nothing;
 
 insert into resource_composition (tenant_id, parent_resource_id, member_resource_id, qty)
-select __TENANT_ID__, parent.id, member.id, 1
+select __PROPERTY_TENANT_ID__, parent.id, member.id, 1
 from resource parent
-join resource member on member.tenant_id = __TENANT_ID__ and member.code in ('EVT-HALL-A', 'EVT-HALL-B')
-where parent.tenant_id = __TENANT_ID__ and parent.code = 'EVT-MAIN'
+join resource member on member.tenant_id = __PROPERTY_TENANT_ID__ and member.code in ('EVT-HALL-A', 'EVT-HALL-B')
+where parent.tenant_id = __PROPERTY_TENANT_ID__ and parent.code = 'EVT-MAIN'
 on conflict (parent_resource_id, member_resource_id) do nothing;
 
 create temporary table seed_setup (code text, style text, capacity int) on commit drop;
@@ -100,16 +100,16 @@ insert into seed_setup values
   ('EVT-BREAKOUT', 'BOARDROOM', 12), ('EVT-BREAKOUT', 'CLASSROOM', 20), ('EVT-BREAKOUT', 'THEATRE', 30);
 
 insert into resource_setup_capacity (tenant_id, resource_id, setup_style, capacity)
-select __TENANT_ID__, r.id, s.style, s.capacity
+select __PROPERTY_TENANT_ID__, r.id, s.style, s.capacity
 from seed_setup s
-join resource r on r.tenant_id = __TENANT_ID__ and r.code = s.code
+join resource r on r.tenant_id = __PROPERTY_TENANT_ID__ and r.code = s.code
 on conflict (resource_id, setup_style) do nothing;
 
 -- Booking calendar for the tenant (grid/duration rules); events use it like any other booking.
 insert into booking_calendar (tenant_id, location_node_id, open_time, close_time, grid_minutes, min_duration_minutes,
                               max_duration_minutes, zone)
-select __TENANT_ID__, null, time '07:00', time '23:00', 30, 30, 960, 'Europe/Zagreb'
-where not exists (select 1 from booking_calendar where tenant_id = __TENANT_ID__);
+select __PROPERTY_TENANT_ID__, null, time '07:00', time '23:00', 30, 30, 960, 'Europe/Zagreb'
+where not exists (select 1 from booking_calendar where tenant_id = __PROPERTY_TENANT_ID__);
 
 -- Packages. DDR: package price split by percentage; Half-day DDR: sum of components.
 update product set package_pricing = 'SPLIT_PERCENT'

@@ -28,18 +28,18 @@ public class CrmContactService {
 
     public List<CrmContact> findAll() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return repo.findByTenantIdOrderByLastNameAsc(TenantResolver.requireTenantId());
+        return repo.findByTenantIdOrderByLastNameAsc(TenantResolver.requireOrgTenantId());
     }
 
     public Optional<CrmContact> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return repo.findByIdAndTenantId(id, TenantResolver.requireTenantId());
+        return repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmContact create(CrmContact contact) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         validateAccount(tenantId, contact.getAccountId());
         contact.setId(null);
         contact.setTenantId(tenantId);
@@ -55,7 +55,7 @@ public class CrmContactService {
     @Transactional
     public CrmContact update(Long id, CrmContact changes) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        CrmContact existing = repo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmContact existing = repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Contact not found: " + id));
         validateAccount(existing.getTenantId(), changes.getAccountId());
         existing.setAccountId(changes.getAccountId());
@@ -77,7 +77,7 @@ public class CrmContactService {
     @Transactional
     public void softDelete(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        CrmContact existing = repo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmContact existing = repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Contact not found: " + id));
         existing.setActive(false);
         repo.save(existing);

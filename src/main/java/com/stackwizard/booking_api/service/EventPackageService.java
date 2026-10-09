@@ -66,8 +66,9 @@ public class EventPackageService {
         if (pax == null || pax <= 0) {
             throw new IllegalArgumentException("pax is required (set expected pax on the event or pass pax)");
         }
-        PackageService.PackageQuote quote = packageService.quote(event.getTenantId(), request.getPackageProductId(),
-                request.getStartsAt().toLocalDate(), pax, event.getCurrency());
+        Long property = functionService.resolveProperty(event, EventFunction.builder().resourceId(request.getResourceId()).build());
+        PackageService.PackageQuote quote = packageService.quote(event.getTenantId(), property,
+                request.getPackageProductId(), request.getStartsAt().toLocalDate(), pax, event.getCurrency());
         if (quote.packagePricing() == Product.PackagePricing.SPLIT_FIXED && quote.difference().signum() != 0) {
             throw new IllegalStateException("Package components differ from the package price by " + quote.difference()
                     + " per person; fix the package before applying it");
@@ -85,7 +86,7 @@ public class EventPackageService {
             LocalDateTime ends = starts.plusMinutes(duration(component));
             boolean overlapsPrevious = created.stream().anyMatch(f ->
                     f.getOccupancyStartsAt().isBefore(ends) && f.getOccupancyEndsAt().isAfter(starts));
-            EventFunction function = newFunction(event, quote, component.getFunctionType(),
+            EventFunction function = newFunction(event, property, quote, component.getFunctionType(),
                     functionName(component.getFunctionType(), quote.name(), line.productName()), starts, ends,
                     overlapsPrevious ? null : request.getResourceId(), pax, created.size());
             created.add(function);
@@ -96,7 +97,7 @@ public class EventPackageService {
                     .map(PackageService.ComponentQuote::component)
                     .mapToInt(c -> offset(c) + (c.getDurationMinutes() != null ? c.getDurationMinutes() : 0))
                     .max().orElse(0);
-            created.add(newFunction(event, quote, EventFunction.FunctionType.PLENARY, quote.name(), start,
+            created.add(newFunction(event, property, quote, EventFunction.FunctionType.PLENARY, quote.name(), start,
                     start.plusMinutes(minutes > 0 ? minutes : DEFAULT_FUNCTION_MINUTES), request.getResourceId(), pax, 0));
         }
 
@@ -115,7 +116,7 @@ public class EventPackageService {
                     .orElseThrow(() -> new IllegalArgumentException("Component product not found"));
             boolean perPax = component.getQtyBasis() == ProductComponent.QtyBasis.PER_PAX && component.getQty() == 1;
             EventFunctionItem item = EventFunctionItem.builder()
-                    .tenantId(event.getTenantId())
+                    .tenantId(property)
                     .eventFunctionId(target.getId())
                     .productId(product.getId())
                     .packageProductId(quote.packageProductId())
@@ -138,11 +139,11 @@ public class EventPackageService {
         return saved;
     }
 
-    private EventFunction newFunction(Event event, PackageService.PackageQuote quote, EventFunction.FunctionType type,
+    private EventFunction newFunction(Event event, Long property, PackageService.PackageQuote quote, EventFunction.FunctionType type,
                                       String name, LocalDateTime starts, LocalDateTime ends, Long resourceId,
                                       Integer pax, int order) {
         return EventFunction.builder()
-                .tenantId(event.getTenantId())
+                .tenantId(property)
                 .eventId(event.getId())
                 .resourceId(resourceId)
                 .functionType(type)

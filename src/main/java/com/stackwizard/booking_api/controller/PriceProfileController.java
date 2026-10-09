@@ -25,16 +25,17 @@ public class PriceProfileController {
 
     @PostMapping
     public ResponseEntity<PriceProfile> create(@RequestBody PriceProfile profile) {
-        PriceProfile saved = service.save(profile);
+        PriceProfile saved = service.create(profile);
         return ResponseEntity.created(URI.create("/api/price-profiles/" + saved.getId())).body(saved);
     }
 
     @PutMapping("/{id}")
     public ResponseEntity<PriceProfile> update(@PathVariable Long id, @RequestBody PriceProfile profile) {
-        profile.setId(id);
-        return ResponseEntity.ok(service.save(profile));
+        return service.update(id, profile).map(ResponseEntity::ok).orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) { service.deleteById(id); return ResponseEntity.noContent().build(); }
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        return service.deleteById(id) ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
+    }
 }

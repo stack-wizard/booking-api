@@ -7,6 +7,7 @@ import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductImage;
 import com.stackwizard.booking_api.repository.PriceListEntryRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.security.TenantContext;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -49,11 +50,11 @@ public class ProductService {
 
     @Transactional(readOnly = true)
     public List<Product> findAll() {
-        return repo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(TenantResolver.requireTenantId());
+        return repo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(TenantResolver.requireOrgTenantId());
     }
 
     @Transactional(readOnly = true)
-    public Optional<Product> findById(Long id) { return repo.findById(id); }
+    public Optional<Product> findById(Long id) { return repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId()); }
 
     @Transactional
     public Product save(Product product) {
@@ -63,7 +64,7 @@ public class ProductService {
 
         Product target = product.getId() == null
                 ? new Product()
-                : repo.findById(product.getId()).orElseThrow(() -> new IllegalArgumentException("Product not found"));
+                : repo.findByIdAndTenantId(product.getId(), TenantResolver.requireOrgTenantId()).orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
         copyEditableFields(product, target);
         normalizeAndValidate(target);
@@ -79,12 +80,12 @@ public class ProductService {
                                MultipartFile file,
                                boolean defaultImage,
                                Integer position) {
-        Product product = repo.findById(productId)
+        Product product = repo.findByIdAndTenantId(productId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
         validateImageFile(file);
 
-        Long tenantId = TenantResolver.requireTenantId(product.getTenantId());
+        Long tenantId = TenantResolver.requireOrgTenantId(product.getTenantId());
         String imageUrl = mediaStorageService.uploadPublic(
                 "products",
                 tenantId,
@@ -117,10 +118,10 @@ public class ProductService {
 
     @Transactional
     public Product setDefaultImage(Long productId, Long imageId, boolean defaultImage) {
-        Product product = repo.findById(productId)
+        Product product = repo.findByIdAndTenantId(productId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
-        TenantResolver.requireTenantId(product.getTenantId());
+        TenantResolver.requireOrgTenantId(product.getTenantId());
 
         ProductImage image = findImage(product, imageId);
         if (defaultImage) {
@@ -134,10 +135,10 @@ public class ProductService {
 
     @Transactional
     public void deleteImage(Long productId, Long imageId) {
-        Product product = repo.findById(productId)
+        Product product = repo.findByIdAndTenantId(productId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found"));
 
-        TenantResolver.requireTenantId(product.getTenantId());
+        TenantResolver.requireOrgTenantId(product.getTenantId());
 
         ProductImage image = findImage(product, imageId);
         product.getImages().remove(image);
@@ -192,6 +193,7 @@ public class ProductService {
                 effectiveUom,
                 effectiveCurrency,
                 tenantId,
+                TenantContext.getPropertyTenantId(),
                 effectiveDate
         );
         BigDecimal unitPriceGross = entries.isEmpty() ? null : entries.get(0).getPrice();
@@ -239,7 +241,7 @@ public class ProductService {
     }
 
     private void normalizeAndValidate(Product product) {
-        product.setTenantId(TenantResolver.requireTenantId(product.getTenantId()));
+        product.setTenantId(TenantResolver.requireOrgTenantId(product.getTenantId()));
 
         product.setName(trimToNull(product.getName()));
         if (!StringUtils.hasText(product.getName())) {

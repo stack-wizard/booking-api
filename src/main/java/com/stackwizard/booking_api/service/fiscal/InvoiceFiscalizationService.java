@@ -1040,7 +1040,7 @@ public class InvoiceFiscalizationService {
         if (invoice == null || invoice.getIssuedByUserId() == null) {
             return Optional.empty();
         }
-        return appUserRepo.findByIdAndTenantId(invoice.getIssuedByUserId(), invoice.getTenantId());
+        return appUserRepo.findByIdInTenantOrItsOrg(invoice.getIssuedByUserId(), invoice.getTenantId());
     }
 
     private String normalizeNullable(String value) {

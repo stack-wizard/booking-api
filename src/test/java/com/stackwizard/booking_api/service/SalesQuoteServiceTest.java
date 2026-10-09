@@ -154,8 +154,8 @@ class SalesQuoteServiceTest {
         when(quoteRepo.findByTenantIdAndEventIdAndStatusIn(eq(1L), eq(5L), any())).thenReturn(List.of(old));
         when(quoteRepo.countByNumberPrefix(eq(1L), any())).thenReturn(2L);
         EventFunction plenary = function(1L, EventFunction.FunctionType.PLENARY);
-        when(functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(1L, 5L)).thenReturn(List.of(plenary));
-        when(reservationSync.activeLines(1L, List.of(1L))).thenReturn(List.of(Reservation.builder().productId(10L)
+        when(functionRepo.findForEvent(1L, 5L)).thenReturn(List.of(plenary));
+        when(reservationSync.activeLines(List.of(plenary))).thenReturn(List.of(Reservation.builder().productId(10L)
                 .eventFunctionId(1L).qty(1).uom("DAY").unitPrice(new BigDecimal("500")).build()));
         when(productRepo.findAllById(anyList())).thenReturn(List.of(product(10L, "Hall", null)));
 

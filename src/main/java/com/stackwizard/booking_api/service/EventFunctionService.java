@@ -5,9 +5,12 @@ import com.stackwizard.booking_api.model.Event;
 import com.stackwizard.booking_api.model.EventFunction;
 import com.stackwizard.booking_api.model.EventFunctionItem;
 import com.stackwizard.booking_api.model.Product;
+import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.repository.EventFunctionItemRepository;
 import com.stackwizard.booking_api.repository.EventFunctionRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.repository.ResourceRepository;
+import com.stackwizard.booking_api.security.TenantContext;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +30,9 @@ public class EventFunctionService {
     private final EventReservationSync reservationSync;
     private final ResourceSetupCapacityService capacityService;
     private final EventItemPricing itemPricing;
+    private final ResourceRepository resourceRepo;
+    private final TenantHierarchy hierarchy;
+    private final ProductVisibilityService productVisibility;
 
     public EventFunctionService(EventService eventService,
                                 EventFunctionRepository functionRepo,
@@ -34,7 +40,10 @@ public class EventFunctionService {
                                 ProductRepository productRepo,
                                 EventReservationSync reservationSync,
                                 ResourceSetupCapacityService capacityService,
-                                EventItemPricing itemPricing) {
+                                EventItemPricing itemPricing,
+                                ResourceRepository resourceRepo,
+                                TenantHierarchy hierarchy,
+                                ProductVisibilityService productVisibility) {
         this.eventService = eventService;
         this.functionRepo = functionRepo;
         this.itemRepo = itemRepo;
@@ -42,18 +51,21 @@ public class EventFunctionService {
         this.reservationSync = reservationSync;
         this.capacityService = capacityService;
         this.itemPricing = itemPricing;
+        this.resourceRepo = resourceRepo;
+        this.hierarchy = hierarchy;
+        this.productVisibility = productVisibility;
     }
 
     public List<EventFunction> functions(Long eventId) {
         Event event = eventService.requireEvent(eventId);
-        return functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(event.getTenantId(), event.getId());
+        return functionRepo.findForEvent(event.getTenantId(), event.getId());
     }
 
     @Transactional
     public EventFunction createFunction(Long eventId, EventFunction function) {
         Event event = requireOpenForPlanning(eventId);
         function.setId(null);
-        function.setTenantId(event.getTenantId());
+        function.setTenantId(resolveProperty(event, function));
         function.setEventId(event.getId());
         if (function.getDisplayOrder() == null) {
             function.setDisplayOrder(0);
@@ -68,6 +80,11 @@ public class EventFunctionService {
     public EventFunction updateFunction(Long functionId, EventFunction changes) {
         EventFunction existing = requireFunction(functionId);
         Event event = requireOpenForPlanning(existing.getEventId());
+        changes.setTenantId(changes.getResourceId() == null ? existing.getTenantId() : null);
+        Long property = resolveProperty(event, changes);
+        if (!property.equals(existing.getTenantId())) {
+            moveToProperty(event, existing, property);
+        }
         existing.setResourceId(changes.getResourceId());
         existing.setFunctionType(changes.getFunctionType());
         existing.setName(changes.getName());
@@ -99,6 +116,57 @@ public class EventFunctionService {
         functionRepo.delete(existing);
     }
 
+    /**
+     * The hotel that hosts a function: the hotel of its space, otherwise the explicitly sent hotel, the selected
+     * hotel of the request or the only hotel of the chain.
+     */
+    Long resolveProperty(Event event, EventFunction function) {
+        Long resolved = resolveUnrestricted(event, function);
+        Long limitedTo = event.getPropertyTenantId();
+        if (limitedTo != null && !limitedTo.equals(resolved)) {
+            throw new IllegalArgumentException("The event is limited to its hotel; this function is in another hotel");
+        }
+        return resolved;
+    }
+
+    private Long resolveUnrestricted(Event event, EventFunction function) {
+        Long org = event.getTenantId();
+        if (function.getResourceId() == null && function.getTenantId() == null && event.getPropertyTenantId() != null) {
+            return event.getPropertyTenantId();
+        }
+        if (function.getResourceId() != null) {
+            Resource space = resourceRepo.findById(function.getResourceId())
+                    .filter(r -> hierarchy.isPropertyOf(r.getTenantId(), org))
+                    .orElseThrow(() -> new IllegalArgumentException("Space not found: " + function.getResourceId()));
+            if (function.getTenantId() != null && !function.getTenantId().equals(space.getTenantId())) {
+                throw new IllegalArgumentException("Space does not belong to the selected hotel");
+            }
+            return space.getTenantId();
+        }
+        if (function.getTenantId() != null) {
+            return hierarchy.requirePropertyOf(function.getTenantId(), org);
+        }
+        Long selected = TenantContext.getPropertyTenantId();
+        if (selected != null) {
+            return hierarchy.requirePropertyOf(selected, org);
+        }
+        List<Long> hotels = hierarchy.propertyIdsOf(org);
+        if (hotels.size() == 1) {
+            return hotels.get(0);
+        }
+        throw new IllegalArgumentException("Choose the hotel of the function (propertyId / X-Property-Id)");
+    }
+
+    /** A function changed hotel: its generated reservation lines and items follow, the old hold is released. */
+    private void moveToProperty(Event event, EventFunction function, Long property) {
+        reservationSync.detachFunction(event, function);
+        List<EventFunctionItem> items = itemRepo.findByTenantIdAndEventFunctionIdOrderByServeAtAscDisplayOrderAscIdAsc(
+                function.getTenantId(), function.getId());
+        items.forEach(i -> i.setTenantId(property));
+        itemRepo.saveAll(items);
+        function.setTenantId(property);
+    }
+
     public List<EventFunctionItem> items(Long functionId) {
         EventFunction function = requireFunction(functionId);
         return itemRepo.findByTenantIdAndEventFunctionIdOrderByServeAtAscDisplayOrderAscIdAsc(
@@ -107,12 +175,12 @@ public class EventFunctionService {
 
     public List<EventFunctionItem> itemsForEvent(Long eventId) {
         Event event = eventService.requireEvent(eventId);
-        List<Long> functionIds = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<Long> functionIds = functionRepo.findForEvent(
                 event.getTenantId(), event.getId()).stream().map(EventFunction::getId).toList();
         if (functionIds.isEmpty()) {
             return List.of();
         }
-        return itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds);
+        return itemRepo.findForFunctions(event.getTenantId(), functionIds);
     }
 
     @Transactional
@@ -131,7 +199,7 @@ public class EventFunctionService {
 
     @Transactional
     public EventFunctionItem updateItem(Long itemId, EventFunctionItem changes) {
-        EventFunctionItem existing = itemRepo.findByIdAndTenantId(itemId, TenantResolver.requireTenantId())
+        EventFunctionItem existing = itemRepo.findForOrgById(TenantResolver.requireOrgTenantId(), itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
         EventFunction function = requireFunction(existing.getEventFunctionId());
         Event event = eventService.requireEditable(function.getEventId());
@@ -158,7 +226,7 @@ public class EventFunctionService {
 
     @Transactional
     public void deleteItem(Long itemId) {
-        EventFunctionItem existing = itemRepo.findByIdAndTenantId(itemId, TenantResolver.requireTenantId())
+        EventFunctionItem existing = itemRepo.findForOrgById(TenantResolver.requireOrgTenantId(), itemId)
                 .orElseThrow(() -> new IllegalArgumentException("Item not found: " + itemId));
         EventFunction function = requireFunction(existing.getEventFunctionId());
         eventService.requireEditable(function.getEventId());
@@ -166,8 +234,7 @@ public class EventFunctionService {
     }
 
     EventFunction requireFunction(Long functionId) {
-        EventFunction function = functionRepo.findByIdAndTenantId(functionId,
-                        TenantResolver.requireTenantId())
+        EventFunction function = functionRepo.findForOrgById(TenantResolver.requireOrgTenantId(), functionId)
                 .orElseThrow(() -> new IllegalArgumentException("Function not found: " + functionId));
         eventService.requireEvent(function.getEventId());
         return function;
@@ -207,9 +274,10 @@ public class EventFunctionService {
             throw new IllegalArgumentException("pax must be >= 0");
         }
         if (function.getResourceId() != null) {
-            capacityService.requireSpaceResource(event.getTenantId(), function.getResourceId());
+            Long property = function.getTenantId() != null ? function.getTenantId() : event.getTenantId();
+            capacityService.requireSpaceResource(property, function.getResourceId());
             if (function.getSetupStyle() != null) {
-                Integer capacity = capacityService.capacityFor(event.getTenantId(), function.getResourceId(), function.getSetupStyle())
+                Integer capacity = capacityService.capacityFor(property, function.getResourceId(), function.getSetupStyle())
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "Space has no " + function.getSetupStyle() + " setup"));
                 if (function.getPax() != null && function.getPax() > capacity) {
@@ -233,6 +301,7 @@ public class EventFunctionService {
         }
         Product product = productRepo.findByIdAndTenantId(item.getProductId(), event.getTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + item.getProductId()));
+        productVisibility.requireVisible(product, function.getTenantId());
         if (product.getPackagePricing() != null) {
             throw new IllegalArgumentException("Packages are applied to the event, not added as a single item");
         }
@@ -256,7 +325,7 @@ public class EventFunctionService {
         }
         requireServeAtInside(function, item.getServeAt());
         if (item.getUnitPrice() == null) {
-            BigDecimal price = itemPricing.catalogPrice(product, uom, event.getCurrency(), event.getTenantId(),
+            BigDecimal price = itemPricing.catalogPrice(product, uom, event.getCurrency(), function.getTenantId(),
                             function.getStartsAt().toLocalDate())
                     .orElseThrow(() -> new IllegalArgumentException("No price for " + product.getName() + " (" + uom
                             + "); enter unitPrice"));

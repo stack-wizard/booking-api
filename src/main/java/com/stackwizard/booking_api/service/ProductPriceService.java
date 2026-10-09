@@ -60,12 +60,12 @@ public class ProductPriceService {
 
     @Transactional(readOnly = true)
     public List<ProductPriceDtos.Period> periods() {
-        return periodRepo.findForTenant(TenantResolver.requireTenantId()).stream().map(ProductPriceService::toPeriod).toList();
+        return periodRepo.findForTenant(TenantResolver.requireOrgTenantId()).stream().map(ProductPriceService::toPeriod).toList();
     }
 
     @Transactional(readOnly = true)
     public List<ProductPriceDtos.PriceRow> prices(Long productId) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireProduct(productId, tenantId);
         return priceRepo.findForProduct(productId, tenantId).stream().map(ProductPriceService::toRow).toList();
     }
@@ -73,7 +73,7 @@ public class ProductPriceService {
     @Transactional
     public List<ProductPriceDtos.PriceRow> save(Long productId, ProductPriceDtos.SaveRequest request) {
         requireWrite();
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product product = requireProduct(productId, tenantId);
         Map<Long, PriceListEntry> existing = new HashMap<>();
         for (PriceListEntry e : priceRepo.findForProduct(productId, tenantId)) {
@@ -123,7 +123,7 @@ public class ProductPriceService {
     @Transactional
     public List<ProductPriceDtos.PriceRow> adjust(Long productId, ProductPriceDtos.AdjustRequest request) {
         requireWrite();
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireProduct(productId, tenantId);
         if (request == null) {
             throw new IllegalArgumentException("percent is required");
@@ -153,7 +153,7 @@ public class ProductPriceService {
     @Transactional
     public List<ProductPriceDtos.PriceRow> copy(Long productId, ProductPriceDtos.CopyRequest request) {
         requireWrite();
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireProduct(productId, tenantId);
         if (request == null || request.fromPeriodId() == null || request.toPeriodId() == null) {
             throw new IllegalArgumentException("fromPeriodId and toPeriodId are required");

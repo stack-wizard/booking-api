@@ -43,6 +43,10 @@ public class Event extends CrmAuditableEntity {
     @Column(name = "opportunity_id")
     private Long opportunityId;
 
+    /** Hotel the event is limited to; null = chain-wide, functions may use any hotel of the chain. */
+    @Column(name = "property_tenant_id")
+    private Long propertyTenantId;
+
     @Column(nullable = false)
     private String name;
 

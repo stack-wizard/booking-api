@@ -35,6 +35,10 @@ public class PriceProfile {
     @Column(nullable = false)
     private String currency;
 
+    /** Null: chain-wide price. Set: price of that hotel only, which wins over the chain price. */
+    @Column(name = "property_tenant_id")
+    private Long propertyTenantId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "reservation_request_type")
     private ReservationRequest.Type reservationRequestType;

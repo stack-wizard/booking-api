@@ -20,6 +20,8 @@ media:
 booking:
   dev:
     reference-date: 2026-04-01
+    # Local only: first login of an unmapped Platform tenant creates an ORG mapping (see TenantSetupService).
+    auto-provision-tenant: true
 
 crm:
   portal:

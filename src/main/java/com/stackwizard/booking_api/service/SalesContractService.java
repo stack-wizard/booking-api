@@ -247,7 +247,7 @@ public class SalesContractService {
     @Transactional(readOnly = true)
     public StoredFile downloadDocument(Long documentId) {
         accessContext.require(CrmPermission.EVENT_READ);
-        SalesContractDocument document = documentRepo.findByIdAndTenantId(documentId, TenantResolver.requireTenantId())
+        SalesContractDocument document = documentRepo.findByIdAndTenantId(documentId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
         requireContract(document.getContractId());
         return read(document);
@@ -260,7 +260,7 @@ public class SalesContractService {
     @Transactional
     public void deleteDocument(Long documentId) {
         accessContext.require(CrmPermission.EVENT_WRITE);
-        SalesContractDocument document = documentRepo.findByIdAndTenantId(documentId, TenantResolver.requireTenantId())
+        SalesContractDocument document = documentRepo.findByIdAndTenantId(documentId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
         requireContract(document.getContractId());
         documentRepo.delete(document);
@@ -270,7 +270,7 @@ public class SalesContractService {
     @Transactional
     public SalesDtos.ContractView invoiceMilestone(Long milestoneId) {
         accessContext.require(CrmPermission.EVENT_WRITE);
-        SalesPaymentMilestone milestone = milestoneRepo.findByIdAndTenantId(milestoneId, TenantResolver.requireTenantId())
+        SalesPaymentMilestone milestone = milestoneRepo.findByIdAndTenantId(milestoneId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Milestone not found"));
         SalesContract contract = requireContract(milestone.getContractId());
         if (contract.getStatus() != SalesContract.Status.SENT && contract.getStatus() != SalesContract.Status.SIGNED) {
@@ -436,7 +436,7 @@ public class SalesContractService {
 
     SalesContract requireContract(Long contractId) {
         accessContext.require(CrmPermission.EVENT_READ);
-        SalesContract contract = contractRepo.findByIdAndTenantId(contractId, TenantResolver.requireTenantId())
+        SalesContract contract = contractRepo.findByIdAndTenantId(contractId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Contract not found"));
         eventService.requireEvent(contract.getEventId());
         return contract;

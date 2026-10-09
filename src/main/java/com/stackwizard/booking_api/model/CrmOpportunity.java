@@ -36,6 +36,10 @@ public class CrmOpportunity extends CrmAuditableEntity {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
+    /** Hotel the row is about; null = chain-wide. */
+    @Column(name = "property_tenant_id")
+    private Long propertyTenantId;
+
     @Column(nullable = false)
     private String name;
 

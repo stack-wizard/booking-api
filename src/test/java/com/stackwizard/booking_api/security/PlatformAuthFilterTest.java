@@ -1,7 +1,9 @@
 package com.stackwizard.booking_api.security;
 
+import com.stackwizard.booking_api.config.BookingDevProperties;
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.service.PlatformTenantResolver;
+import com.stackwizard.booking_api.service.PlatformTenantResolver.TenantScope;
 import com.stackwizard.booking_api.service.PlatformUserSyncService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,11 +38,13 @@ class PlatformAuthFilterTest {
     @Mock
     private PlatformUserSyncService userSyncService;
 
+    private final BookingDevProperties devProperties = new BookingDevProperties();
+
     private PlatformAuthFilter filter;
 
     @BeforeEach
     void setUp() {
-        filter = new PlatformAuthFilter(tenantResolver, userSyncService);
+        filter = new PlatformAuthFilter(tenantResolver, userSyncService, devProperties);
         SecurityContextHolder.clearContext();
         TenantContext.clear();
     }
@@ -63,14 +67,14 @@ class PlatformAuthFilterTest {
                 "mikos_roles", List.of("BOOKING_ADMIN")
         ));
 
-        when(tenantResolver.resolveOrProvision(platformTenantId)).thenReturn(1L);
+        when(tenantResolver.resolveScope(platformTenantId, null, false)).thenReturn(new TenantScope(1L, 1L));
         when(userSyncService.syncUser(eq(platformUserId), eq("admin"), eq(1L), any()))
                 .thenReturn(AppUser.builder().id(9L).username("admin").role(AppUser.Role.ADMIN).tenantId(1L).build());
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         filter.authenticateRequest(request, jwt);
 
-        verify(tenantResolver).resolveOrProvision(platformTenantId);
+        verify(tenantResolver).resolveScope(platformTenantId, null, false);
         verify(userSyncService).syncUser(eq(platformUserId), eq("admin"), eq(1L), any());
         assertThat(request.getAttribute(PlatformAuthFilter.ATTR_APP_USER)).isNotNull();
         assertThat(TenantContext.getTenantId()).isEqualTo(1L);
@@ -83,15 +87,80 @@ class PlatformAuthFilterTest {
                 "token_use", "m2m",
                 "scope", "booking.api"
         ));
-        when(tenantResolver.requireExisting(platformTenantId)).thenReturn(1L);
+        when(tenantResolver.resolveScope(platformTenantId, null, false)).thenReturn(new TenantScope(1L, 1L));
 
         MockHttpServletRequest request = new MockHttpServletRequest();
         request.addHeader("X-Tenant-Id", platformTenantId.toString());
         filter.authenticateRequest(request, jwt);
 
-        verify(tenantResolver).requireExisting(platformTenantId);
+        verify(tenantResolver).resolveScope(platformTenantId, null, false);
         verifyNoInteractions(userSyncService);
         assertThat(TenantContext.getTenantId()).isEqualTo(1L);
+    }
+
+    @Test
+    void orgHeaderWithPropertyHeaderSetsBothLevels() {
+        UUID orgId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID propertyId = UUID.fromString("21111111-1111-1111-1111-111111111111");
+        UUID platformUserId = UUID.randomUUID();
+        Jwt jwt = jwt(platformUserId.toString(), Map.of(
+                "preferred_username", "sales",
+                "mikos_tenant_ids", List.of(orgId.toString()),
+                "mikos_applications", List.of("BOOKING"),
+                "mikos_roles", List.of("BOOKING_ADMIN")
+        ));
+        when(tenantResolver.resolveScope(orgId, propertyId, false)).thenReturn(new TenantScope(1L, 2L));
+        when(userSyncService.syncUser(eq(platformUserId), eq("sales"), eq(1L), any()))
+                .thenReturn(AppUser.builder().id(9L).username("sales").role(AppUser.Role.ADMIN).tenantId(1L).build());
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Tenant-Id", orgId.toString());
+        request.addHeader("X-Property-Id", propertyId.toString());
+        filter.authenticateRequest(request, jwt);
+
+        assertThat(TenantContext.getOrgTenantId()).isEqualTo(1L);
+        assertThat(TenantContext.getPropertyTenantId()).isEqualTo(2L);
+    }
+
+    @Test
+    void hotelOnlyMembershipMayUseOrgHeaderTogetherWithItsHotel() {
+        UUID orgId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID propertyId = UUID.fromString("21111111-1111-1111-1111-111111111111");
+        UUID platformUserId = UUID.randomUUID();
+        Jwt jwt = jwt(platformUserId.toString(), Map.of(
+                "preferred_username", "frontdesk",
+                "mikos_tenant_ids", List.of(propertyId.toString()),
+                "mikos_applications", List.of("BOOKING"),
+                "mikos_roles", List.of("BOOKING_ADMIN")
+        ));
+        when(tenantResolver.resolveScope(orgId, propertyId, false)).thenReturn(new TenantScope(1L, 2L));
+        when(userSyncService.syncUser(eq(platformUserId), eq("frontdesk"), eq(1L), any()))
+                .thenReturn(AppUser.builder().id(9L).username("frontdesk").role(AppUser.Role.ADMIN).tenantId(1L).build());
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Tenant-Id", orgId.toString());
+        request.addHeader("X-Property-Id", propertyId.toString());
+        filter.authenticateRequest(request, jwt);
+
+        assertThat(TenantContext.getPropertyTenantId()).isEqualTo(2L);
+    }
+
+    @Test
+    void hotelOnlyMembershipCannotUseOrgHeaderWithoutHotel() {
+        UUID orgId = UUID.fromString("11111111-1111-1111-1111-111111111111");
+        UUID propertyId = UUID.fromString("21111111-1111-1111-1111-111111111111");
+        Jwt jwt = jwt(UUID.randomUUID().toString(), Map.of(
+                "mikos_tenant_ids", List.of(propertyId.toString()),
+                "mikos_applications", List.of("BOOKING"),
+                "mikos_roles", List.of("BOOKING_ADMIN")
+        ));
+
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("X-Tenant-Id", orgId.toString());
+        assertThatThrownBy(() -> filter.authenticateRequest(request, jwt))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("allow-list");
+        verifyNoInteractions(tenantResolver);
     }
 
     @Test

@@ -31,6 +31,10 @@ public class SalesPaymentMilestone {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
+    /** Hotel the row is about; null = chain-wide. */
+    @Column(name = "property_tenant_id")
+    private Long propertyTenantId;
+
     @Column(name = "contract_id", nullable = false)
     private Long contractId;
 

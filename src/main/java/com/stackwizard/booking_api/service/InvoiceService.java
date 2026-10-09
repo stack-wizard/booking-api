@@ -87,6 +87,7 @@ public class InvoiceService {
     private final FiscalBusinessPremiseService fiscalBusinessPremiseService;
     private final FiscalCashRegisterService fiscalCashRegisterService;
     private final AppUserRepository appUserRepo;
+    private final TenantHierarchy tenantHierarchy;
 
     public InvoiceService(InvoiceRepository invoiceRepo,
                           InvoiceItemRepository invoiceItemRepo,
@@ -99,7 +100,9 @@ public class InvoiceService {
                           PriceListEntryRepository priceListRepo,
                           FiscalBusinessPremiseService fiscalBusinessPremiseService,
                           FiscalCashRegisterService fiscalCashRegisterService,
-                          AppUserRepository appUserRepo) {
+                          AppUserRepository appUserRepo,
+                          TenantHierarchy tenantHierarchy) {
+        this.tenantHierarchy = tenantHierarchy;
         this.invoiceRepo = invoiceRepo;
         this.invoiceItemRepo = invoiceItemRepo;
         this.allocationRepo = allocationRepo;
@@ -698,7 +701,7 @@ public class InvoiceService {
                 .orElseThrow(() -> new IllegalArgumentException("Request not found for payment intent"));
         List<Reservation> reservations = reservationRepo.findByRequestId(requestId);
         Product depositProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(
-                        paymentIntent.getTenantId(), PRODUCT_TYPE_DEPOSIT)
+                        tenantHierarchy.orgIdOf(paymentIntent.getTenantId()), PRODUCT_TYPE_DEPOSIT)
                 .orElseThrow(() -> new IllegalStateException("Deposit product is missing for tenant " + paymentIntent.getTenantId()));
 
         int year = LocalDate.now().getYear();
@@ -965,7 +968,7 @@ public class InvoiceService {
         ReservationRequest request = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
         Product penaltyProduct = productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(
-                        request.getTenantId(), PRODUCT_TYPE_PENALTY)
+                        tenantHierarchy.orgIdOf(request.getTenantId()), PRODUCT_TYPE_PENALTY)
                 .orElseThrow(() -> new IllegalStateException("Penalty product is missing for tenant " + request.getTenantId()));
 
         int year = LocalDate.now().getYear();
@@ -1605,7 +1608,7 @@ public class InvoiceService {
         if (productId == null) {
             throw new IllegalArgumentException("item productId is required");
         }
-        return productRepo.findByIdAndTenantId(productId, tenantId)
+        return productRepo.findByIdAndTenantId(productId, tenantHierarchy.orgIdOf(tenantId))
                 .orElseThrow(() -> new IllegalArgumentException("productId " + productId + " not found for tenant"));
     }
 
@@ -1669,6 +1672,7 @@ public class InvoiceService {
                 product.getId(),
                 uom.trim(),
                 currency,
+                tenantHierarchy.orgIdOf(tenantId),
                 tenantId,
                 invoiceDate
         );
@@ -1728,7 +1732,7 @@ public class InvoiceService {
         }
 
         if (requestedIssuedByUserId != null) {
-            AppUser requestedIssuer = appUserRepo.findByIdAndTenantId(requestedIssuedByUserId, tenantId)
+            AppUser requestedIssuer = appUserRepo.findByIdInTenantOrItsOrg(requestedIssuedByUserId, tenantId)
                     .orElseThrow(() -> new IllegalArgumentException("issuedByUserId not found for tenant"));
             return requestedIssuer.getId();
         }
@@ -1773,7 +1777,9 @@ public class InvoiceService {
     }
 
     private void ensureUserInTenant(AppUser user, Long tenantId) {
-        if (user.getTenantId() == null || !tenantId.equals(user.getTenantId())) {
+        boolean sameTenant = user.getTenantId() != null
+                && (tenantId.equals(user.getTenantId()) || user.getTenantId().equals(tenantHierarchy.orgIdOf(tenantId)));
+        if (!sameTenant) {
             throw new IllegalStateException("Authenticated user does not belong to invoice tenant");
         }
     }

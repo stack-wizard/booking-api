@@ -25,19 +25,19 @@ public class CrmCustomFieldDefinitionService {
 
     public List<CrmCustomFieldDefinition> findAll() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return repo.findByTenantIdOrderByDisplayOrderAsc(TenantResolver.requireTenantId());
+        return repo.findByTenantIdOrderByDisplayOrderAsc(TenantResolver.requireOrgTenantId());
     }
 
     public Optional<CrmCustomFieldDefinition> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return repo.findByIdAndTenantId(id, TenantResolver.requireTenantId());
+        return repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmCustomFieldDefinition create(CrmCustomFieldDefinition def) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
         def.setId(null);
-        def.setTenantId(TenantResolver.requireTenantId());
+        def.setTenantId(TenantResolver.requireOrgTenantId());
         if (def.getRequired() == null) {
             def.setRequired(false);
         }
@@ -56,7 +56,7 @@ public class CrmCustomFieldDefinitionService {
     @Transactional
     public CrmCustomFieldDefinition update(Long id, CrmCustomFieldDefinition changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmCustomFieldDefinition existing = repo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmCustomFieldDefinition existing = repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Custom field not found: " + id));
         existing.setEntity(changes.getEntity());
         existing.setFieldKey(changes.getFieldKey());

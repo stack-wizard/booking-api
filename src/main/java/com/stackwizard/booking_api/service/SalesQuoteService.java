@@ -125,7 +125,7 @@ public class SalesQuoteService {
     @Transactional(readOnly = true)
     public List<SalesQuote> pendingApprovals() {
         accessContext.require(CrmPermission.QUOTE_APPROVE);
-        return quoteRepo.findByTenantIdAndStatusOrderByIdDesc(TenantResolver.requireTenantId(), SalesQuote.Status.PENDING_APPROVAL);
+        return quoteRepo.findByTenantIdAndStatusOrderByIdDesc(TenantResolver.requireOrgTenantId(), SalesQuote.Status.PENDING_APPROVAL);
     }
 
     @Transactional(readOnly = true)
@@ -409,7 +409,7 @@ public class SalesQuoteService {
 
     public SalesQuote requireQuote(Long quoteId) {
         accessContext.require(CrmPermission.EVENT_READ);
-        SalesQuote quote = quoteRepo.findByIdAndTenantId(quoteId, TenantResolver.requireTenantId())
+        SalesQuote quote = quoteRepo.findByIdAndTenantId(quoteId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Quote not found"));
         eventService.requireEvent(quote.getEventId());
         return quote;
@@ -420,13 +420,13 @@ public class SalesQuoteService {
     }
 
     List<SalesQuoteLine> linesFromEvent(Event event) {
-        List<EventFunction> functions = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<EventFunction> functions = functionRepo.findForEvent(
                 event.getTenantId(), event.getId());
         List<Long> functionIds = functions.stream().map(EventFunction::getId).toList();
-        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(event.getTenantId(), functionIds).stream()
+        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(functions).stream()
                 .collect(Collectors.toMap(Reservation::getEventFunctionId, Function.identity(), (a, b) -> a));
         Map<Long, List<EventFunctionItem>> itemsByFunction = functionIds.isEmpty() ? Map.of()
-                : itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds).stream()
+                : itemRepo.findForFunctions(event.getTenantId(), functionIds).stream()
                 .collect(Collectors.groupingBy(EventFunctionItem::getEventFunctionId));
         List<Long> productIds = new ArrayList<>();
         rentByFunction.values().forEach(r -> productIds.add(r.getProductId()));

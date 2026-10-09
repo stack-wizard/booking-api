@@ -2,8 +2,10 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.model.CrmTeam;
 import com.stackwizard.booking_api.model.CrmTeamMember;
+import com.stackwizard.booking_api.model.CrmTeamProperty;
 import com.stackwizard.booking_api.repository.AppUserRepository;
 import com.stackwizard.booking_api.repository.CrmTeamMemberRepository;
+import com.stackwizard.booking_api.repository.CrmTeamPropertyRepository;
 import com.stackwizard.booking_api.repository.CrmTeamRepository;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmPermission;
@@ -29,17 +31,23 @@ public class CrmTeamService {
     private final AppUserRepository appUserRepo;
     private final CrmAccessContext accessContext;
     private final CrmTeamDirectory teamDirectory;
+    private final CrmTeamPropertyRepository teamPropertyRepo;
+    private final TenantHierarchy hierarchy;
 
     public CrmTeamService(CrmTeamRepository teamRepo,
                           CrmTeamMemberRepository memberRepo,
                           AppUserRepository appUserRepo,
                           CrmAccessContext accessContext,
-                          CrmTeamDirectory teamDirectory) {
+                          CrmTeamDirectory teamDirectory,
+                          CrmTeamPropertyRepository teamPropertyRepo,
+                          TenantHierarchy hierarchy) {
         this.teamRepo = teamRepo;
         this.memberRepo = memberRepo;
         this.appUserRepo = appUserRepo;
         this.accessContext = accessContext;
         this.teamDirectory = teamDirectory;
+        this.teamPropertyRepo = teamPropertyRepo;
+        this.hierarchy = hierarchy;
     }
 
     /** What the caller sees: ALL / TEAM / OWN, the teams they lead and every team and user that is visible. */
@@ -58,7 +66,7 @@ public class CrmTeamService {
 
     public List<CrmUser> users() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         List<CrmTeamMember> active = memberRepo.findActive(tenantId, LocalDate.now());
         Map<Long, AppUser> byId = new LinkedHashMap<>();
         appUserRepo.findByTenantIdOrderByUsernameAsc(tenantId).stream()
@@ -79,19 +87,19 @@ public class CrmTeamService {
 
     public List<CrmTeam> findAll() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return teamRepo.findByTenantIdOrderByNameAsc(TenantResolver.requireTenantId());
+        return teamRepo.findByTenantIdOrderByNameAsc(TenantResolver.requireOrgTenantId());
     }
 
     public Optional<CrmTeam> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return teamRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId());
+        return teamRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmTeam create(CrmTeam team) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
         team.setId(null);
-        team.setTenantId(TenantResolver.requireTenantId());
+        team.setTenantId(TenantResolver.requireOrgTenantId());
         validateParent(team.getTenantId(), null, team.getParentTeamId());
         if (team.getActive() == null) {
             team.setActive(true);
@@ -102,7 +110,7 @@ public class CrmTeamService {
     @Transactional
     public CrmTeam update(Long id, CrmTeam changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmTeam existing = teamRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmTeam existing = teamRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Team not found: " + id));
         existing.setName(changes.getName());
         validateParent(existing.getTenantId(), existing.getId(), changes.getParentTeamId());
@@ -113,9 +121,51 @@ public class CrmTeamService {
         return teamRepo.save(existing);
     }
 
+    /** Explicit hotels of every team of the chain; a team without rows covers every hotel. */
+    public List<CrmTeamProperty> allProperties() {
+        accessContext.require(CrmPermission.ACCOUNT_READ);
+        return teamPropertyRepo.findByTenantId(TenantResolver.requireOrgTenantId());
+    }
+
+    /**
+     * Replaces the hotels of a team (empty = every hotel). A sub-team can only work for hotels its parent works
+     * for, and a parent cannot drop a hotel one of its sub-teams still uses.
+     */
+    @Transactional
+    public List<CrmTeamProperty> replaceProperties(Long teamId, List<Long> propertyTenantIds) {
+        accessContext.require(CrmPermission.PIPELINE_CONFIG);
+        Long tenantId = TenantResolver.requireOrgTenantId();
+        CrmTeam team = teamRepo.findByIdAndTenantId(teamId, tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Team not found: " + teamId));
+        Set<Long> wanted = new java.util.LinkedHashSet<>(propertyTenantIds == null ? List.of() : propertyTenantIds);
+        wanted.forEach(id -> hierarchy.requirePropertyOf(id, tenantId));
+        if (!wanted.isEmpty() && team.getParentTeamId() != null) {
+            var parent = teamDirectory.coverageOf(tenantId, team.getParentTeamId());
+            if (!parent.allHotels() && !parent.propertyIds().containsAll(wanted)) {
+                throw new IllegalArgumentException("A sub-team can only work for hotels its parent team works for");
+            }
+        }
+        for (CrmTeam child : teamRepo.findByTenantIdOrderByNameAsc(tenantId)) {
+            if (!teamId.equals(child.getParentTeamId())) {
+                continue;
+            }
+            List<CrmTeamProperty> own = teamPropertyRepo.findByTenantIdAndTeamId(tenantId, child.getId());
+            boolean outside = own.stream().anyMatch(r -> !wanted.isEmpty() && !wanted.contains(r.getPropertyTenantId()));
+            if (outside) {
+                throw new IllegalArgumentException("Sub-team " + child.getName() + " works for a hotel that is not in this list");
+            }
+        }
+        teamPropertyRepo.deleteByTenantIdAndTeamId(tenantId, teamId);
+        teamPropertyRepo.flush();
+        List<CrmTeamProperty> rows = wanted.stream()
+                .map(id -> CrmTeamProperty.builder().tenantId(tenantId).teamId(teamId).propertyTenantId(id).build())
+                .toList();
+        return teamPropertyRepo.saveAll(rows);
+    }
+
     public List<CrmTeamMember> members(Long teamId) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         teamRepo.findByIdAndTenantId(teamId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Team not found: " + teamId));
         return memberRepo.findByTenantIdAndTeamIdOrderByValidFromDescIdDesc(tenantId, teamId);
@@ -124,7 +174,7 @@ public class CrmTeamService {
     @Transactional
     public CrmTeamMember addMember(Long teamId, CrmTeamMember member) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         teamRepo.findByIdAndTenantId(teamId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Team not found: " + teamId));
         if (member.getAppUserId() == null) {
@@ -151,7 +201,7 @@ public class CrmTeamService {
     @Transactional
     public CrmTeamMember updateMember(Long memberId, CrmTeamMember changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmTeamMember member = memberRepo.findByIdAndTenantId(memberId, TenantResolver.requireTenantId())
+        CrmTeamMember member = memberRepo.findByIdAndTenantId(memberId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Team member not found: " + memberId));
         if (changes.getTeamLead() != null) {
             member.setTeamLead(changes.getTeamLead());
@@ -175,7 +225,7 @@ public class CrmTeamService {
     @Transactional
     public void removeMember(Long memberId) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        CrmTeamMember member = memberRepo.findByIdAndTenantId(memberId, TenantResolver.requireTenantId())
+        CrmTeamMember member = memberRepo.findByIdAndTenantId(memberId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Team member not found: " + memberId));
         LocalDate today = LocalDate.now();
         if (!member.getValidFrom().isBefore(today)) {

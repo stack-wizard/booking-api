@@ -70,7 +70,7 @@ class CrmOpportunityLeadServiceTest {
         TenantContext.setTenantId(1L);
         opportunityService = new CrmOpportunityService(
                 opportunityRepo, stageRepo, requirementRepo, outcomeRepo, transitionRepo, accountRepo, contactRepo,
-                accessContext, teamDirectory);
+                accessContext, teamDirectory, TenantHierarchyTestSupport.standalone());
         leadService = new CrmLeadService(
                 leadRepo, accountRepo, contactRepo, pipelineRepo, stageRepo, opportunityRepo, transitionRepo,
                 accessContext, teamDirectory, segmentService, assignmentService);

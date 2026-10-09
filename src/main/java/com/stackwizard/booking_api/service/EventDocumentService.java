@@ -128,7 +128,7 @@ public class EventDocumentService {
     @Transactional(readOnly = true)
     public PdfDocument orderPdf(Long orderId) {
         accessContext.require(CrmPermission.EVENT_READ);
-        EventOrder order = orderRepo.findByIdAndTenantId(orderId, TenantResolver.requireTenantId())
+        EventOrder order = orderRepo.findByIdAndTenantId(orderId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("BEO not found: " + orderId));
         eventService.requireEvent(order.getEventId());
         String html = renderOrderHtml(order.getSnapshot(), order.getVersion(), order.getStatus());
@@ -166,13 +166,13 @@ public class EventDocumentService {
         if (draft.isPresent()) {
             return draft.get();
         }
-        List<EventFunction> functions = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<EventFunction> functions = functionRepo.findForEvent(
                 event.getTenantId(), event.getId());
         List<Long> functionIds = functions.stream().map(EventFunction::getId).toList();
-        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(event.getTenantId(), functionIds).stream()
+        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(functions).stream()
                 .collect(Collectors.toMap(Reservation::getEventFunctionId, Function.identity(), (a, b) -> a));
         Map<Long, List<EventFunctionItem>> itemsByFunction = functionIds.isEmpty() ? Map.of()
-                : itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds).stream()
+                : itemRepo.findForFunctions(event.getTenantId(), functionIds).stream()
                 .collect(Collectors.groupingBy(EventFunctionItem::getEventFunctionId));
 
         List<InvoiceCreateItemRequest> lines = new ArrayList<>();
@@ -224,11 +224,11 @@ public class EventDocumentService {
     }
 
     JsonNode snapshot(Event event, int version) {
-        List<EventFunction> functions = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<EventFunction> functions = functionRepo.findForEvent(
                 event.getTenantId(), event.getId());
         List<Long> functionIds = functions.stream().map(EventFunction::getId).toList();
         List<EventFunctionItem> items = functionIds.isEmpty() ? List.of()
-                : itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds);
+                : itemRepo.findForFunctions(event.getTenantId(), functionIds);
         Map<Long, String> productNames = productRepo.findAllById(
                         items.stream().map(EventFunctionItem::getProductId).distinct().toList()).stream()
                 .collect(Collectors.toMap(Product::getId, Product::getName));

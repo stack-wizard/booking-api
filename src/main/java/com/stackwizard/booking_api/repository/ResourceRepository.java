@@ -10,6 +10,7 @@ import java.util.Optional;
 
 public interface ResourceRepository extends JpaRepository<Resource, Long> {
     List<Resource> findByTenantId(Long tenantId);
+    boolean existsByTenantId(Long tenantId);
     List<Resource> findByTenantIdAndLocationId(Long tenantId, Long locationId);
     Optional<Resource> findByIdAndTenantId(Long id, Long tenantId);
 

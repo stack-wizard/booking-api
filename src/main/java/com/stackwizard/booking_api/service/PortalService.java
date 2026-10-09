@@ -104,7 +104,7 @@ public class PortalService {
     /** Logged-in Platform user resolver: contacts whose platform_user_id is the JWT subject. */
     @Transactional(readOnly = true)
     public PortalAccessContext fromPlatformUser() {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         AppUser user = authUserAccessor.currentAppUser()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Sign in required"));
         if (user.getPlatformUserId() == null) {

@@ -28,13 +28,13 @@ public class CrmSegmentService {
 
     public List<CrmSegment> findAll() {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return repo.findByTenantIdOrderByDisplayOrderAscNameAsc(TenantResolver.requireTenantId());
+        return repo.findByTenantIdOrderByDisplayOrderAscNameAsc(TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmSegment create(CrmSegment segment) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         segment.setId(null);
         segment.setTenantId(tenantId);
         apply(tenantId, segment, segment);
@@ -47,7 +47,7 @@ public class CrmSegmentService {
     @Transactional
     public CrmSegment update(Long id, CrmSegment changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmSegment existing = repo.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Segment not found: " + id));
         String oldCode = existing.getCode();

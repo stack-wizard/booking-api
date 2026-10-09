@@ -41,13 +41,13 @@ public class CrmAlertService {
         if (scope.team() && scope.teamUserIds() != null) {
             userIds.addAll(scope.teamUserIds());
         }
-        return alertRepo.findOpen(TenantResolver.requireTenantId(), scope.all(), userIds);
+        return alertRepo.findOpen(TenantResolver.requireOrgTenantId(), scope.all(), userIds);
     }
 
     @Transactional
     public CrmAlert acknowledge(Long alertId) {
         accessContext.require(CrmPermission.EVENT_READ);
-        CrmAlert alert = alertRepo.findByIdAndTenantId(alertId, TenantResolver.requireTenantId())
+        CrmAlert alert = alertRepo.findByIdAndTenantId(alertId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alert not found"));
         if (alert.getAcknowledgedAt() == null) {
             alert.setAcknowledgedAt(OffsetDateTime.now());

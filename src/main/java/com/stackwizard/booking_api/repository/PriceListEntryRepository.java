@@ -44,12 +44,15 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
               and upper(p.uom) = upper(:uom)
               and upper(prof.currency) = upper(:currency)
               and prof.tenantId = :tenantId
+              and (prof.propertyTenantId is null or prof.propertyTenantId = :propertyTenantId)
               and :date between pd.dateFrom and pd.dateTo
+            order by case when prof.propertyTenantId = :propertyTenantId then 0 else 1 end, p.id
             """)
     List<PriceListEntry> findForProductUomOnDate(@Param("productId") Long productId,
                                                  @Param("uom") String uom,
                                                  @Param("currency") String currency,
                                                  @Param("tenantId") Long tenantId,
+                                                 @Param("propertyTenantId") Long propertyTenantId,
                                                  @Param("date") LocalDate date);
 
     @Query("""
@@ -59,9 +62,11 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
             join p.priceProfileDate pd
             where p.productId in :productIds
               and prof.tenantId = :tenantId
+              and (prof.propertyTenantId is null or prof.propertyTenantId = :propertyTenantId)
               and :date between pd.dateFrom and pd.dateTo
               and (prof.reservationRequestType is null or prof.reservationRequestType = :requestType)
             order by
+              case when prof.propertyTenantId = :propertyTenantId then 0 else 1 end,
               case when prof.reservationRequestType = :requestType then 0 else 1 end,
               case when p.startTime is null then 0 else 1 end,
               p.startTime,
@@ -70,6 +75,7 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
             """)
     List<PriceListEntry> findCandidatesForProductsOnDate(@Param("productIds") List<Long> productIds,
                                                          @Param("tenantId") Long tenantId,
+                                                         @Param("propertyTenantId") Long propertyTenantId,
                                                          @Param("date") LocalDate date,
                                                          @Param("requestType") ReservationRequest.Type requestType);
 
@@ -82,9 +88,11 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
               and upper(p.uom) = upper(:uom)
               and upper(prof.currency) = upper(:currency)
               and prof.tenantId = :tenantId
+              and (prof.propertyTenantId is null or prof.propertyTenantId = :propertyTenantId)
               and :date between pd.dateFrom and pd.dateTo
               and (prof.reservationRequestType is null or prof.reservationRequestType = :requestType)
             order by
+              case when prof.propertyTenantId = :propertyTenantId then 0 else 1 end,
               case when prof.reservationRequestType = :requestType then 0 else 1 end,
               case when p.startTime is null then 0 else 1 end,
               p.startTime,
@@ -95,6 +103,7 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
                                                            @Param("uom") String uom,
                                                            @Param("currency") String currency,
                                                            @Param("tenantId") Long tenantId,
+                                                           @Param("propertyTenantId") Long propertyTenantId,
                                                            @Param("date") LocalDate date,
                                                            @Param("requestType") ReservationRequest.Type requestType);
 

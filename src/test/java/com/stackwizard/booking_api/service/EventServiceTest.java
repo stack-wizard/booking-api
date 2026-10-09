@@ -64,7 +64,7 @@ class EventServiceTest {
         when(accessContext.currentUserId()).thenReturn(7L);
         when(eventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
-                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager, quoteRepo, true);
+                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager, quoteRepo, TenantHierarchyTestSupport.standalone(), true);
     }
 
     @AfterEach
@@ -103,7 +103,7 @@ class EventServiceTest {
     @Test
     void definiteRequiresAcceptedQuote() {
         event(Event.Status.TENTATIVE).setDecisionDate(LocalDate.now().plusDays(3));
-        when(functionRepo.existsByTenantIdAndEventIdAndResourceIdIsNotNull(1L, 5L)).thenReturn(true);
+        when(functionRepo.existsSpaceFunctionForEvent(1L, 5L)).thenReturn(true);
         when(quoteRepo.existsByTenantIdAndEventIdAndStatus(1L, 5L, SalesQuote.Status.ACCEPTED)).thenReturn(false);
 
         assertThatThrownBy(() -> service.changeStatus(5L, to(Event.Status.DEFINITE, null)))
@@ -127,7 +127,7 @@ class EventServiceTest {
     void tentativeRequiresAtLeastOneFunctionWithSpace() {
         Event event = event(Event.Status.INQUIRY);
         event.setDecisionDate(LocalDate.now().plusDays(7));
-        when(functionRepo.existsByTenantIdAndEventIdAndResourceIdIsNotNull(1L, 5L)).thenReturn(false);
+        when(functionRepo.existsSpaceFunctionForEvent(1L, 5L)).thenReturn(false);
 
         assertThatThrownBy(() -> service.changeStatus(5L, to(Event.Status.TENTATIVE, null)))
                 .isInstanceOf(IllegalStateException.class)
@@ -139,7 +139,7 @@ class EventServiceTest {
     void tentativeHoldsSpaceAndWritesHistory() {
         Event event = event(Event.Status.INQUIRY);
         event.setDecisionDate(LocalDate.now().plusDays(7));
-        when(functionRepo.existsByTenantIdAndEventIdAndResourceIdIsNotNull(1L, 5L)).thenReturn(true);
+        when(functionRepo.existsSpaceFunctionForEvent(1L, 5L)).thenReturn(true);
 
         Event saved = service.changeStatus(5L, to(Event.Status.TENTATIVE, null));
 
@@ -206,5 +206,26 @@ class EventServiceTest {
         assertThatThrownBy(() -> service.update(5L, changes))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("cannot be reduced");
+    }
+
+    @Test
+    void eventCannotBeLimitedToAHotelWhileItHasFunctionsElsewhere() {
+        TenantHierarchy chain = org.mockito.Mockito.mock(TenantHierarchy.class);
+        when(chain.isPropertyOf(2L, 1L)).thenReturn(true);
+        when(chain.requirePropertyOf(2L, 1L)).thenReturn(2L);
+        service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
+                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager,
+                quoteRepo, chain, true);
+        Event existing = event(Event.Status.INQUIRY);
+        existing.setPropertyTenantId(null);
+        when(functionRepo.findForEvent(1L, 5L)).thenReturn(java.util.List.of(
+                com.stackwizard.booking_api.model.EventFunction.builder().id(9L).tenantId(3L).build()));
+        Event changes = Event.builder().name(existing.getName()).propertyTenantId(2L)
+                .dateFrom(existing.getDateFrom()).dateTo(existing.getDateTo()).build();
+
+        assertThatThrownBy(() -> service.update(5L, changes))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("other hotels");
+        assertThat(existing.getPropertyTenantId()).isNull();
     }
 }

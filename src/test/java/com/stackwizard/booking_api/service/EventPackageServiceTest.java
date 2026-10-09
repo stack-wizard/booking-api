@@ -55,6 +55,7 @@ class EventPackageServiceTest {
         event = Event.builder().id(5L).tenantId(1L).status(Event.Status.INQUIRY).currency("EUR")
                 .dateFrom(LocalDate.of(2027, 4, 14)).dateTo(LocalDate.of(2027, 4, 15)).guaranteedPax(120).build();
         when(eventService.requireEditable(5L)).thenReturn(event);
+        when(functionService.resolveProperty(any(), any())).thenReturn(1L);
     }
 
     @Test
@@ -63,7 +64,7 @@ class EventPackageServiceTest {
         when(productRepo.findByIdAndTenantId(anyLong(), eq(1L)))
                 .thenAnswer(inv -> Optional.of(Product.builder().id(inv.getArgument(0)).name("P" + inv.getArgument(0))
                         .defaultUom("UNIT").build()));
-        when(packageService.quote(1L, 50L, START.toLocalDate(), 120, "EUR")).thenReturn(quote(Product.PackagePricing.SPLIT_PERCENT,
+        when(packageService.quote(1L, 1L, 50L, START.toLocalDate(), 120, "EUR")).thenReturn(quote(Product.PackagePricing.SPLIT_PERCENT,
                 BigDecimal.ZERO,
                 line(component(101L, EventFunction.FunctionType.PLENARY, 0, 480), "Main Hall rent", 120),
                 line(component(102L, EventFunction.FunctionType.COFFEE_BREAK, 90, 30), "Coffee break", 240),
@@ -89,7 +90,7 @@ class EventPackageServiceTest {
 
     @Test
     void splitFixedWithDifferenceIsRejected() {
-        when(packageService.quote(1L, 50L, START.toLocalDate(), 120, "EUR")).thenReturn(quote(Product.PackagePricing.SPLIT_FIXED,
+        when(packageService.quote(1L, 1L, 50L, START.toLocalDate(), 120, "EUR")).thenReturn(quote(Product.PackagePricing.SPLIT_FIXED,
                 new BigDecimal("-5.00"),
                 line(component(101L, EventFunction.FunctionType.PLENARY, 0, 480), "Main Hall rent", 120)));
 

@@ -41,6 +41,7 @@ class PackageCatalogServiceTest {
     @Mock ProductPackageListingRepository listingRepo;
     @Mock PackageService packageService;
     @Mock ResourceSetupCapacityService spaceService;
+    @Mock ProductVisibilityService visibility;
 
     PackageCatalogService service;
 
@@ -54,10 +55,11 @@ class PackageCatalogServiceTest {
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new PackageCatalogService(productRepo, componentRepo, listingRepo, packageService, spaceService);
+        service = new PackageCatalogService(productRepo, componentRepo, listingRepo, packageService, spaceService, visibility);
+        when(visibility.isVisible(any(), any())).thenReturn(true);
         when(productRepo.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(ddr));
         when(listingRepo.findByTenantIdAndProductId(1L, 1L)).thenReturn(Optional.of(listing));
-        when(packageService.quote(eq(1L), eq(1L), any(), anyInt(), any())).thenReturn(new PackageService.PackageQuote(
+        when(packageService.quote(eq(1L), eq(1L), eq(1L), any(), anyInt(), any())).thenReturn(new PackageService.PackageQuote(
                 1L, "DDR", Product.PackagePricing.SPLIT_PERCENT, 20, new BigDecimal("65.00"), new BigDecimal("1300.00"),
                 new BigDecimal("1300.00"), BigDecimal.ZERO, BigDecimal.ZERO, List.of()));
     }
@@ -129,5 +131,13 @@ class PackageCatalogServiceTest {
         return ProductComponent.builder().componentProductId(2L).qty(1).included(true)
                 .qtyBasis(ProductComponent.QtyBasis.PER_PAX)
                 .functionType(type).startOffsetMinutes(offset).durationMinutes(duration).build();
+    }
+
+    @Test
+    void catalogHidesPackagesNotOfferedInTheSelectedHotel() {
+        when(listingRepo.findByTenantIdAndPublishedTrueOrderByIdAsc(1L)).thenReturn(java.util.List.of(listing));
+        when(visibility.isVisible(ddr, 1L)).thenReturn(false);
+
+        org.assertj.core.api.Assertions.assertThat(service.catalog(null, "EUR")).isEmpty();
     }
 }

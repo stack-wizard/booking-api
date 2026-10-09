@@ -27,7 +27,8 @@ public class BookingDevProperties {
 
     /**
      * When true (default), startup seeds one demo sales flow for {@link #dhSalesFlowPlatformTenantId}
-     * if that Platform tenant is mapped. No-op when mapping is missing. Disable via SSM on real prod.
+     * if that Platform tenant is mapped. An older/incomplete seed (wrong tenant or missing hotel) is wiped
+     * and re-seeded. No-op when mapping is missing. Disable via SSM on real prod.
      */
     private boolean dhSalesFlowSeed = true;
 
@@ -36,6 +37,20 @@ public class BookingDevProperties {
      * {@code platform_tenant_mapping} — not an Opera hotel code.
      */
     private UUID dhSalesFlowPlatformTenantId = DEFAULT_DEMO_PLATFORM_TENANT_ID;
+
+    /**
+     * Local/dev convenience only: create an ORG mapping on first login of an unmapped Platform tenant.
+     * Default false — real tenants are registered through {@code /api/admin/tenant-setup}.
+     */
+    private boolean autoProvisionTenant = false;
+
+    public boolean isAutoProvisionTenant() {
+        return autoProvisionTenant;
+    }
+
+    public void setAutoProvisionTenant(boolean autoProvisionTenant) {
+        this.autoProvisionTenant = autoProvisionTenant;
+    }
 
     public LocalDate getReferenceDate() {
         return referenceDate;

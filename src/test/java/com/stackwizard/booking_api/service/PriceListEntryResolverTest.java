@@ -25,7 +25,7 @@ class PriceListEntryResolverTest {
 
     @Test
     void findEffectiveForProductUomOnDatePrefersTypedEntryButKeepsGenericFallbackForOtherWindows() {
-        PriceListEntryResolver resolver = new PriceListEntryResolver(priceListRepo);
+        PriceListEntryResolver resolver = new PriceListEntryResolver(priceListRepo, TenantHierarchyTestSupport.standalone());
         PriceListEntry genericMorning = entry(
                 "HALFDAY",
                 "70.00",
@@ -53,6 +53,7 @@ class PriceListEntryResolverTest {
                 "HALFDAY",
                 "EUR",
                 3L,
+                3L,
                 LocalDate.of(2026, 7, 12),
                 ReservationRequest.Type.WALKIN
         )).thenReturn(List.of(genericMorning, genericAfternoon, walkinMorning));
@@ -69,6 +70,23 @@ class PriceListEntryResolverTest {
         assertThat(resolved)
                 .extracting(PriceListEntry::getPrice)
                 .containsExactly(new BigDecimal("60.00"), new BigDecimal("75.00"));
+    }
+
+    @Test
+    void hotelPriceBeatsChainPriceEvenWhenChainPriceMatchesRequestType() {
+        PriceListEntryResolver resolver = new PriceListEntryResolver(priceListRepo, TenantHierarchyTestSupport.standalone());
+        PriceListEntry chainWalkin = entry("DAY", "100.00", null, null, ReservationRequest.Type.WALKIN);
+        PriceListEntry hotelGeneric = entry("DAY", "80.00", null, null, null);
+        hotelGeneric.getPriceProfile().setPropertyTenantId(3L);
+
+        when(priceListRepo.findCandidatesForProductUomOnDate(
+                15L, "DAY", "EUR", 3L, 3L, LocalDate.of(2026, 7, 12), ReservationRequest.Type.WALKIN
+        )).thenReturn(List.of(chainWalkin, hotelGeneric));
+
+        List<PriceListEntry> resolved = resolver.findEffectiveForProductUomOnDate(
+                15L, "DAY", "EUR", 3L, LocalDate.of(2026, 7, 12), ReservationRequest.Type.WALKIN);
+
+        assertThat(resolved).extracting(PriceListEntry::getPrice).containsExactly(new BigDecimal("80.00"));
     }
 
     private PriceListEntry entry(String uom,

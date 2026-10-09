@@ -23,9 +23,10 @@ public interface EventRepository extends JpaRepository<Event, Long> {
               and e.dateTo >= :from
               and e.dateFrom <= :to
               and (:all = true
-                   or (:own = true and e.ownerUserId = :currentUserId)
-                   or (:team = true and e.ownerUserId in :teamUserIds)
-                   or (:team = true and e.teamId in :teamIds))
+                   or ((:own = true or :team = true) and e.ownerUserId = :currentUserId)
+                   or (:team = true
+                       and (e.ownerUserId in :teamUserIds or e.teamId in :teamIds)
+                       and (:allHotels = true or e.propertyTenantId in :propertyIds)))
             order by e.dateFrom asc, e.id asc
             """)
     List<Event> findScoped(@Param("tenantId") Long tenantId,
@@ -38,7 +39,9 @@ public interface EventRepository extends JpaRepository<Event, Long> {
                            @Param("team") boolean team,
                            @Param("currentUserId") Long currentUserId,
                            @Param("teamUserIds") Collection<Long> teamUserIds,
-                           @Param("teamIds") Collection<Long> teamIds);
+                           @Param("teamIds") Collection<Long> teamIds,
+                           @Param("allHotels") boolean allHotels,
+                           @Param("propertyIds") Collection<Long> propertyIds);
 
     @Query("""
             select e from Event e

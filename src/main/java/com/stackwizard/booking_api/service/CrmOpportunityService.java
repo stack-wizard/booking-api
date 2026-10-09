@@ -42,6 +42,7 @@ public class CrmOpportunityService {
     private final CrmContactRepository contactRepo;
     private final CrmAccessContext accessContext;
     private final CrmTeamDirectory teamDirectory;
+    private final TenantHierarchy hierarchy;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CrmOpportunityService(CrmOpportunityRepository opportunityRepo,
@@ -52,7 +53,8 @@ public class CrmOpportunityService {
                                  CrmAccountRepository accountRepo,
                                  CrmContactRepository contactRepo,
                                  CrmAccessContext accessContext,
-                                 CrmTeamDirectory teamDirectory) {
+                                 CrmTeamDirectory teamDirectory,
+                                 TenantHierarchy hierarchy) {
         this.opportunityRepo = opportunityRepo;
         this.stageRepo = stageRepo;
         this.requirementRepo = requirementRepo;
@@ -62,28 +64,37 @@ public class CrmOpportunityService {
         this.contactRepo = contactRepo;
         this.accessContext = accessContext;
         this.teamDirectory = teamDirectory;
+        this.hierarchy = hierarchy;
+    }
+
+    private void requireHotelOfChain(Long orgTenantId, Long propertyTenantId) {
+        if (propertyTenantId != null) {
+            hierarchy.requirePropertyOf(propertyTenantId, orgTenantId);
+        }
     }
 
     public List<CrmOpportunity> findAll(Long pipelineId) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return opportunityRepo.findScoped(
-                TenantResolver.requireTenantId(), pipelineId,
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
+                TenantResolver.requireOrgTenantId(), pipelineId,
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds(),
+                scope.allHotels(), scope.propertyIds());
     }
 
     public Optional<CrmOpportunity> findById(Long id) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
-        return opportunityRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()));
+        return opportunityRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId(), o.getPropertyTenantId()));
     }
 
     @Transactional
     public CrmOpportunity create(CrmOpportunity opportunity) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         opportunity.setId(null);
         opportunity.setTenantId(tenantId);
+        requireHotelOfChain(tenantId, opportunity.getPropertyTenantId());
         if (opportunity.getCurrency() == null || opportunity.getCurrency().isBlank()) {
             opportunity.setCurrency("EUR");
         }
@@ -101,6 +112,7 @@ public class CrmOpportunityService {
                 : accountRepo.findByIdAndTenantId(opportunity.getAccountId(), tenantId).map(CrmAccount::getTeamId).orElse(null);
         opportunity.setTeamId(teamDirectory.resolveTeam(tenantId, opportunity.getOwnerUserId(), opportunity.getTeamId(), accountTeam));
         teamDirectory.requireAssignable(tenantId, opportunity.getOwnerUserId(), opportunity.getTeamId());
+        opportunity.setPropertyTenantId(teamDirectory.resolveProperty(tenantId, opportunity.getTeamId(), opportunity.getPropertyTenantId()));
         validateAgency(tenantId, opportunity.getAgencyAccountId(), opportunity.getAccountId());
         CrmPipelineStage stage = stageRepo.findByIdAndTenantId(opportunity.getStageId(), tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Stage not found: " + opportunity.getStageId()));
@@ -137,6 +149,9 @@ public class CrmOpportunityService {
         }
         existing.setExpectedCloseDate(changes.getExpectedCloseDate());
         existing.setSource(changes.getSource());
+        requireHotelOfChain(existing.getTenantId(), changes.getPropertyTenantId());
+        boolean propertyChanged = !Objects.equals(changes.getPropertyTenantId(), existing.getPropertyTenantId());
+        existing.setPropertyTenantId(changes.getPropertyTenantId());
         Long owner = changes.getOwnerUserId() != null ? changes.getOwnerUserId() : existing.getOwnerUserId();
         boolean ownerChanged = !Objects.equals(owner, existing.getOwnerUserId());
         Long team = changes.getTeamId() != null ? changes.getTeamId()
@@ -144,6 +159,9 @@ public class CrmOpportunityService {
                 : existing.getTeamId();
         if (ownerChanged || !Objects.equals(team, existing.getTeamId())) {
             teamDirectory.requireAssignable(existing.getTenantId(), owner, team);
+        }
+        if (propertyChanged || ownerChanged || !Objects.equals(team, existing.getTeamId())) {
+            existing.setPropertyTenantId(teamDirectory.resolveProperty(existing.getTenantId(), team, existing.getPropertyTenantId()));
         }
         existing.setOwnerUserId(owner);
         existing.setTeamId(team);
@@ -161,7 +179,7 @@ public class CrmOpportunityService {
         if (request == null || request.getStageId() == null) {
             throw new IllegalArgumentException("stageId is required");
         }
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmOpportunity opportunity = requireOwned(id);
         CrmPipelineStage target = stageRepo.findByIdAndTenantId(request.getStageId(), tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Stage not found: " + request.getStageId()));
@@ -223,7 +241,7 @@ public class CrmOpportunityService {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
         requireOwned(opportunityId);
         return transitionRepo.findByTenantIdAndOpportunityIdOrderByChangedAtAsc(
-                TenantResolver.requireTenantId(), opportunityId);
+                TenantResolver.requireOrgTenantId(), opportunityId);
     }
 
     void validateRequirements(Long tenantId, Long stageId, CrmOpportunity opportunity) {

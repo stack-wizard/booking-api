@@ -7,6 +7,7 @@ import com.stackwizard.booking_api.model.ProductPackageListing;
 import com.stackwizard.booking_api.repository.ProductComponentRepository;
 import com.stackwizard.booking_api.repository.ProductPackageListingRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.security.TenantContext;
 import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,22 +37,25 @@ public class PackageCatalogService {
     private final ProductPackageListingRepository listingRepo;
     private final PackageService packageService;
     private final ResourceSetupCapacityService spaceService;
+    private final ProductVisibilityService visibility;
 
     public PackageCatalogService(ProductRepository productRepo,
                                  ProductComponentRepository componentRepo,
                                  ProductPackageListingRepository listingRepo,
                                  PackageService packageService,
-                                 ResourceSetupCapacityService spaceService) {
+                                 ResourceSetupCapacityService spaceService,
+                                 ProductVisibilityService visibility) {
         this.productRepo = productRepo;
         this.componentRepo = componentRepo;
         this.listingRepo = listingRepo;
         this.packageService = packageService;
         this.spaceService = spaceService;
+        this.visibility = visibility;
     }
 
     @Transactional(readOnly = true)
     public ProductPackageListing listing(Long productId) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product product = requirePackage(tenantId, productId);
         return listingRepo.findByTenantIdAndProductId(tenantId, product.getId())
                 .orElseGet(() -> defaults(tenantId, product.getId()));
@@ -62,7 +66,7 @@ public class PackageCatalogService {
         if (incoming == null) {
             throw new IllegalArgumentException("request body is required");
         }
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product product = requirePackage(tenantId, productId);
         ProductPackageListing listing = listingRepo.findByTenantIdAndProductId(tenantId, product.getId())
                 .orElseGet(() -> defaults(tenantId, product.getId()));
@@ -94,25 +98,32 @@ public class PackageCatalogService {
     /** Published packages, optionally only those valid on {@code date}. Price is per person for min pax. */
     @Transactional(readOnly = true)
     public List<CatalogPackage> catalog(LocalDate date, String currency) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
+        Long property = TenantContext.getPropertyTenantId();
         List<CatalogPackage> out = new ArrayList<>();
         for (ProductPackageListing listing : listingRepo.findByTenantIdAndPublishedTrueOrderByIdAsc(tenantId)) {
             if (date != null && !validOn(listing, date)) {
                 continue;
             }
             Optional<Product> product = productRepo.findByIdAndTenantId(listing.getProductId(), tenantId)
-                    .filter(p -> p.getPackagePricing() != null);
-            product.ifPresent(p -> out.add(toCatalog(tenantId, p, listing, date != null ? date : LocalDate.now(), currency)));
+                    .filter(p -> p.getPackagePricing() != null)
+                    .filter(p -> property == null || visibility.isVisible(p, property));
+            product.ifPresent(p -> out.add(toCatalog(tenantId, priceTenant(tenantId, property), p, listing,
+                    date != null ? date : LocalDate.now(), currency)));
         }
         return out;
     }
 
     @Transactional(readOnly = true)
     public CatalogPackage catalogPackage(Long productId, LocalDate date, String currency) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product product = requirePackage(tenantId, productId);
         ProductPackageListing listing = requirePublished(tenantId, product.getId());
-        return toCatalog(tenantId, product, listing, date != null ? date : LocalDate.now(), currency);
+        Long property = TenantContext.getPropertyTenantId();
+        if (property != null) {
+            visibility.requireVisible(product, property);
+        }
+        return toCatalog(tenantId, priceTenant(tenantId, property), product, listing, date != null ? date : LocalDate.now(), currency);
     }
 
     /**
@@ -126,9 +137,13 @@ public class PackageCatalogService {
         if (pax == null || pax <= 0) {
             throw new IllegalArgumentException("pax must be > 0");
         }
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product product = requirePackage(tenantId, productId);
         ProductPackageListing listing = requirePublished(tenantId, product.getId());
+        Long property = TenantContext.getPropertyTenantId();
+        if (property != null) {
+            visibility.requireVisible(product, property);
+        }
         if (!validOn(listing, date)) {
             throw new IllegalArgumentException(displayName(product, listing) + " is not offered on " + date);
         }
@@ -140,7 +155,7 @@ public class PackageCatalogService {
                 tenantId, product.getId());
         LocalDateTime start = date.atTime(startTime != null ? startTime : listing.getDefaultStartTime());
         LocalDateTime[] window = spaceWindow(start, listing.getDuration(), components);
-        PackageService.PackageQuote quote = packageService.quote(tenantId, product.getId(), date, pax, currency);
+        PackageService.PackageQuote quote = packageService.quote(tenantId, priceTenant(tenantId, property), product.getId(), date, pax, currency);
         List<ResourceSetupCapacityService.SpaceCandidate> spaces = spaceService.searchSpaces(
                         pax, listing.getSetupStyle(), window[0], window[1]).stream()
                 .filter(ResourceSetupCapacityService.SpaceCandidate::available)
@@ -179,7 +194,7 @@ public class PackageCatalogService {
                 && (listing.getValidTo() == null || !date.isAfter(listing.getValidTo()));
     }
 
-    private CatalogPackage toCatalog(Long tenantId, Product product, ProductPackageListing listing, LocalDate date, String currency) {
+    private CatalogPackage toCatalog(Long tenantId, Long priceTenantId, Product product, ProductPackageListing listing, LocalDate date, String currency) {
         List<ProductComponent> components = componentRepo.findByTenantIdAndPackageProductIdOrderByDisplayOrderAscIdAsc(
                 tenantId, product.getId());
         Map<Long, Product> products = productRepo.findAllById(
@@ -195,7 +210,7 @@ public class PackageCatalogService {
         BigDecimal pricePerPerson = null;
         try {
             int pax = listing.getMinPax() != null ? listing.getMinPax() : 1;
-            pricePerPerson = packageService.quote(tenantId, product.getId(), date, pax, currency).pricePerPerson();
+            pricePerPerson = packageService.quote(tenantId, priceTenantId, product.getId(), date, pax, currency).pricePerPerson();
         } catch (IllegalArgumentException ignored) {
             // no price on that date: listed without a price
         }
@@ -206,6 +221,11 @@ public class PackageCatalogService {
                 product.getDefaultImageUrl(), images, listing.getValidFrom(), listing.getValidTo(),
                 listing.getMinPax(), listing.getMaxPax(), listing.getDuration(), listing.getDefaultStartTime(),
                 listing.getSetupStyle(), pricePerPerson, currency == null ? "EUR" : currency, parts);
+    }
+
+    /** Prices come from the selected hotel (its own price list wins), otherwise from the chain. */
+    private static Long priceTenant(Long orgTenantId, Long propertyTenantId) {
+        return propertyTenantId != null ? propertyTenantId : orgTenantId;
     }
 
     private ProductPackageListing requirePublished(Long tenantId, Long productId) {

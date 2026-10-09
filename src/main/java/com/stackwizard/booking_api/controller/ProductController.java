@@ -28,7 +28,7 @@ public class ProductController {
     public List<Product> autocomplete(@RequestParam Long tenantId,
                                       @RequestParam(required = false) String q,
                                       @RequestParam(defaultValue = "20") int limit) {
-        Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
+        Long resolvedTenantId = TenantResolver.requireOrgTenantId(tenantId);
         return service.autocomplete(resolvedTenantId, q, limit);
     }
 
@@ -39,7 +39,7 @@ public class ProductController {
                                                          @RequestParam(required = false) String uom,
                                                          @RequestParam(required = false)
                                                          @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        Long resolvedTenantId = TenantResolver.requireTenantId(tenantId);
+        Long resolvedTenantId = TenantResolver.requireOrgTenantId(tenantId);
         return ResponseEntity.ok(service.selection(resolvedTenantId, id, currency, uom, date));
     }
 
@@ -50,7 +50,7 @@ public class ProductController {
 
     @PostMapping
     public ResponseEntity<Product> create(@RequestBody Product product) {
-        product.setTenantId(TenantResolver.requireTenantId(product.getTenantId()));
+        product.setTenantId(TenantResolver.requireOrgTenantId(product.getTenantId()));
         Product saved = service.save(product);
         return ResponseEntity.created(URI.create("/api/products/" + saved.getId())).body(saved);
     }
@@ -59,7 +59,7 @@ public class ProductController {
     public ResponseEntity<Product> update(@PathVariable Long id, @RequestBody Product product) {
         product.setId(id);
         if (product.getTenantId() != null) {
-            product.setTenantId(TenantResolver.requireTenantId(product.getTenantId()));
+            product.setTenantId(TenantResolver.requireOrgTenantId(product.getTenantId()));
         }
         return ResponseEntity.ok(service.save(product));
     }

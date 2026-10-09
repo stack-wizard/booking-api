@@ -79,6 +79,12 @@ public class Product {
     @Column(name = "tax2_percent", nullable = false)
     private BigDecimal tax2Percent;
 
+    /** ALL: offered in every hotel unless switched off there; SELECTED: only in hotels that switch it on. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "property_visibility", nullable = false)
+    @Builder.Default
+    private PropertyVisibility propertyVisibility = PropertyVisibility.ALL;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "package_pricing")
     private PackagePricing packagePricing;
@@ -108,6 +114,10 @@ public class Product {
                 .or(() -> images.stream().findFirst())
                 .map(ProductImage::getImageUrl)
                 .orElse(null);
+    }
+
+    public enum PropertyVisibility {
+        ALL, SELECTED
     }
 
     public enum PackagePricing {

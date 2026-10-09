@@ -2,7 +2,9 @@ package com.stackwizard.booking_api.security;
 
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.model.CrmTeam;
+import com.stackwizard.booking_api.model.CrmTeamProperty;
 import com.stackwizard.booking_api.repository.CrmTeamMemberRepository;
+import com.stackwizard.booking_api.repository.CrmTeamPropertyRepository;
 import com.stackwizard.booking_api.repository.CrmTeamRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -28,6 +30,7 @@ public class CrmAccessContext {
     private final AuthUserAccessor authUserAccessor;
     private final CrmTeamMemberRepository teamMemberRepository;
     private final CrmTeamRepository teamRepository;
+    private final CrmTeamPropertyRepository teamPropertyRepository;
 
     private Long currentUserId;
     private Set<CrmPermission> permissions;
@@ -35,15 +38,19 @@ public class CrmAccessContext {
     private Set<Long> teamUserIds;
     private Set<Long> teamIds;
     private Set<Long> ledTeamIds;
+    private boolean allHotels = true;
+    private Set<Long> propertyIds = Set.of();
     private Set<CrmRole> crmRoles;
     private boolean initialized;
 
     public CrmAccessContext(AuthUserAccessor authUserAccessor,
                             CrmTeamMemberRepository teamMemberRepository,
-                            CrmTeamRepository teamRepository) {
+                            CrmTeamRepository teamRepository,
+                            CrmTeamPropertyRepository teamPropertyRepository) {
         this.authUserAccessor = authUserAccessor;
         this.teamMemberRepository = teamMemberRepository;
         this.teamRepository = teamRepository;
+        this.teamPropertyRepository = teamPropertyRepository;
     }
 
     public void require(CrmPermission permission) {
@@ -85,6 +92,18 @@ public class CrmAccessContext {
         return ledTeamIds;
     }
 
+    /** True when the visible teams together cover every hotel of the chain (or the scope is not team based). */
+    public boolean allHotels() {
+        ensureInitialized();
+        return allHotels;
+    }
+
+    /** Hotels (local tenant ids) covered by the visible teams; only meaningful when {@link #allHotels()} is false. */
+    public Set<Long> propertyIds() {
+        ensureInitialized();
+        return propertyIds;
+    }
+
     public Set<CrmRole> crmRoles() {
         ensureInitialized();
         return crmRoles;
@@ -118,7 +137,7 @@ public class CrmAccessContext {
             teamIds = Set.of();
             ledTeamIds = Set.of();
         } else {
-            Long tenantId = TenantResolver.requireTenantId();
+            Long tenantId = TenantResolver.requireOrgTenantId();
             Map<Long, Long> parents = new HashMap<>();
             for (CrmTeam team : teamRepository.findByTenantIdOrderByNameAsc(tenantId)) {
                 parents.put(team.getId(), team.getParentTeamId());
@@ -131,6 +150,13 @@ public class CrmAccessContext {
             teamUserIds = users;
             teamIds = visibility.teamIds();
             ledTeamIds = visibility.ledTeamIds();
+            Map<Long, Set<Long>> hotels = new HashMap<>();
+            for (CrmTeamProperty row : teamPropertyRepository.findByTenantId(tenantId)) {
+                hotels.computeIfAbsent(row.getTeamId(), k -> new HashSet<>()).add(row.getPropertyTenantId());
+            }
+            CrmTeamCoverage.Coverage coverage = CrmTeamCoverage.union(teamIds, parents, hotels);
+            allHotels = coverage.allHotels();
+            propertyIds = coverage.propertyIds();
         }
         initialized = true;
     }

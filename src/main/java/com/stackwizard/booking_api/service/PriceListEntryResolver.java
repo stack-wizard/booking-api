@@ -18,9 +18,11 @@ import java.util.Objects;
 @Service
 public class PriceListEntryResolver {
     private final PriceListEntryRepository priceListRepo;
+    private final TenantHierarchy tenantHierarchy;
 
-    public PriceListEntryResolver(PriceListEntryRepository priceListRepo) {
+    public PriceListEntryResolver(PriceListEntryRepository priceListRepo, TenantHierarchy tenantHierarchy) {
         this.priceListRepo = priceListRepo;
+        this.tenantHierarchy = tenantHierarchy;
     }
 
     @Transactional(readOnly = true)
@@ -33,6 +35,7 @@ public class PriceListEntryResolver {
         }
         List<PriceListEntry> candidates = priceListRepo.findCandidatesForProductsOnDate(
                 productIds,
+                tenantHierarchy.orgIdOf(tenantId),
                 tenantId,
                 date,
                 normalizeRequestType(requestType)
@@ -51,6 +54,7 @@ public class PriceListEntryResolver {
                 productId,
                 uom,
                 currency,
+                tenantHierarchy.orgIdOf(tenantId),
                 tenantId,
                 date,
                 normalizeRequestType(requestType)
@@ -87,10 +91,10 @@ public class PriceListEntryResolver {
 
     private int specificity(PriceListEntry entry, ReservationRequest.Type requestType) {
         PriceProfile profile = entry != null ? entry.getPriceProfile() : null;
-        if (profile != null && profile.getReservationRequestType() == requestType) {
-            return 0;
-        }
-        return 1;
+        // A hotel's own price beats the chain price; within the same level the matching request type wins.
+        int level = profile != null && profile.getPropertyTenantId() != null ? 0 : 2;
+        int type = profile != null && profile.getReservationRequestType() == requestType ? 0 : 1;
+        return level + type;
     }
 
     private record EntryKey(Long productId,

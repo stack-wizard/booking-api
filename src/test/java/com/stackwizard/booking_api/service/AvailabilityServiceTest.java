@@ -98,7 +98,7 @@ class AvailabilityServiceTest {
                 "findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan", args -> List.of()
         ));
         ProductRepository productRepo = stub(ProductRepository.class, Map.of(
-                "findByTenantIdOrderByDisplayOrderAscNameAscIdAsc", args -> List.of()
+                "findVisibleForProperty", args -> List.of()
         ));
         PriceListEntryRepository priceListRepo = stub(PriceListEntryRepository.class, Map.of(
                 "findCandidatesForProductsOnDate", args -> List.of()
@@ -139,12 +139,13 @@ class AvailabilityServiceTest {
                 compositionRepo,
                 allocationRepo,
                 productRepo,
-                new PriceListEntryResolver(priceListRepo),
+                new PriceListEntryResolver(priceListRepo, TenantHierarchyTestSupport.standalone()),
                 calendarService,
                 mapRepo,
                 mapResourceRepo,
                 uomRepo,
-                cancellationPolicyService
+                cancellationPolicyService,
+                TenantHierarchyTestSupport.standalone()
         );
 
         AvailabilityResponse response = service.getAvailability(tenantId, date, locationId, ReservationRequest.Type.EXTERNAL);
@@ -226,7 +227,7 @@ class AvailabilityServiceTest {
                 "findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan", args -> activeAllocations
         ));
         ProductRepository productRepo = stub(ProductRepository.class, Map.of(
-                "findByTenantIdOrderByDisplayOrderAscNameAscIdAsc", args -> List.of()
+                "findVisibleForProperty", args -> List.of()
         ));
         PriceListEntryRepository priceListRepo = stub(PriceListEntryRepository.class, Map.of(
                 "findCandidatesForProductsOnDate", args -> List.of()
@@ -267,12 +268,13 @@ class AvailabilityServiceTest {
                 compositionRepo,
                 allocationRepo,
                 productRepo,
-                new PriceListEntryResolver(priceListRepo),
+                new PriceListEntryResolver(priceListRepo, TenantHierarchyTestSupport.standalone()),
                 calendarService,
                 mapRepo,
                 mapResourceRepo,
                 uomRepo,
-                cancellationPolicyService
+                cancellationPolicyService,
+                TenantHierarchyTestSupport.standalone()
         );
 
         List<AvailabilityResourceDto> responseResources = service

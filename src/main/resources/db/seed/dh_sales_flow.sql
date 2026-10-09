@@ -1,4 +1,4 @@
--- JDBC seed (classpath). Placeholder __TENANT_ID__ replaced at runtime. Not a Flyway migration.
+-- JDBC seed (classpath). Placeholders replaced at runtime: __TENANT_ID__ = chain, __PROPERTY_TENANT_ID__ = hotel hosting the functions. Not a Flyway migration.
 -- Manual demo: one complete sales flow for a resolved tenant (__TENANT_ID__).
 -- Invoked only by seed-dh-sales-flow.sh after Opera hotel DH is confirmed.
 -- Not a Flyway migration — never runs on deploy by itself.
@@ -9,6 +9,7 @@
 -- Owner: prefer admin1 for this tenant, else any ADMIN/STAFF on the tenant, else null.
 create temporary table seed_ctx (
   tenant_id bigint primary key,
+  property_tenant_id bigint,
   owner_id bigint,
   team_id bigint,
   pipeline_id bigint,
@@ -34,8 +35,8 @@ create temporary table seed_ctx (
   date_to date
 ) on commit drop;
 
-insert into seed_ctx (tenant_id, owner_id, date_from, date_to)
-select __TENANT_ID__,
+insert into seed_ctx (tenant_id, property_tenant_id, owner_id, date_from, date_to)
+select __TENANT_ID__, __PROPERTY_TENANT_ID__,
        (select u.id from app_user u
         where u.tenant_id = __TENANT_ID__ and u.role in ('ADMIN', 'STAFF', 'SUPER_ADMIN')
         order by case when u.username = 'admin1' then 0 else 1 end, u.id
@@ -93,8 +94,8 @@ update seed_ctx c set
   stage_won = (select s.id from crm_pipeline_stage s join crm_pipeline p on p.id = s.pipeline_id
                where p.tenant_id = c.tenant_id and upper(p.code) = 'DH_EVENTS' and upper(s.code) = 'WON'),
   reason_won = (select r.id from crm_outcome_reason r where r.tenant_id = c.tenant_id and r.code = 'DH_VENUE_FIT'),
-  main_resource_id = (select r.id from resource r where r.tenant_id = c.tenant_id and r.code = 'EVT-MAIN'),
-  breakout_resource_id = (select r.id from resource r where r.tenant_id = c.tenant_id and r.code = 'EVT-BREAKOUT'),
+  main_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'EVT-MAIN'),
+  breakout_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'EVT-BREAKOUT'),
   package_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Day Delegate Rate'),
   rent_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Breakout room rent'),
   coffee_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Coffee break'),
@@ -137,10 +138,11 @@ update seed_ctx c set
 
 -- Opportunity (WON) + converted lead
 insert into crm_opportunity (
-  tenant_id, name, account_id, primary_contact_id, pipeline_id, stage_id, owner_user_id, team_id,
+  tenant_id, property_tenant_id, name, account_id, primary_contact_id, pipeline_id, stage_id, owner_user_id, team_id,
   amount, currency, expected_close_date, source, status, outcome_reason_id, outcome_note, closed_at, attrs
 )
-select c.tenant_id, 'DH Seed Congress', c.account_id, c.contact_id, c.pipeline_id, c.stage_won, c.owner_id, c.team_id,
+select c.tenant_id, c.property_tenant_id, 'DH Seed Congress', c.account_id, c.contact_id, c.pipeline_id, c.stage_won,
+       c.owner_id, c.team_id,
        14520.00, 'EUR', c.date_from - 30, 'WEB', 'WON', c.reason_won, 'Seeded won deal', now() - interval '5 days',
        jsonb_build_object('seed', 'DH_SALES_FLOW')
 from seed_ctx c
@@ -196,11 +198,12 @@ where c.opportunity_id is not null
 
 -- Event DEFINITE
 insert into event (
-  tenant_id, account_id, primary_contact_id, opportunity_id, name, status, event_type,
+  tenant_id, property_tenant_id, account_id, primary_contact_id, opportunity_id, name, status, event_type,
   decision_date, date_from, date_to, expected_pax, guaranteed_pax, guarantee_due_date,
   currency, owner_user_id, team_id, notes, attrs
 )
-select c.tenant_id, c.account_id, c.contact_id, c.opportunity_id, 'DH Seed Congress', 'DEFINITE', 'CONFERENCE',
+select c.tenant_id, c.property_tenant_id, c.account_id, c.contact_id, c.opportunity_id, 'DH Seed Congress',
+       'DEFINITE', 'CONFERENCE',
        c.date_from - 45, c.date_from, c.date_to, 130, 120, c.date_from - 14,
        'EUR', c.owner_id, c.team_id, 'Seeded definite event after accepted quote',
        jsonb_build_object('seed', 'DH_SALES_FLOW', 'setupStyle', 'CLASSROOM', 'cocktail', true)
@@ -232,7 +235,7 @@ insert into event_function (
   tenant_id, event_id, resource_id, function_type, name, setup_style,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, package_product_id, display_order
 )
-select c.tenant_id, c.event_id, c.main_resource_id, 'PLENARY', 'Day Delegate Rate', 'CLASSROOM',
+select c.property_tenant_id, c.event_id, c.main_resource_id, 'PLENARY', 'Day Delegate Rate', 'CLASSROOM',
        c.date_from + time '09:00', c.date_from + time '17:00',
        c.date_from + time '08:00', c.date_from + time '18:00',
        120, c.package_id, 10
@@ -244,7 +247,7 @@ insert into event_function (
   tenant_id, event_id, resource_id, function_type, name, setup_style,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, display_order
 )
-select c.tenant_id, c.event_id, c.breakout_resource_id, 'BREAKOUT', 'Workshop', 'CLASSROOM',
+select c.property_tenant_id, c.event_id, c.breakout_resource_id, 'BREAKOUT', 'Workshop', 'CLASSROOM',
        c.date_to + time '09:00', c.date_to + time '12:00',
        c.date_to + time '08:30', c.date_to + time '12:30',
        20, 20
@@ -256,7 +259,7 @@ insert into event_function (
   tenant_id, event_id, function_type, name,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, package_product_id, display_order
 )
-select c.tenant_id, c.event_id, 'COFFEE_BREAK', 'Coffee break',
+select c.property_tenant_id, c.event_id, 'COFFEE_BREAK', 'Coffee break',
        c.date_from + time '10:30', c.date_from + time '11:00',
        c.date_from + time '10:30', c.date_from + time '11:00',
        120, c.package_id, 15
@@ -268,7 +271,7 @@ insert into event_function_item (
   tenant_id, event_function_id, product_id, package_product_id, description, uom, qty, qty_basis,
   unit_price, discount_amount, gross_amount, display_order
 )
-select c.tenant_id, f.id, c.package_id, c.package_id, 'Day Delegate Rate', 'UNIT', 120, 'PER_GUARANTEED_PAX',
+select c.property_tenant_id, f.id, c.package_id, c.package_id, 'Day Delegate Rate', 'UNIT', 120, 'PER_GUARANTEED_PAX',
        65.00, 0, 7800.00, 1
 from seed_ctx c
 join event_function f on f.event_id = c.event_id and f.function_type = 'PLENARY'
@@ -278,7 +281,7 @@ insert into event_function_item (
   tenant_id, event_function_id, product_id, description, uom, qty, qty_basis,
   unit_price, discount_amount, gross_amount, display_order
 )
-select c.tenant_id, f.id, c.rent_product_id, 'Breakout room rent', 'HOUR', 3, 'FIXED',
+select c.property_tenant_id, f.id, c.rent_product_id, 'Breakout room rent', 'HOUR', 3, 'FIXED',
        45.00, 0, 135.00, 1
 from seed_ctx c
 join event_function f on f.event_id = c.event_id and f.function_type = 'BREAKOUT'

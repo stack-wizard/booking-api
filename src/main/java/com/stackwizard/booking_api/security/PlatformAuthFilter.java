@@ -1,7 +1,9 @@
 package com.stackwizard.booking_api.security;
 
+import com.stackwizard.booking_api.config.BookingDevProperties;
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.service.PlatformTenantResolver;
+import com.stackwizard.booking_api.service.PlatformTenantResolver.TenantScope;
 import com.stackwizard.booking_api.service.PlatformUserSyncService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -33,16 +35,27 @@ import java.util.UUID;
 public class PlatformAuthFilter extends OncePerRequestFilter {
 
     public static final String APP_CODE = "BOOKING";
+    /** Platform UUID of the organization (hotel chain). A hotel UUID is still accepted for older clients. */
     public static final String HEADER_TENANT_ID = "X-Tenant-Id";
+    /** Optional Platform UUID of the selected hotel (child of the organization). */
+    public static final String HEADER_PROPERTY_ID = "X-Property-Id";
     public static final String ATTR_APP_USER = "booking.platformAppUser";
+    /** Platform UUID of the organization on tenant-setup requests (the org may not be registered yet). */
+    public static final String ATTR_PLATFORM_TENANT_ID = "booking.platformTenantId";
+    static final String TENANT_SETUP_PATH = "/api/admin/tenant-setup";
+    /** The organization list is what the UI needs to find the setup wizard, so it works before onboarding. */
+    static final String TENANT_ORGANIZATIONS_PATH = "/api/tenant/organizations";
 
     private final PlatformTenantResolver tenantResolver;
     private final PlatformUserSyncService userSyncService;
+    private final BookingDevProperties devProperties;
 
     public PlatformAuthFilter(PlatformTenantResolver tenantResolver,
-                              PlatformUserSyncService userSyncService) {
+                              PlatformUserSyncService userSyncService,
+                              BookingDevProperties devProperties) {
         this.tenantResolver = tenantResolver;
         this.userSyncService = userSyncService;
+        this.devProperties = devProperties;
     }
 
     @Override
@@ -98,8 +111,8 @@ public class PlatformAuthFilter extends OncePerRequestFilter {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "m2m token requires scope booking.api");
         }
         UUID platformTenantId = requireHeaderTenantId(request);
-        Long bookingTenantId = tenantResolver.requireExisting(platformTenantId);
-        TenantContext.setTenantId(bookingTenantId);
+        TenantScope scope = tenantResolver.resolveScope(platformTenantId, optionalHeaderPropertyId(request), false);
+        TenantContext.setScope(scope.orgTenantId(), scope.propertyTenantId());
 
         Collection<GrantedAuthority> authorities = new ArrayList<>();
         authorities.add(new SimpleGrantedAuthority("ROLE_API"));
@@ -121,9 +134,17 @@ public class PlatformAuthFilter extends OncePerRequestFilter {
             }
         }
 
-        UUID platformTenantId = resolvePlatformTenantId(request, jwt, platformAdmin);
-        Long bookingTenantId = tenantResolver.resolveOrProvision(platformTenantId);
-        TenantContext.setTenantId(bookingTenantId);
+        UUID platformPropertyId = optionalHeaderPropertyId(request);
+        UUID platformTenantId = resolvePlatformTenantId(request, jwt, platformAdmin, platformPropertyId);
+        if (isTenantSetupRequest(request)) {
+            applyTenantSetup(request, jwt, platformTenantId, roles);
+            return;
+        }
+        TenantScope scope = tenantResolver.resolveScope(
+                platformTenantId, platformPropertyId, devProperties.isAutoProvisionTenant());
+        TenantContext.setScope(scope.orgTenantId(), scope.propertyTenantId());
+        // People belong to the chain and work in several hotels.
+        Long bookingTenantId = scope.orgTenantId();
 
         UUID platformUserId = parseUuid(jwt.getSubject(), "JWT sub");
         String username = firstNonBlank(
@@ -141,13 +162,42 @@ public class PlatformAuthFilter extends OncePerRequestFilter {
         SecurityContextHolder.getContext().setAuthentication(token);
     }
 
-    private UUID resolvePlatformTenantId(HttpServletRequest request, Jwt jwt, boolean platformAdmin) {
+    /**
+     * Membership on the organization (parent) grants every hotel under it; membership on a hotel grants
+     * only that hotel, so the organization header is accepted when the selected hotel is in the allow-list.
+     * That the hotel really is a child of the organization is verified by the resolver.
+     */
+    private static boolean isTenantSetupRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        return uri != null && (uri.contains(TENANT_SETUP_PATH) || uri.contains(TENANT_ORGANIZATIONS_PATH));
+    }
+
+    /**
+     * Tenant setup works before the tenant is fully onboarded: no status check and no local user sync.
+     * The controller verifies the caller's role.
+     */
+    private void applyTenantSetup(HttpServletRequest request, Jwt jwt, UUID platformTenantId, List<String> roles) {
+        request.setAttribute(ATTR_PLATFORM_TENANT_ID, platformTenantId);
+        tenantResolver.findOrgScopeForSetup(platformTenantId)
+                .ifPresent(scope -> TenantContext.setScope(scope.orgTenantId(), null));
+        Collection<GrantedAuthority> authorities = new ArrayList<>();
+        for (String role : roles) {
+            authorities.add(new SimpleGrantedAuthority("ROLE_" + role.toUpperCase(Locale.ROOT)));
+        }
+        SecurityContextHolder.getContext().setAuthentication(
+                new JwtAuthenticationToken(jwt, authorities, jwt.getSubject()));
+    }
+
+    private UUID resolvePlatformTenantId(HttpServletRequest request, Jwt jwt, boolean platformAdmin,
+                                         UUID propertyId) {
         String header = request.getHeader(HEADER_TENANT_ID);
         if (header != null && !header.isBlank()) {
             UUID fromHeader = parseUuid(header.trim(), HEADER_TENANT_ID);
             if (!platformAdmin) {
                 List<String> allow = tenantAllowList(jwt);
-                boolean allowed = allow.stream().anyMatch(t -> t.equalsIgnoreCase(fromHeader.toString()));
+                boolean allowed = allow.stream().anyMatch(t -> t.equalsIgnoreCase(fromHeader.toString()))
+                        || (propertyId != null
+                        && allow.stream().anyMatch(t -> t.equalsIgnoreCase(propertyId.toString())));
                 if (!allowed) {
                     throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                             "X-Tenant-Id must match a tenant in your token allow-list");
@@ -162,6 +212,14 @@ public class PlatformAuthFilter extends OncePerRequestFilter {
         }
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                 "X-Tenant-Id header or mikos_tenant_id claim is required");
+    }
+
+    private static UUID optionalHeaderPropertyId(HttpServletRequest request) {
+        String header = request.getHeader(HEADER_PROPERTY_ID);
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        return parseUuid(header.trim(), HEADER_PROPERTY_ID);
     }
 
     private static UUID requireHeaderTenantId(HttpServletRequest request) {
@@ -211,32 +269,12 @@ public class PlatformAuthFilter extends OncePerRequestFilter {
         return false;
     }
 
-    @SuppressWarnings("unchecked")
     private static List<String> stringListClaim(Jwt jwt, String claim) {
-        Object raw = jwt.getClaim(claim);
-        if (raw instanceof List<?> list) {
-            return list.stream()
-                    .map(o -> o == null ? null : o.toString())
-                    .filter(s -> s != null && !s.isBlank())
-                    .map(String::trim)
-                    .toList();
-        }
-        if (raw instanceof String s && !s.isBlank()) {
-            return List.of(s.trim());
-        }
-        return List.of();
+        return PlatformJwtClaims.stringList(jwt, claim);
     }
 
     private static List<String> tenantAllowList(Jwt jwt) {
-        List<String> many = stringListClaim(jwt, "mikos_tenant_ids");
-        if (!many.isEmpty()) {
-            return many;
-        }
-        String one = jwt.getClaimAsString("mikos_tenant_id");
-        if (one != null && !one.isBlank()) {
-            return List.of(one.trim());
-        }
-        return List.of();
+        return PlatformJwtClaims.tenantAllowList(jwt);
     }
 
     private static UUID parseUuid(String raw, String label) {

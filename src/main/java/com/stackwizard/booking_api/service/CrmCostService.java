@@ -120,7 +120,7 @@ public class CrmCostService {
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         List<SalesDtos.EventProfit> events = new ArrayList<>();
         for (Event event : eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(opportunity.getTenantId(), opportunity.getId())) {
-            if (scope.allows(event.getOwnerUserId(), event.getTeamId())) {
+            if (scope.allows(event.getOwnerUserId(), event.getTeamId(), event.getPropertyTenantId())) {
                 events.add(profit(event));
             }
         }
@@ -189,7 +189,7 @@ public class CrmCostService {
     }
 
     private CrmCostItem requireCostForWrite(Long costId) {
-        CrmCostItem cost = costRepo.findByIdAndTenantId(costId, TenantResolver.requireTenantId())
+        CrmCostItem cost = costRepo.findByIdAndTenantId(costId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cost not found"));
         if (cost.getEventId() != null) {
             eventService.requireEditable(cost.getEventId());
@@ -202,8 +202,8 @@ public class CrmCostService {
 
     private CrmOpportunity requireOpportunity(Long opportunityId) {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
-        return opportunityRepo.findByIdAndTenantId(opportunityId, TenantResolver.requireTenantId())
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()))
+        return opportunityRepo.findByIdAndTenantId(opportunityId, TenantResolver.requireOrgTenantId())
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId(), o.getPropertyTenantId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
     }
 

@@ -65,13 +65,13 @@ public class EventReadModelService {
     @Transactional(readOnly = true)
     public EventDtos.Financials financials(Long eventId) {
         Event event = eventService.requireEvent(eventId);
-        List<EventFunction> functions = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<EventFunction> functions = functionRepo.findForEvent(
                 event.getTenantId(), event.getId());
         List<Long> functionIds = functions.stream().map(EventFunction::getId).toList();
-        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(event.getTenantId(), functionIds).stream()
+        Map<Long, Reservation> rentByFunction = reservationSync.activeLines(functions).stream()
                 .collect(Collectors.toMap(Reservation::getEventFunctionId, Function.identity(), (a, b) -> a));
         Map<Long, List<EventFunctionItem>> itemsByFunction = functionIds.isEmpty() ? Map.of()
-                : itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds).stream()
+                : itemRepo.findForFunctions(event.getTenantId(), functionIds).stream()
                 .collect(Collectors.groupingBy(EventFunctionItem::getEventFunctionId));
         Map<Long, String> resourceNames = resourceNames(functions.stream().map(EventFunction::getResourceId).toList());
 
@@ -133,6 +133,7 @@ public class EventReadModelService {
             throw new IllegalArgumentException("Range is limited to 62 days");
         }
         Long tenantId = TenantResolver.requireTenantId();
+        Long orgTenantId = TenantResolver.requireOrgTenantId();
         LocalDateTime start = from.atStartOfDay();
         LocalDateTime end = to.plusDays(1).atStartOfDay();
         List<Resource> spaces = (locationId != null
@@ -167,7 +168,7 @@ public class EventReadModelService {
         Set<Long> eventIds = functionsById.values().stream().map(EventFunction::getEventId).collect(Collectors.toSet());
         Map<Long, Event> eventsById = eventIds.isEmpty() ? Map.of()
                 : eventRepo.findAllById(eventIds).stream()
-                .filter(e -> tenantId.equals(e.getTenantId()))
+                .filter(e -> orgTenantId.equals(e.getTenantId()))
                 .collect(Collectors.toMap(Event::getId, Function.identity()));
 
         Set<Long> functionsWithAllocation = new HashSet<>();

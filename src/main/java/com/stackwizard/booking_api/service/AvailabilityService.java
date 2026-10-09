@@ -56,6 +56,7 @@ public class AvailabilityService {
     private final ResourceMapRepository mapRepo;
     private final ResourceMapResourceRepository mapResourceRepo;
     private final CancellationPolicyService cancellationPolicyService;
+    private final TenantHierarchy tenantHierarchy;
 
     public AvailabilityService(ResourceRepository resourceRepo,
                                ResourceCompositionRepository compositionRepo,
@@ -66,7 +67,8 @@ public class AvailabilityService {
                                ResourceMapRepository mapRepo,
                                ResourceMapResourceRepository mapResourceRepo,
                                UomRepository uomRepo,
-                               CancellationPolicyService cancellationPolicyService) {
+                               CancellationPolicyService cancellationPolicyService,
+                               TenantHierarchy tenantHierarchy) {
         this.resourceRepo = resourceRepo;
         this.compositionRepo = compositionRepo;
         this.allocationRepo = allocationRepo;
@@ -77,6 +79,7 @@ public class AvailabilityService {
         this.mapResourceRepo = mapResourceRepo;
         this.uomRepo = uomRepo;
         this.cancellationPolicyService = cancellationPolicyService;
+        this.tenantHierarchy = tenantHierarchy;
     }
 
     @Transactional(readOnly = true)
@@ -119,7 +122,8 @@ public class AvailabilityService {
         }
 
         Map<Long, List<Product>> productsByResourceId = new HashMap<>();
-        List<Product> products = productRepo.findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(tenantId);
+        List<Product> products = productRepo.findVisibleForProperty(
+                tenantHierarchy.orgIdOf(tenantId), tenantId);
         Map<Long, Product> productById = new HashMap<>();
         for (Product product : products) {
             if (product.getResource() != null && product.getResource().getId() != null) {

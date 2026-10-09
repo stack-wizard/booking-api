@@ -30,7 +30,7 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.FunnelResponse funnel(Long pipelineId, LocalDate from, LocalDate to, Long ownerUserId) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         String sql = """
                 select s.id, s.name, s.display_order,
                        count(distinct t.opportunity_id) as entered,
@@ -79,7 +79,7 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.ConversionResponse conversion(LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         List<CrmReportDtos.ConversionRow> byOwner = conversionRows("""
                 select coalesce(cast(o.owner_user_id as text), 'unassigned') as dim_key,
                        count(*) filter (where o.status = 'WON') as won,
@@ -141,7 +141,7 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.RevenueResponse revenue(LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         String sql = """
                 with ev as (
                   select e.id, e.account_id,
@@ -207,7 +207,7 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.UtilisationResponse spaceUtilisation(LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         LocalDate start = from != null ? from : LocalDate.now().withDayOfMonth(1);
         LocalDate end = to != null ? to : start.plusMonths(1).minusDays(1);
         if (end.isBefore(start)) {
@@ -292,7 +292,7 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.StageDurationResponse stageDuration(Long pipelineId, LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         String sql = """
                 with ordered as (
                   select t.from_stage_id,

@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -66,6 +67,95 @@ class PlatformTenantResolverTest {
         verify(mappingRepo).saveAndFlush(any(PlatformTenantMapping.class));
         verify(tenantConfigRepo).save(any(TenantConfig.class));
         verify(appUserRepo).save(any(AppUser.class));
+    }
+
+    private static PlatformTenantMapping org(long tenantId, UUID uuid) {
+        return PlatformTenantMapping.builder().tenantId(tenantId).platformTenantId(uuid)
+                .kind(PlatformTenantMapping.Kind.ORG).status(PlatformTenantMapping.Status.ACTIVE).build();
+    }
+
+    private static PlatformTenantMapping property(long tenantId, UUID uuid, long parentId) {
+        return PlatformTenantMapping.builder().tenantId(tenantId).platformTenantId(uuid).parentTenantId(parentId)
+                .kind(PlatformTenantMapping.Kind.PROPERTY).status(PlatformTenantMapping.Status.ACTIVE).build();
+    }
+
+    @Test
+    void scopeFromPropertyHeaderUsesParentAsOrg() {
+        UUID propertyUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(propertyUuid))
+                .thenReturn(Optional.of(property(2L, propertyUuid, 1L)));
+
+        PlatformTenantResolver.TenantScope scope = resolver.resolveScope(propertyUuid, null, true);
+
+        assertThat(scope.orgTenantId()).isEqualTo(1L);
+        assertThat(scope.propertyTenantId()).isEqualTo(2L);
+    }
+
+    @Test
+    void scopeFromOrgWithSelectedChild() {
+        UUID orgUuid = UUID.randomUUID();
+        UUID propertyUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.of(org(1L, orgUuid)));
+        when(mappingRepo.findByPlatformTenantId(propertyUuid))
+                .thenReturn(Optional.of(property(3L, propertyUuid, 1L)));
+
+        PlatformTenantResolver.TenantScope scope = resolver.resolveScope(orgUuid, propertyUuid, false);
+
+        assertThat(scope).isEqualTo(new PlatformTenantResolver.TenantScope(1L, 3L));
+    }
+
+    @Test
+    void scopeRejectsHotelOfAnotherOrganization() {
+        UUID orgUuid = UUID.randomUUID();
+        UUID foreignUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.of(org(1L, orgUuid)));
+        when(mappingRepo.findByPlatformTenantId(foreignUuid))
+                .thenReturn(Optional.of(property(7L, foreignUuid, 5L)));
+
+        assertThatThrownBy(() -> resolver.resolveScope(orgUuid, foreignUuid, false))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("not a hotel of the selected organization");
+    }
+
+    @Test
+    void scopeOfOrgWithOneChildDefaultsToIt() {
+        UUID orgUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.of(org(1L, orgUuid)));
+        when(mappingRepo.findByParentTenantIdOrderByHotelCodeAscTenantIdAsc(1L))
+                .thenReturn(List.of(property(2L, UUID.randomUUID(), 1L)));
+
+        assertThat(resolver.resolveScope(orgUuid, null, false))
+                .isEqualTo(new PlatformTenantResolver.TenantScope(1L, 2L));
+    }
+
+    @Test
+    void scopeOfOrgWithSeveralChildrenHasNoPropertyUntilSelected() {
+        UUID orgUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.of(org(1L, orgUuid)));
+        when(mappingRepo.findByParentTenantIdOrderByHotelCodeAscTenantIdAsc(1L))
+                .thenReturn(List.of(property(2L, UUID.randomUUID(), 1L), property(3L, UUID.randomUUID(), 1L)));
+
+        assertThat(resolver.resolveScope(orgUuid, null, false))
+                .isEqualTo(new PlatformTenantResolver.TenantScope(1L, null));
+    }
+
+    @Test
+    void scopeOfLegacyOrgWithoutChildrenIsItsOwnProperty() {
+        UUID orgUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.of(org(4L, orgUuid)));
+        when(mappingRepo.findByParentTenantIdOrderByHotelCodeAscTenantIdAsc(4L)).thenReturn(List.of());
+
+        assertThat(resolver.resolveScope(orgUuid, null, false))
+                .isEqualTo(new PlatformTenantResolver.TenantScope(4L, 4L));
+    }
+
+    @Test
+    void scopeForUnmappedTenantFailsForM2m() {
+        UUID orgUuid = UUID.randomUUID();
+        when(mappingRepo.findByPlatformTenantId(orgUuid)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> resolver.resolveScope(orgUuid, null, false))
+                .isInstanceOf(ResponseStatusException.class);
     }
 
     @Test

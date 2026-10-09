@@ -54,12 +54,12 @@ public class CrmActivityService {
 
     public List<CrmActivity> search(Long accountId, Long opportunityId, Long leadId, Long assignedTo, boolean openOnly) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return activityRepo.search(TenantResolver.requireTenantId(), accountId, opportunityId, leadId, assignedTo, openOnly);
+        return activityRepo.search(TenantResolver.requireOrgTenantId(), accountId, opportunityId, leadId, assignedTo, openOnly);
     }
 
     public Optional<CrmActivity> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return activityRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId());
+        return activityRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
@@ -68,7 +68,7 @@ public class CrmActivityService {
         if (activity.getAccountId() == null && activity.getOpportunityId() == null && activity.getLeadId() == null) {
             throw new IllegalArgumentException("activity requires accountId, opportunityId or leadId");
         }
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         validateReferences(tenantId, activity);
         activity.setId(null);
         activity.setTenantId(tenantId);
@@ -78,7 +78,7 @@ public class CrmActivityService {
     @Transactional
     public CrmActivity update(Long id, CrmActivity changes) {
         accessContext.require(CrmPermission.ACTIVITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmActivity existing = activityRepo.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Activity not found: " + id));
         if (changes.getAccountId() == null && changes.getOpportunityId() == null && changes.getLeadId() == null) {
@@ -100,7 +100,7 @@ public class CrmActivityService {
     @Transactional
     public CrmActivity complete(Long id) {
         accessContext.require(CrmPermission.ACTIVITY_WRITE);
-        CrmActivity existing = activityRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        CrmActivity existing = activityRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Activity not found: " + id));
         existing.setDoneAt(OffsetDateTime.now());
         return activityRepo.save(existing);
@@ -108,7 +108,7 @@ public class CrmActivityService {
 
     public List<CrmAttachment> listAttachments(Long accountId) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         accountRepo.findByIdAndTenantId(accountId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found: " + accountId));
         return attachmentRepo.findByTenantIdAndAccountIdOrderByCreatedAtDesc(tenantId, accountId);
@@ -117,7 +117,7 @@ public class CrmActivityService {
     @Transactional
     public CrmAttachment uploadAttachment(Long accountId, MultipartFile file) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         accountRepo.findByIdAndTenantId(accountId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Account not found: " + accountId));
         String storageKey = mediaStorageService.upload(
@@ -152,7 +152,7 @@ public class CrmActivityService {
     @Transactional
     public void deleteAttachment(Long attachmentId) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        CrmAttachment attachment = attachmentRepo.findByIdAndTenantId(attachmentId, TenantResolver.requireTenantId())
+        CrmAttachment attachment = attachmentRepo.findByIdAndTenantId(attachmentId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Attachment not found: " + attachmentId));
         attachmentRepo.delete(attachment);
     }

@@ -74,7 +74,7 @@ public class CrmAccountRelationService {
     @Transactional
     public CrmAccountRelation create(Long fromAccountId, CrmTeamDtos.RelationRequest request) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         if (request == null || request.toAccountId() == null || request.relationType() == null) {
             throw new IllegalArgumentException("toAccountId and relationType are required");
         }
@@ -108,7 +108,7 @@ public class CrmAccountRelationService {
     @Transactional
     public void delete(Long relationId) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        CrmAccountRelation relation = relationRepo.findByIdAndTenantId(relationId, TenantResolver.requireTenantId())
+        CrmAccountRelation relation = relationRepo.findByIdAndTenantId(relationId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Relation not found: " + relationId));
         accountService.requireOwned(relation.getFromAccountId());
         relationRepo.delete(relation);

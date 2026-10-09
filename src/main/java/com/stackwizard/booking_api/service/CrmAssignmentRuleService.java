@@ -35,13 +35,13 @@ public class CrmAssignmentRuleService {
 
     public List<CrmAssignmentRule> findAll() {
         accessContext.require(CrmPermission.OPPORTUNITY_READ);
-        return repo.findByTenantIdOrderByPriorityAscIdAsc(TenantResolver.requireTenantId());
+        return repo.findByTenantIdOrderByPriorityAscIdAsc(TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmAssignmentRule create(CrmAssignmentRule rule) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmAssignmentRule target = new CrmAssignmentRule();
         target.setTenantId(tenantId);
         apply(tenantId, target, rule);
@@ -51,7 +51,7 @@ public class CrmAssignmentRuleService {
     @Transactional
     public CrmAssignmentRule update(Long id, CrmAssignmentRule changes) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmAssignmentRule existing = repo.findByIdAndTenantId(id, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Assignment rule not found: " + id));
         if (!java.util.Objects.equals(existing.getTargetTeamId(), changes.getTargetTeamId())) {
@@ -64,7 +64,7 @@ public class CrmAssignmentRuleService {
     @Transactional
     public void delete(Long id) {
         accessContext.require(CrmPermission.PIPELINE_CONFIG);
-        repo.delete(repo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        repo.delete(repo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Assignment rule not found: " + id)));
     }
 

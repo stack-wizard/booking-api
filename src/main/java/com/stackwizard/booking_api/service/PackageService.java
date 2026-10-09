@@ -40,7 +40,7 @@ public class PackageService {
     }
 
     public List<ProductComponent> components(Long packageProductId) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireProduct(tenantId, packageProductId);
         return componentRepo.findByTenantIdAndPackageProductIdOrderByDisplayOrderAscIdAsc(tenantId, packageProductId);
     }
@@ -50,7 +50,7 @@ public class PackageService {
      */
     @Transactional
     public PackageDefinition define(Long packageProductId, Product.PackagePricing pricing, List<ProductComponent> components) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         Product pkg = requireProduct(tenantId, packageProductId);
         List<ProductComponent> incoming = components == null ? List.of() : components;
         if (pricing == null && !incoming.isEmpty()) {
@@ -79,18 +79,24 @@ public class PackageService {
         if (group == com.stackwizard.booking_api.model.SalesQuoteLine.Group.DISCOUNT) {
             throw new IllegalArgumentException("DISCOUNT is not a product sales group");
         }
-        Product product = requireProduct(TenantResolver.requireTenantId(), productId);
+        Product product = requireProduct(TenantResolver.requireOrgTenantId(), productId);
         product.setSalesGroup(group);
         return productRepo.save(product);
     }
 
     @Transactional(readOnly = true)
     public PackageQuote quote(Long packageProductId, LocalDate date, Integer pax, String currency) {
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         return quote(tenantId, packageProductId, date, pax, currency);
     }
 
     PackageQuote quote(Long tenantId, Long packageProductId, LocalDate date, Integer pax, String currency) {
+        return quote(tenantId, tenantId, packageProductId, date, pax, currency);
+    }
+
+    /** Package of the chain priced for a hotel: {@code priceTenantId} lets the hotel's own prices win. */
+    PackageQuote quote(Long tenantId, Long priceTenantId, Long packageProductId, LocalDate date, Integer pax,
+                       String currency) {
         Product pkg = requireProduct(tenantId, packageProductId);
         if (pkg.getPackagePricing() == null) {
             throw new IllegalArgumentException(pkg.getName() + " is not a package");
@@ -110,7 +116,7 @@ public class PackageService {
 
         BigDecimal pricePerPerson = pkg.getPackagePricing() == Product.PackagePricing.SUM
                 ? null
-                : catalogPrice(pkg, currency, tenantId, date)
+                : catalogPrice(pkg, currency, priceTenantId, date)
                 .orElseThrow(() -> new IllegalArgumentException("No package price for " + pkg.getName() + " on " + date));
 
         List<ComponentQuote> lines = new ArrayList<>();
@@ -123,7 +129,7 @@ public class PackageService {
             BigDecimal amount;
             BigDecimal perPerson = null;
             if (!component.getIncluded() || pkg.getPackagePricing() == Product.PackagePricing.SUM) {
-                BigDecimal unit = catalogPrice(product, currency, tenantId, date)
+                BigDecimal unit = catalogPrice(product, currency, priceTenantId, date)
                         .orElseThrow(() -> new IllegalArgumentException("No price for component " + product.getName() + " on " + date));
                 amount = unit.multiply(BigDecimal.valueOf(qty));
             } else {

@@ -70,7 +70,7 @@ public class CrmReassignmentService {
     @Transactional(readOnly = true)
     public CrmTeamDtos.ReassignCounts preview(Long fromUserId) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireManages(fromUserId);
         return new CrmTeamDtos.ReassignCounts(
                 openLeads(tenantId, fromUserId).size(),
@@ -81,13 +81,13 @@ public class CrmReassignmentService {
 
     public List<CrmReassignment> history() {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        return reassignmentRepo.findTop50ByTenantIdOrderByCreatedAtDesc(TenantResolver.requireTenantId());
+        return reassignmentRepo.findTop50ByTenantIdOrderByCreatedAtDesc(TenantResolver.requireOrgTenantId());
     }
 
     @Transactional
     public CrmReassignment reassign(CrmTeamDtos.ReassignRequest request) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         if (request == null || request.fromUserId() == null) {
             throw new IllegalArgumentException("fromUserId is required");
         }
@@ -132,6 +132,7 @@ public class CrmReassignmentService {
         }
         if (opportunities) {
             for (CrmOpportunity opportunity : openOpportunities(tenantId, from)) {
+                teamDirectory.requireCovers(tenantId, team, opportunity.getPropertyTenantId());
                 opportunity.setOwnerUserId(to);
                 opportunity.setTeamId(team != null ? team : opportunity.getTeamId());
                 opportunityRepo.save(opportunity);
@@ -148,6 +149,7 @@ public class CrmReassignmentService {
         }
         if (events) {
             for (Event event : openEvents(tenantId, from)) {
+                teamDirectory.requireCovers(tenantId, team, event.getPropertyTenantId());
                 event.setOwnerUserId(to);
                 event.setTeamId(team != null ? team : event.getTeamId());
                 eventRepo.save(event);

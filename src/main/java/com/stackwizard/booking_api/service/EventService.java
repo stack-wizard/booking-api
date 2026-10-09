@@ -70,6 +70,7 @@ public class EventService {
     private final CrmTeamDirectory teamDirectory;
     private final TransactionTemplate transactionTemplate;
     private final SalesQuoteRepository quoteRepo;
+    private final TenantHierarchy hierarchy;
     private final boolean definiteRequiresAcceptedQuote;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -86,6 +87,7 @@ public class EventService {
                         CrmTeamDirectory teamDirectory,
                         PlatformTransactionManager transactionManager,
                         SalesQuoteRepository quoteRepo,
+                        TenantHierarchy hierarchy,
                         @Value("${crm.events.definite-requires-accepted-quote:true}") boolean definiteRequiresAcceptedQuote) {
         this.eventRepo = eventRepo;
         this.historyRepo = historyRepo;
@@ -100,21 +102,23 @@ public class EventService {
         this.teamDirectory = teamDirectory;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.quoteRepo = quoteRepo;
+        this.hierarchy = hierarchy;
         this.definiteRequiresAcceptedQuote = definiteRequiresAcceptedQuote;
     }
 
     public List<Event> findAll(Event.Status status, Long accountId, LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.EVENT_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
-        return eventRepo.findScoped(TenantResolver.requireTenantId(), status, accountId,
+        return eventRepo.findScoped(TenantResolver.requireOrgTenantId(), status, accountId,
                 from != null ? from : MIN_DATE, to != null ? to : MAX_DATE,
-                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds());
+                scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds(),
+                scope.allHotels(), scope.propertyIds());
     }
 
     public Optional<Event> findById(Long id) {
         accessContext.require(CrmPermission.EVENT_READ);
-        return eventRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
-                .filter(e -> CrmOwnerScope.from(accessContext).allows(e.getOwnerUserId(), e.getTeamId()));
+        return eventRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
+                .filter(e -> CrmOwnerScope.from(accessContext).allows(e.getOwnerUserId(), e.getTeamId(), e.getPropertyTenantId()));
     }
 
     /** Tenant-scoped lookup without the caller's CRM scope, for scheduled jobs and the client portal. */
@@ -125,8 +129,8 @@ public class EventService {
     public List<Event> forOpportunity(Long opportunityId) {
         accessContext.require(CrmPermission.EVENT_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
-        return eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(TenantResolver.requireTenantId(), opportunityId)
-                .stream().filter(e -> scope.allows(e.getOwnerUserId(), e.getTeamId())).toList();
+        return eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(TenantResolver.requireOrgTenantId(), opportunityId)
+                .stream().filter(e -> scope.allows(e.getOwnerUserId(), e.getTeamId(), e.getPropertyTenantId())).toList();
     }
 
     public Event requireEvent(Long id) {
@@ -150,7 +154,7 @@ public class EventService {
     @Transactional
     public Event create(Event event) {
         accessContext.require(CrmPermission.EVENT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         event.setId(null);
         event.setTenantId(tenantId);
         event.setStatus(Event.Status.INQUIRY);
@@ -175,11 +179,16 @@ public class EventService {
             if (event.getTeamId() == null) {
                 event.setTeamId(opportunity.getTeamId());
             }
+            if (event.getPropertyTenantId() == null) {
+                event.setPropertyTenantId(opportunity.getPropertyTenantId());
+            }
         }
+        requireHotelOfChain(tenantId, event.getPropertyTenantId());
         Long accountTeam = event.getAccountId() == null ? null
                 : accountRepo.findByIdAndTenantId(event.getAccountId(), tenantId).map(a -> a.getTeamId()).orElse(null);
         event.setTeamId(teamDirectory.resolveTeam(tenantId, event.getOwnerUserId(), event.getTeamId(), accountTeam));
         teamDirectory.requireAssignable(tenantId, event.getOwnerUserId(), event.getTeamId());
+        event.setPropertyTenantId(teamDirectory.resolveProperty(tenantId, event.getTeamId(), event.getPropertyTenantId()));
         validateHeader(tenantId, event);
         Event saved = eventRepo.save(event);
         writeHistory(saved, null, Event.Status.INQUIRY, null, "created", accessContext.currentUserId());
@@ -192,9 +201,9 @@ public class EventService {
     @Transactional
     public Event createFromOpportunity(Long opportunityId) {
         accessContext.require(CrmPermission.EVENT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmOpportunity opportunity = opportunityRepo.findByIdAndTenantId(opportunityId, tenantId)
-                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId()))
+                .filter(o -> CrmOwnerScope.from(accessContext).allows(o.getOwnerUserId(), o.getTeamId(), o.getPropertyTenantId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Opportunity not found"));
         JsonNode attrs = opportunity.getAttrs();
         LocalDate from = parseDate(attrs, "startDate");
@@ -209,6 +218,7 @@ public class EventService {
                 .accountId(opportunity.getAccountId())
                 .primaryContactId(opportunity.getPrimaryContactId())
                 .opportunityId(opportunity.getId())
+                .propertyTenantId(opportunity.getPropertyTenantId())
                 .name(firstText(text(attrs, "title"), opportunity.getName()))
                 .eventType(text(attrs, "eventType"))
                 .dateFrom(from)
@@ -231,6 +241,8 @@ public class EventService {
             existing.setName(changes.getName());
             existing.setAccountId(changes.getAccountId() != null ? changes.getAccountId() : existing.getAccountId());
             existing.setPrimaryContactId(changes.getPrimaryContactId());
+            Long previousProperty = existing.getPropertyTenantId();
+            changeProperty(existing, changes.getPropertyTenantId());
             existing.setEventType(changes.getEventType());
             existing.setDateFrom(changes.getDateFrom());
             existing.setDateTo(changes.getDateTo());
@@ -246,6 +258,10 @@ public class EventService {
                     : existing.getTeamId();
             if (ownerChanged || !java.util.Objects.equals(team, existing.getTeamId())) {
                 teamDirectory.requireAssignable(tenantId, owner, team);
+            }
+            if (!java.util.Objects.equals(previousProperty, existing.getPropertyTenantId()) || ownerChanged
+                    || !java.util.Objects.equals(team, existing.getTeamId())) {
+                changeProperty(existing, teamDirectory.resolveProperty(tenantId, team, existing.getPropertyTenantId()));
             }
             existing.setOwnerUserId(owner);
             existing.setTeamId(team);
@@ -401,7 +417,7 @@ public class EventService {
 
     /** Functions without a space (e.g. a coffee break in the foyer) hold nothing, but the event must hold at least one. */
     private void requireSpace(Event event, Event.Status target) {
-        if (!functionRepo.existsByTenantIdAndEventIdAndResourceIdIsNotNull(event.getTenantId(), event.getId())) {
+        if (!functionRepo.existsSpaceFunctionForEvent(event.getTenantId(), event.getId())) {
             throw new IllegalStateException("Assign a space to at least one function before " + target);
         }
     }
@@ -442,11 +458,33 @@ public class EventService {
         }
     }
 
+    private void requireHotelOfChain(Long orgTenantId, Long propertyTenantId) {
+        if (propertyTenantId != null) {
+            hierarchy.requirePropertyOf(propertyTenantId, orgTenantId);
+        }
+    }
+
+    /** Limiting an event to a hotel is only possible while none of its functions is in another hotel. */
+    private void changeProperty(Event event, Long propertyTenantId) {
+        if (java.util.Objects.equals(event.getPropertyTenantId(), propertyTenantId)) {
+            return;
+        }
+        requireHotelOfChain(event.getTenantId(), propertyTenantId);
+        if (propertyTenantId != null) {
+            boolean elsewhere = functionRepo.findForEvent(event.getTenantId(), event.getId()).stream()
+                    .anyMatch(f -> !propertyTenantId.equals(f.getTenantId()));
+            if (elsewhere) {
+                throw new IllegalStateException("The event has functions in other hotels; move or remove them first");
+            }
+        }
+        event.setPropertyTenantId(propertyTenantId);
+    }
+
     private void validateFunctionsInsideDates(Event event) {
         if (event.getId() == null) {
             return;
         }
-        for (EventFunction function : functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        for (EventFunction function : functionRepo.findForEvent(
                 event.getTenantId(), event.getId())) {
             LocalDate day = function.getStartsAt().toLocalDate();
             if (day.isBefore(event.getDateFrom()) || day.isAfter(event.getDateTo())) {

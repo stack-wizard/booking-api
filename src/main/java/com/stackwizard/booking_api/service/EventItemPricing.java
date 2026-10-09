@@ -69,12 +69,12 @@ public class EventItemPricing {
         if (pax == null || pax <= 0) {
             return;
         }
-        List<Long> functionIds = functionRepo.findByTenantIdAndEventIdOrderByStartsAtAscDisplayOrderAscIdAsc(
+        List<Long> functionIds = functionRepo.findForEvent(
                 event.getTenantId(), event.getId()).stream().map(EventFunction::getId).toList();
         if (functionIds.isEmpty()) {
             return;
         }
-        List<EventFunctionItem> items = itemRepo.findByTenantIdAndEventFunctionIdIn(event.getTenantId(), functionIds).stream()
+        List<EventFunctionItem> items = itemRepo.findForFunctions(event.getTenantId(), functionIds).stream()
                 .filter(i -> i.getQtyBasis() == EventFunctionItem.QtyBasis.PER_GUARANTEED_PAX)
                 .filter(i -> !pax.equals(i.getQty()))
                 .toList();

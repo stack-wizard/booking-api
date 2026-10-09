@@ -50,7 +50,7 @@ public class CrmAccountService {
                                    Long ownerUserId,
                                    Boolean active) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
         return accountRepo.search(
                 tenantId, blankToNull(search), accountType, blankToNull(segment), ownerUserId, active,
@@ -60,14 +60,14 @@ public class CrmAccountService {
 
     public Optional<CrmAccount> findById(Long id) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
-        return accountRepo.findByIdAndTenantId(id, TenantResolver.requireTenantId())
+        return accountRepo.findByIdAndTenantId(id, TenantResolver.requireOrgTenantId())
                 .filter(a -> CrmOwnerScope.from(accessContext).allows(a.getOwnerUserId(), a.getTeamId()));
     }
 
     @Transactional
     public CrmAccount create(CrmAccount account) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         validateParent(tenantId, null, account.getParentAccountId());
         account.setId(null);
         account.setTenantId(tenantId);
@@ -132,13 +132,13 @@ public class CrmAccountService {
     public List<CrmContact> contactsForAccount(Long accountId) {
         accessContext.require(CrmPermission.ACCOUNT_READ);
         requireVisible(accountId);
-        return contactRepo.findByTenantIdAndAccountIdOrderByLastNameAsc(TenantResolver.requireTenantId(), accountId);
+        return contactRepo.findByTenantIdAndAccountIdOrderByLastNameAsc(TenantResolver.requireOrgTenantId(), accountId);
     }
 
     @Transactional
     public CrmAccountContactRole addRole(Long accountId, Long contactId, CrmAccountContactRole role) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        Long tenantId = TenantResolver.requireTenantId();
+        Long tenantId = TenantResolver.requireOrgTenantId();
         requireOwned(accountId);
         contactRepo.findByIdAndTenantId(contactId, tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Contact not found: " + contactId));
@@ -155,7 +155,7 @@ public class CrmAccountService {
     @Transactional
     public void deleteRole(Long roleId) {
         accessContext.require(CrmPermission.ACCOUNT_WRITE);
-        CrmAccountContactRole role = roleRepo.findByIdAndTenantId(roleId, TenantResolver.requireTenantId())
+        CrmAccountContactRole role = roleRepo.findByIdAndTenantId(roleId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new IllegalArgumentException("Role not found: " + roleId));
         requireOwned(role.getAccountId());
         roleRepo.delete(role);
