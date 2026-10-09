@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/tenant/properties")
+@RequestMapping("/api/tenant")
 public class TenantPropertyController {
     private final TenantPropertyService service;
 
@@ -27,7 +27,7 @@ public class TenantPropertyController {
     }
 
     /** Hotels of the current organization that the caller may switch between. */
-    @GetMapping
+    @GetMapping("/properties")
     public List<TenantPropertyDto> accessible(@AuthenticationPrincipal Jwt jwt) {
         return service.listAccessible(jwt);
     }
