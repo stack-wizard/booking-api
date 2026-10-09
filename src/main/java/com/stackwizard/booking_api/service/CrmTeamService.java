@@ -69,9 +69,7 @@ public class CrmTeamService {
         Long tenantId = TenantResolver.requireOrgTenantId();
         List<CrmTeamMember> active = memberRepo.findActive(tenantId, LocalDate.now());
         Map<Long, AppUser> byId = new LinkedHashMap<>();
-        appUserRepo.findByTenantIdOrderByUsernameAsc(tenantId).stream()
-                .filter(u -> u.getPlatformUserId() != null)
-                .forEach(u -> byId.put(u.getId(), u));
+        appUserRepo.findPlatformUsersOfChain(tenantId).forEach(u -> byId.put(u.getId(), u));
         Set<Long> extra = new HashSet<>();
         active.forEach(m -> extra.add(m.getAppUserId()));
         extra.add(accessContext.currentUserId());
