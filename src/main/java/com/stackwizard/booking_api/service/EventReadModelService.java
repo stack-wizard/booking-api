@@ -240,7 +240,8 @@ public class EventReadModelService {
     private Map<Long, String> resourceNames(List<Long> ids) {
         List<Long> nonNull = ids.stream().filter(id -> id != null).distinct().toList();
         if (nonNull.isEmpty()) {
-            return Map.of();
+            // A function without a room looks up a null id. Map.of() rejects null keys.
+            return new HashMap<>();
         }
         return resourceRepo.findAllById(nonNull).stream().collect(Collectors.toMap(Resource::getId, Resource::getName));
     }
