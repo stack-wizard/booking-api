@@ -19,7 +19,7 @@ public interface ResourceSetupCapacityRepository extends JpaRepository<ResourceS
 
     Optional<ResourceSetupCapacity> findByTenantIdAndResourceIdAndSetupStyle(Long tenantId,
                                                                             Long resourceId,
-                                                                            ResourceSetupCapacity.SetupStyle setupStyle);
+                                                                            String setupStyle);
 
     @Query("""
             select c from ResourceSetupCapacity c
@@ -30,7 +30,7 @@ public interface ResourceSetupCapacityRepository extends JpaRepository<ResourceS
             """)
     List<ResourceSetupCapacity> findCandidates(@Param("tenantId") Long tenantId,
                                                @Param("minPax") Integer minPax,
-                                               @Param("setupStyle") ResourceSetupCapacity.SetupStyle setupStyle);
+                                               @Param("setupStyle") String setupStyle);
 
     @Modifying
     @Query("delete from ResourceSetupCapacity c where c.tenantId = :tenantId and c.resourceId = :resourceId")

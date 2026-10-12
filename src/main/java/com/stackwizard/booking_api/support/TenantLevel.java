@@ -29,7 +29,7 @@ public enum TenantLevel {
             "sales_contract", "sales_contract_document", "sales_payment_milestone",
             "crm_account", "crm_account_contact_role", "crm_account_relation", "crm_activity", "crm_alert",
             "crm_assignment_rule", "crm_attachment", "crm_contact", "crm_cost_item",
-            "crm_custom_field_definition", "crm_lead", "crm_opportunity", "crm_outcome_reason",
+            "crm_custom_field_definition", "crm_lead", "crm_lookup", "crm_opportunity", "crm_outcome_reason",
             "crm_pipeline", "crm_pipeline_stage", "crm_reassignment", "crm_segment", "crm_stage_requirement",
             "crm_stage_transition", "crm_team", "crm_team_member", "crm_team_property");
 

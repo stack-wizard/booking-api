@@ -87,6 +87,9 @@ public class CrmOpportunity extends CrmAuditableEntity {
     @Column(name = "closed_at")
     private OffsetDateTime closedAt;
 
+    @Column(name = "intake_locked_at")
+    private OffsetDateTime intakeLockedAt;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "attrs", columnDefinition = "jsonb", nullable = false)
     private JsonNode attrs;

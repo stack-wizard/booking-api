@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -36,13 +37,15 @@ class ResourceSetupCapacityServiceTest {
     @Mock ResourceCompositionRepository compositionRepo;
     @Mock AllocationRepository allocationRepo;
     @Mock CrmAccessContext accessContext;
+    @Mock CrmLookupService lookupService;
 
     ResourceSetupCapacityService service;
 
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new ResourceSetupCapacityService(capacityRepo, resourceRepo, compositionRepo, allocationRepo, accessContext);
+        service = new ResourceSetupCapacityService(capacityRepo, resourceRepo, compositionRepo, allocationRepo, accessContext, lookupService);
+        when(lookupService.requireCode(any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
         when(capacityRepo.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
     }
 
@@ -56,7 +59,7 @@ class ResourceSetupCapacityServiceTest {
                 .resourceType(ResourceType.builder().code(type).name(type).build()).build()));
     }
 
-    private ResourceSetupCapacity setup(ResourceSetupCapacity.SetupStyle style, int capacity) {
+    private ResourceSetupCapacity setup(String style, int capacity) {
         return ResourceSetupCapacity.builder().setupStyle(style).capacity(capacity).build();
     }
 
@@ -64,7 +67,7 @@ class ResourceSetupCapacityServiceTest {
     void sunbedIsNotASpace() {
         resource(9L, "SUNBED");
 
-        assertThatThrownBy(() -> service.replace(9L, List.of(setup(ResourceSetupCapacity.SetupStyle.THEATRE, 10))))
+        assertThatThrownBy(() -> service.replace(9L, List.of(setup("THEATRE", 10))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("SUNBED");
     }
@@ -74,8 +77,8 @@ class ResourceSetupCapacityServiceTest {
         resource(3L, "MEETING_ROOM");
 
         assertThatThrownBy(() -> service.replace(3L, List.of(
-                setup(ResourceSetupCapacity.SetupStyle.THEATRE, 200),
-                setup(ResourceSetupCapacity.SetupStyle.THEATRE, 150))))
+                setup("THEATRE", 200),
+                setup("THEATRE", 150))))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Duplicate");
     }
@@ -85,8 +88,8 @@ class ResourceSetupCapacityServiceTest {
         resource(3L, "COMPOSITION");
 
         List<ResourceSetupCapacity> saved = service.replace(3L, List.of(
-                setup(ResourceSetupCapacity.SetupStyle.THEATRE, 200),
-                setup(ResourceSetupCapacity.SetupStyle.CLASSROOM, 80)));
+                setup("THEATRE", 200),
+                setup("CLASSROOM", 80)));
 
         verify(capacityRepo).deleteByTenantIdAndResourceId(1L, 3L);
         assertThat(saved).allSatisfy(s -> {

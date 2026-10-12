@@ -5,6 +5,7 @@ import com.stackwizard.booking_api.dto.ManagementAppUserResponse;
 import com.stackwizard.booking_api.dto.ManagementUpdateEmployeeNumberRequest;
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.repository.AppUserRepository;
+import com.stackwizard.booking_api.repository.PlatformTenantMappingRepository;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.TenantContext;
 import org.springframework.http.HttpStatus;
@@ -19,10 +20,14 @@ public class ManagementAppUserService {
 
     private final AppUserRepository userRepo;
     private final CrmAccessContext crmAccessContext;
+    private final PlatformTenantMappingRepository mappingRepo;
 
-    public ManagementAppUserService(AppUserRepository userRepo, CrmAccessContext crmAccessContext) {
+    public ManagementAppUserService(AppUserRepository userRepo,
+                                    CrmAccessContext crmAccessContext,
+                                    PlatformTenantMappingRepository mappingRepo) {
         this.userRepo = userRepo;
         this.crmAccessContext = crmAccessContext;
+        this.mappingRepo = mappingRepo;
     }
 
     @Transactional(readOnly = true)
@@ -38,7 +43,16 @@ public class ManagementAppUserService {
                 .role(actor.getRole().name())
                 .roles(crmAccessContext.roleNamesForMe())
                 .tenantId(tenantId)
+                .defaultPropertyPlatformId(defaultPropertyPlatformId())
                 .build();
+    }
+
+    private String defaultPropertyPlatformId() {
+        if (crmAccessContext.allHotels() || crmAccessContext.propertyIds().size() != 1) {
+            return null;
+        }
+        Long hotel = crmAccessContext.propertyIds().iterator().next();
+        return mappingRepo.findByTenantId(hotel).map(m -> m.getPlatformTenantId().toString()).orElse(null);
     }
 
     @Transactional(readOnly = true)

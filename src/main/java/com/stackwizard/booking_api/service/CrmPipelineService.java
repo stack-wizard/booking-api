@@ -108,6 +108,15 @@ public class CrmPipelineService {
         if (stage.getStageKind() == null) {
             stage.setStageKind(CrmPipelineStage.StageKind.OPEN);
         }
+        if (stage.getAllowBack() == null) {
+            stage.setAllowBack(true);
+        }
+        if (stage.getAllowSkip() == null) {
+            stage.setAllowSkip(true);
+        }
+        if (stage.getLocksIntake() == null) {
+            stage.setLocksIntake(false);
+        }
         return stageRepo.save(stage);
     }
 
@@ -124,6 +133,15 @@ public class CrmPipelineService {
         }
         if (changes.getStageKind() != null) {
             existing.setStageKind(changes.getStageKind());
+        }
+        if (changes.getAllowBack() != null) {
+            existing.setAllowBack(changes.getAllowBack());
+        }
+        if (changes.getAllowSkip() != null) {
+            existing.setAllowSkip(changes.getAllowSkip());
+        }
+        if (changes.getLocksIntake() != null) {
+            existing.setLocksIntake(changes.getLocksIntake());
         }
         return stageRepo.save(existing);
     }

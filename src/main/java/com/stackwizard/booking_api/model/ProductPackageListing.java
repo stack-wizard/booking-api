@@ -59,9 +59,8 @@ public class ProductPackageListing {
     @Column(name = "default_start_time", nullable = false)
     private LocalTime defaultStartTime;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "setup_style")
-    private ResourceSetupCapacity.SetupStyle setupStyle;
+    private String setupStyle;
 
     @Column(nullable = false)
     private Boolean published;

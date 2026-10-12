@@ -49,6 +49,15 @@ public final class TenantResolver {
         return requireTenantId(null);
     }
 
+    /**
+     * Hotel the user narrowed chain lists to (X-Property-Id), or null for "all hotels". A standalone hotel is its own
+     * organization and never narrows.
+     */
+    public static Long selectedHotelId() {
+        Long property = TenantContext.getPropertyTenantId();
+        return property == null || property.equals(TenantContext.getOrgTenantId()) ? null : property;
+    }
+
     /** Chain (parent) tenant for shared catalog / CRM / events. */
     public static Long requireOrgTenantId() {
         return requireOrgTenantId(null);

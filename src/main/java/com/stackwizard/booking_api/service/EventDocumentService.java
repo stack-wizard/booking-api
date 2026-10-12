@@ -262,7 +262,7 @@ public class EventDocumentService {
             node.put("name", functionLabel(function));
             node.put("functionType", function.getFunctionType().name());
             node.put("space", spaceNames.get(function.getResourceId()));
-            node.put("setupStyle", function.getSetupStyle() != null ? function.getSetupStyle().name() : null);
+            node.put("setupStyle", function.getSetupStyle());
             node.put("startsAt", function.getStartsAt().toString());
             node.put("endsAt", function.getEndsAt().toString());
             node.put("occupancyStartsAt", function.getOccupancyStartsAt().toString());

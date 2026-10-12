@@ -22,6 +22,7 @@ public interface EventRepository extends JpaRepository<Event, Long> {
               and (:accountId is null or e.accountId = :accountId)
               and e.dateTo >= :from
               and e.dateFrom <= :to
+              and (:hotelId is null or e.propertyTenantId is null or e.propertyTenantId = :hotelId)
               and (:all = true
                    or ((:own = true or :team = true) and e.ownerUserId = :currentUserId)
                    or (:team = true
@@ -41,7 +42,8 @@ public interface EventRepository extends JpaRepository<Event, Long> {
                            @Param("teamUserIds") Collection<Long> teamUserIds,
                            @Param("teamIds") Collection<Long> teamIds,
                            @Param("allHotels") boolean allHotels,
-                           @Param("propertyIds") Collection<Long> propertyIds);
+                           @Param("propertyIds") Collection<Long> propertyIds,
+                           @Param("hotelId") Long hotelId);
 
     @Query("""
             select e from Event e

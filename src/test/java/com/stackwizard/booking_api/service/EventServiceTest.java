@@ -51,6 +51,7 @@ class EventServiceTest {
     @Mock EventReservationSync reservationSync;
     @Mock EventItemPricing itemPricing;
     @Mock CrmAccessContext accessContext;
+    @Mock CrmLookupService lookupService;
     @Mock CrmTeamDirectory teamDirectory;
     @Mock PlatformTransactionManager transactionManager;
     @Mock SalesQuoteRepository quoteRepo;
@@ -63,8 +64,9 @@ class EventServiceTest {
         when(accessContext.scope()).thenReturn(CrmScope.ALL);
         when(accessContext.currentUserId()).thenReturn(7L);
         when(eventRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(lookupService.requireCode(any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
         service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
-                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager, quoteRepo, TenantHierarchyTestSupport.standalone(), true);
+                opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager, quoteRepo, TenantHierarchyTestSupport.standalone(), lookupService, true);
     }
 
     @AfterEach
@@ -215,7 +217,7 @@ class EventServiceTest {
         when(chain.requirePropertyOf(2L, 1L)).thenReturn(2L);
         service = new EventService(eventRepo, historyRepo, functionRepo, outcomeRepo, accountRepo, contactRepo,
                 opportunityRepo, reservationSync, itemPricing, accessContext, teamDirectory, transactionManager,
-                quoteRepo, chain, true);
+                quoteRepo, chain, lookupService, true);
         Event existing = event(Event.Status.INQUIRY);
         existing.setPropertyTenantId(null);
         when(functionRepo.findForEvent(1L, 5L)).thenReturn(java.util.List.of(

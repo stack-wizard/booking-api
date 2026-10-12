@@ -16,6 +16,7 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
             select o from CrmOpportunity o
             where o.tenantId = :tenantId
               and (:pipelineId is null or o.pipelineId = :pipelineId)
+              and (:hotelId is null or o.propertyTenantId is null or o.propertyTenantId = :hotelId)
               and (
                    :scopeAll = true
                    or ((:scopeOwn = true or :scopeTeam = true) and o.ownerUserId = :currentUserId)
@@ -34,7 +35,8 @@ public interface CrmOpportunityRepository extends JpaRepository<CrmOpportunity, 
                                     @Param("teamUserIds") Collection<Long> teamUserIds,
                                     @Param("teamIds") Collection<Long> teamIds,
                                     @Param("allHotels") boolean allHotels,
-                                    @Param("propertyIds") Collection<Long> propertyIds);
+                                    @Param("propertyIds") Collection<Long> propertyIds,
+                                    @Param("hotelId") Long hotelId);
 
     List<CrmOpportunity> findByTenantIdAndOwnerUserIdAndStatus(Long tenantId, Long ownerUserId, CrmOpportunity.Status status);
 }

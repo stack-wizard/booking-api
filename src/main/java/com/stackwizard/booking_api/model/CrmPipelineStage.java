@@ -50,6 +50,21 @@ public class CrmPipelineStage extends CrmAuditableEntity {
     @Column(name = "stage_kind", nullable = false)
     private StageKind stageKind;
 
+    /** A deal in this open stage may move to an earlier open stage. */
+    @Builder.Default
+    @Column(name = "allow_back", nullable = false)
+    private Boolean allowBack = true;
+
+    /** A deal in this open stage may jump past the next open stage. */
+    @Builder.Default
+    @Column(name = "allow_skip", nullable = false)
+    private Boolean allowSkip = true;
+
+    /** Entering this stage locks the intake fields of the deal. */
+    @Builder.Default
+    @Column(name = "locks_intake", nullable = false)
+    private Boolean locksIntake = false;
+
     public enum StageKind {
         OPEN, WON, LOST
     }

@@ -35,7 +35,7 @@ public class ResourceSetupCapacityController {
     @GetMapping("/crm/spaces")
     public List<ResourceSetupCapacityService.SpaceCandidate> spaces(
             @RequestParam(required = false) Integer minPax,
-            @RequestParam(required = false) ResourceSetupCapacity.SetupStyle setupStyle,
+            @RequestParam(required = false) String setupStyle,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to) {
         return service.searchSpaces(minPax, setupStyle, from, to);

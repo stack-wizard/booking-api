@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.service;
 
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductComponent;
 import com.stackwizard.booking_api.model.ProductImage;
@@ -38,19 +39,22 @@ public class PackageCatalogService {
     private final PackageService packageService;
     private final ResourceSetupCapacityService spaceService;
     private final ProductVisibilityService visibility;
+    private final CrmLookupService lookupService;
 
     public PackageCatalogService(ProductRepository productRepo,
                                  ProductComponentRepository componentRepo,
                                  ProductPackageListingRepository listingRepo,
                                  PackageService packageService,
                                  ResourceSetupCapacityService spaceService,
-                                 ProductVisibilityService visibility) {
+                                 ProductVisibilityService visibility,
+                                 CrmLookupService lookupService) {
         this.productRepo = productRepo;
         this.componentRepo = componentRepo;
         this.listingRepo = listingRepo;
         this.packageService = packageService;
         this.spaceService = spaceService;
         this.visibility = visibility;
+        this.lookupService = lookupService;
     }
 
     @Transactional(readOnly = true)
@@ -89,7 +93,8 @@ public class PackageCatalogService {
         listing.setMaxPax(incoming.getMaxPax());
         listing.setDuration(incoming.getDuration() != null ? incoming.getDuration() : ProductPackageListing.Duration.FULL_DAY);
         listing.setDefaultStartTime(incoming.getDefaultStartTime() != null ? incoming.getDefaultStartTime() : LocalTime.of(9, 0));
-        listing.setSetupStyle(incoming.getSetupStyle());
+        listing.setSetupStyle(lookupService.requireCode(tenantId, CrmLookup.Kind.SETUP_STYLE,
+                incoming.getSetupStyle(), listing.getSetupStyle()));
         listing.setPublished(Boolean.TRUE.equals(incoming.getPublished()));
         listing.setUpdatedAt(OffsetDateTime.now());
         return listingRepo.save(listing);
@@ -291,7 +296,7 @@ public class PackageCatalogService {
                                  Integer maxPax,
                                  ProductPackageListing.Duration duration,
                                  LocalTime defaultStartTime,
-                                 com.stackwizard.booking_api.model.ResourceSetupCapacity.SetupStyle setupStyle,
+                                 String setupStyle,
                                  BigDecimal pricePerPerson,
                                  String currency,
                                  List<CatalogComponent> components) {

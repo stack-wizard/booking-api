@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stackwizard.booking_api.dto.EventDtos;
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.CrmOpportunity;
 import com.stackwizard.booking_api.model.CrmOutcomeReason;
 import com.stackwizard.booking_api.model.Event;
@@ -49,7 +50,7 @@ public class EventService {
 
     static final Map<Event.Status, Set<Event.Status>> TRANSITIONS = Map.of(
             Event.Status.INQUIRY, EnumSet.of(Event.Status.TENTATIVE, Event.Status.TURNED_DOWN, Event.Status.LOST),
-            Event.Status.TENTATIVE, EnumSet.of(Event.Status.DEFINITE, Event.Status.LOST, Event.Status.INQUIRY),
+            Event.Status.TENTATIVE, EnumSet.of(Event.Status.DEFINITE, Event.Status.TURNED_DOWN, Event.Status.LOST, Event.Status.INQUIRY),
             Event.Status.DEFINITE, EnumSet.of(Event.Status.ACTUAL, Event.Status.CANCELLED),
             Event.Status.ACTUAL, EnumSet.noneOf(Event.Status.class),
             Event.Status.TURNED_DOWN, EnumSet.noneOf(Event.Status.class),
@@ -71,6 +72,7 @@ public class EventService {
     private final TransactionTemplate transactionTemplate;
     private final SalesQuoteRepository quoteRepo;
     private final TenantHierarchy hierarchy;
+    private final CrmLookupService lookupService;
     private final boolean definiteRequiresAcceptedQuote;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -88,6 +90,7 @@ public class EventService {
                         PlatformTransactionManager transactionManager,
                         SalesQuoteRepository quoteRepo,
                         TenantHierarchy hierarchy,
+                        CrmLookupService lookupService,
                         @Value("${crm.events.definite-requires-accepted-quote:true}") boolean definiteRequiresAcceptedQuote) {
         this.eventRepo = eventRepo;
         this.historyRepo = historyRepo;
@@ -103,6 +106,7 @@ public class EventService {
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.quoteRepo = quoteRepo;
         this.hierarchy = hierarchy;
+        this.lookupService = lookupService;
         this.definiteRequiresAcceptedQuote = definiteRequiresAcceptedQuote;
     }
 
@@ -112,7 +116,7 @@ public class EventService {
         return eventRepo.findScoped(TenantResolver.requireOrgTenantId(), status, accountId,
                 from != null ? from : MIN_DATE, to != null ? to : MAX_DATE,
                 scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds(),
-                scope.allHotels(), scope.propertyIds());
+                scope.allHotels(), scope.propertyIds(), TenantResolver.selectedHotelId());
     }
 
     public Optional<Event> findById(Long id) {
@@ -170,9 +174,11 @@ public class EventService {
         if (event.getAttrs() == null) {
             event.setAttrs(objectMapper.createObjectNode());
         }
+        String carriedEventType = null;
         if (event.getOpportunityId() != null) {
             CrmOpportunity opportunity = opportunityRepo.findByIdAndTenantId(event.getOpportunityId(), tenantId)
                     .orElseThrow(() -> new IllegalArgumentException("Opportunity not found: " + event.getOpportunityId()));
+            carriedEventType = text(opportunity.getAttrs(), "eventType");
             if (event.getAccountId() == null) {
                 event.setAccountId(opportunity.getAccountId());
             }
@@ -184,6 +190,7 @@ public class EventService {
             }
         }
         requireHotelOfChain(tenantId, event.getPropertyTenantId());
+        event.setEventType(lookupService.requireCode(tenantId, CrmLookup.Kind.EVENT_TYPE, event.getEventType(), carriedEventType));
         Long accountTeam = event.getAccountId() == null ? null
                 : accountRepo.findByIdAndTenantId(event.getAccountId(), tenantId).map(a -> a.getTeamId()).orElse(null);
         event.setTeamId(teamDirectory.resolveTeam(tenantId, event.getOwnerUserId(), event.getTeamId(), accountTeam));
@@ -243,7 +250,8 @@ public class EventService {
             existing.setPrimaryContactId(changes.getPrimaryContactId());
             Long previousProperty = existing.getPropertyTenantId();
             changeProperty(existing, changes.getPropertyTenantId());
-            existing.setEventType(changes.getEventType());
+            existing.setEventType(lookupService.requireCode(tenantId, CrmLookup.Kind.EVENT_TYPE,
+                    changes.getEventType(), existing.getEventType()));
             existing.setDateFrom(changes.getDateFrom());
             existing.setDateTo(changes.getDateTo());
             existing.setExpectedPax(changes.getExpectedPax());

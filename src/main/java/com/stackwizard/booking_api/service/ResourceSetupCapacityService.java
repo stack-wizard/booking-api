@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.model.Allocation;
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.model.ResourceSetupCapacity;
@@ -17,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -35,17 +35,20 @@ public class ResourceSetupCapacityService {
     private final ResourceCompositionRepository compositionRepo;
     private final AllocationRepository allocationRepo;
     private final CrmAccessContext accessContext;
+    private final CrmLookupService lookupService;
 
     public ResourceSetupCapacityService(ResourceSetupCapacityRepository capacityRepo,
                                         ResourceRepository resourceRepo,
                                         ResourceCompositionRepository compositionRepo,
                                         AllocationRepository allocationRepo,
-                                        CrmAccessContext accessContext) {
+                                        CrmAccessContext accessContext,
+                                        CrmLookupService lookupService) {
         this.capacityRepo = capacityRepo;
         this.resourceRepo = resourceRepo;
         this.compositionRepo = compositionRepo;
         this.allocationRepo = allocationRepo;
         this.accessContext = accessContext;
+        this.lookupService = lookupService;
     }
 
     public List<ResourceSetupCapacity> forResource(Long resourceId) {
@@ -64,22 +67,28 @@ public class ResourceSetupCapacityService {
         Long tenantId = TenantResolver.requireTenantId();
         requireSpaceResource(tenantId, resourceId);
         List<ResourceSetupCapacity> incoming = setups == null ? List.of() : setups;
-        EnumSet<ResourceSetupCapacity.SetupStyle> seen = EnumSet.noneOf(ResourceSetupCapacity.SetupStyle.class);
+        Long orgTenantId = TenantResolver.requireOrgTenantId();
+        Set<String> previous = new HashSet<>();
+        capacityRepo.findByTenantIdAndResourceIdOrderBySetupStyleAsc(tenantId, resourceId)
+                .forEach(c -> previous.add(c.getSetupStyle()));
+        Set<String> seen = new HashSet<>();
         List<ResourceSetupCapacity> rows = new ArrayList<>();
         for (ResourceSetupCapacity setup : incoming) {
-            if (setup == null || setup.getSetupStyle() == null) {
+            if (setup == null || setup.getSetupStyle() == null || setup.getSetupStyle().isBlank()) {
                 throw new IllegalArgumentException("setupStyle is required");
             }
+            String style = previous.stream().filter(p -> p.equalsIgnoreCase(setup.getSetupStyle().trim())).findFirst()
+                    .orElseGet(() -> lookupService.requireCode(orgTenantId, CrmLookup.Kind.SETUP_STYLE, setup.getSetupStyle(), null));
             if (setup.getCapacity() == null || setup.getCapacity() <= 0) {
-                throw new IllegalArgumentException("capacity must be > 0 for " + setup.getSetupStyle());
+                throw new IllegalArgumentException("capacity must be > 0 for " + style);
             }
-            if (!seen.add(setup.getSetupStyle())) {
-                throw new IllegalArgumentException("Duplicate setup style " + setup.getSetupStyle());
+            if (!seen.add(style.toUpperCase(Locale.ROOT))) {
+                throw new IllegalArgumentException("Duplicate setup style " + style);
             }
             rows.add(ResourceSetupCapacity.builder()
                     .tenantId(tenantId)
                     .resourceId(resourceId)
-                    .setupStyle(setup.getSetupStyle())
+                    .setupStyle(style)
                     .capacity(setup.getCapacity())
                     .notes(setup.getNotes())
                     .build());
@@ -92,7 +101,7 @@ public class ResourceSetupCapacityService {
     /**
      * Capacity of a space for a setup style; empty when the space has no such setup.
      */
-    public Optional<Integer> capacityFor(Long tenantId, Long resourceId, ResourceSetupCapacity.SetupStyle setupStyle) {
+    public Optional<Integer> capacityFor(Long tenantId, Long resourceId, String setupStyle) {
         return capacityRepo.findByTenantIdAndResourceIdAndSetupStyle(tenantId, resourceId, setupStyle)
                 .map(ResourceSetupCapacity::getCapacity);
     }
@@ -103,7 +112,7 @@ public class ResourceSetupCapacityService {
      */
     @Transactional(readOnly = true)
     public List<SpaceCandidate> searchSpaces(Integer minPax,
-                                             ResourceSetupCapacity.SetupStyle setupStyle,
+                                             String setupStyle,
                                              LocalDateTime from,
                                              LocalDateTime to) {
         Long tenantId = TenantResolver.requireTenantId();
@@ -115,7 +124,8 @@ public class ResourceSetupCapacityService {
             throw new IllegalArgumentException("from and to must both be set and to must be after from");
         }
         Map<Long, List<ResourceSetupCapacity>> byResource = new LinkedHashMap<>();
-        for (ResourceSetupCapacity c : capacityRepo.findCandidates(tenantId, pax, setupStyle)) {
+        String style = setupStyle == null || setupStyle.isBlank() ? null : setupStyle.trim().toUpperCase(Locale.ROOT);
+        for (ResourceSetupCapacity c : capacityRepo.findCandidates(tenantId, pax, style)) {
             byResource.computeIfAbsent(c.getResourceId(), k -> new ArrayList<>()).add(c);
         }
         List<SpaceCandidate> out = new ArrayList<>();
@@ -173,7 +183,7 @@ public class ResourceSetupCapacityService {
         return resource.getStatus() == null || "ACTIVE".equalsIgnoreCase(resource.getStatus());
     }
 
-    public record SetupCapacity(ResourceSetupCapacity.SetupStyle setupStyle, Integer capacity) {
+    public record SetupCapacity(String setupStyle, Integer capacity) {
     }
 
     public record SpaceCandidate(Long resourceId,

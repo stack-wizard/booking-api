@@ -14,4 +14,6 @@ public class AuthResponse {
     private String role;
     private List<String> roles;
     private Long tenantId;
+    /** Platform UUID of the only hotel the user's teams cover; null when they cover several or all. */
+    private String defaultPropertyPlatformId;
 }

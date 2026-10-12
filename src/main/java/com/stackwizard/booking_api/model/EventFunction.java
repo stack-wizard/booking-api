@@ -42,9 +42,8 @@ public class EventFunction {
 
     private String name;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "setup_style")
-    private ResourceSetupCapacity.SetupStyle setupStyle;
+    private String setupStyle;
 
     @Column(name = "starts_at", nullable = false)
     private LocalDateTime startsAt;

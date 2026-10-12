@@ -2,6 +2,7 @@ package com.stackwizard.booking_api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.DecimalNode;
 import com.stackwizard.booking_api.dto.CrmStageChangeRequest;
 import com.stackwizard.booking_api.model.CrmAccount;
 import com.stackwizard.booking_api.model.CrmOpportunity;
@@ -33,6 +34,11 @@ import java.util.Optional;
 
 @Service
 public class CrmOpportunityService {
+    /** Inquiry wishes in {@code attrs}; the admin keeps the same list. */
+    public static final List<String> INTAKE_KEYS = List.of(
+            "inquiryType", "eventType", "startDate", "endDate", "pax", "setupStyle", "roomNights",
+            "catering", "dietary", "services", "agenda", "estimatedValue");
+
     private final CrmOpportunityRepository opportunityRepo;
     private final CrmPipelineStageRepository stageRepo;
     private final CrmStageRequirementRepository requirementRepo;
@@ -79,7 +85,7 @@ public class CrmOpportunityService {
         return opportunityRepo.findScoped(
                 TenantResolver.requireOrgTenantId(), pipelineId,
                 scope.all(), scope.own(), scope.team(), scope.currentUserId(), scope.teamUserIds(), scope.teamIds(),
-                scope.allHotels(), scope.propertyIds());
+                scope.allHotels(), scope.propertyIds(), TenantResolver.selectedHotelId());
     }
 
     public Optional<CrmOpportunity> findById(Long id) {
@@ -122,6 +128,8 @@ public class CrmOpportunityService {
         if (stage.getStageKind() != CrmPipelineStage.StageKind.OPEN) {
             throw new IllegalArgumentException("Opportunity must be created in an open stage");
         }
+        opportunity.setIntakeLockedAt(locksIntake(stage, stageRepo.findByTenantIdAndPipelineIdOrderByDisplayOrderAsc(tenantId, stage.getPipelineId()))
+                ? OffsetDateTime.now() : null);
         validateReferences(tenantId, opportunity.getAccountId(), opportunity.getPrimaryContactId());
         CrmOpportunity saved = opportunityRepo.save(opportunity);
         transitionRepo.save(CrmStageTransition.builder()
@@ -168,6 +176,13 @@ public class CrmOpportunityService {
         validateAgency(existing.getTenantId(), changes.getAgencyAccountId(), existing.getAccountId());
         existing.setAgencyAccountId(changes.getAgencyAccountId());
         if (changes.getAttrs() != null) {
+            if (existing.getIntakeLockedAt() != null) {
+                List<String> changed = changedIntakeKeys(existing.getAttrs(), changes.getAttrs());
+                if (!changed.isEmpty()) {
+                    throw new IllegalStateException("The intake is locked since the deal left the inquiry stages; "
+                            + "cannot change " + String.join(", ", changed));
+                }
+            }
             existing.setAttrs(changes.getAttrs());
         }
         return opportunityRepo.save(existing);
@@ -187,7 +202,14 @@ public class CrmOpportunityService {
             throw new IllegalArgumentException("Stage does not belong to the opportunity pipeline");
         }
 
+        List<CrmPipelineStage> stages = stageRepo.findByTenantIdAndPipelineIdOrderByDisplayOrderAsc(tenantId, opportunity.getPipelineId());
+        CrmPipelineStage current = stages.stream().filter(s -> s.getId().equals(opportunity.getStageId())).findFirst()
+                .orElse(null);
+        checkTransition(current, target, stages);
         validateRequirements(tenantId, target.getId(), opportunity);
+        if (opportunity.getIntakeLockedAt() == null && locksIntake(target, stages)) {
+            opportunity.setIntakeLockedAt(OffsetDateTime.now());
+        }
 
         if (target.getStageKind() == CrmPipelineStage.StageKind.WON
                 || target.getStageKind() == CrmPipelineStage.StageKind.LOST) {
@@ -217,6 +239,7 @@ public class CrmOpportunityService {
                 case CANCELLED -> CrmOpportunity.Status.CANCELLED;
             });
         } else if (opportunity.getStatus() != CrmOpportunity.Status.OPEN) {
+            accessContext.require(CrmPermission.OPPORTUNITY_CLOSE);
             opportunity.setStatus(CrmOpportunity.Status.OPEN);
             opportunity.setOutcomeReasonId(null);
             opportunity.setOutcomeNote(null);
@@ -235,6 +258,67 @@ public class CrmOpportunityService {
                 .note(request.getNote())
                 .build());
         return saved;
+    }
+
+    /**
+     * Closing is always allowed. Between open stages a deal moves back only when its stage allows it, and forward
+     * past the next open stage only when its stage allows skipping. A closed deal may reopen into any open stage.
+     */
+    static void checkTransition(CrmPipelineStage current, CrmPipelineStage target, List<CrmPipelineStage> stages) {
+        if (current == null || current.getId().equals(target.getId())
+                || target.getStageKind() != CrmPipelineStage.StageKind.OPEN
+                || current.getStageKind() != CrmPipelineStage.StageKind.OPEN) {
+            return;
+        }
+        int from = current.getDisplayOrder();
+        int to = target.getDisplayOrder();
+        if (to < from) {
+            if (!Boolean.TRUE.equals(current.getAllowBack())) {
+                throw new IllegalStateException("A deal in " + current.getName() + " cannot move back to " + target.getName());
+            }
+            return;
+        }
+        if (Boolean.TRUE.equals(current.getAllowSkip())) {
+            return;
+        }
+        CrmPipelineStage next = stages.stream()
+                .filter(s -> s.getStageKind() == CrmPipelineStage.StageKind.OPEN)
+                .filter(s -> !s.getId().equals(current.getId()))
+                .filter(s -> s.getDisplayOrder() >= from)
+                .findFirst()
+                .orElse(null);
+        if (next != null && !next.getId().equals(target.getId())) {
+            throw new IllegalStateException("A deal in " + current.getName() + " moves only to " + next.getName()
+                    + "; it cannot skip to " + target.getName());
+        }
+    }
+
+    /** The target stage locks the intake, or it is an open stage at or after one that does. */
+    static boolean locksIntake(CrmPipelineStage target, List<CrmPipelineStage> stages) {
+        if (Boolean.TRUE.equals(target.getLocksIntake())) {
+            return true;
+        }
+        return target.getStageKind() == CrmPipelineStage.StageKind.OPEN && stages.stream()
+                .filter(s -> s.getStageKind() == CrmPipelineStage.StageKind.OPEN)
+                .anyMatch(s -> Boolean.TRUE.equals(s.getLocksIntake()) && s.getDisplayOrder() <= target.getDisplayOrder());
+    }
+
+    /** Intake fields changed by an update; they cannot change once the intake is locked. */
+    static List<String> changedIntakeKeys(JsonNode before, JsonNode after) {
+        return INTAKE_KEYS.stream()
+                .filter(key -> !Objects.equals(intakeValue(before, key), intakeValue(after, key)))
+                .toList();
+    }
+
+    private static JsonNode intakeValue(JsonNode attrs, String key) {
+        if (attrs == null || !attrs.hasNonNull(key)) {
+            return null;
+        }
+        JsonNode value = attrs.get(key);
+        if (value.isTextual() && value.asText().isBlank() || value.isArray() && value.isEmpty()) {
+            return null;
+        }
+        return value.isNumber() ? new DecimalNode(value.decimalValue().stripTrailingZeros()) : value;
     }
 
     public List<CrmStageTransition> transitions(Long opportunityId) {

@@ -4,7 +4,6 @@ import com.stackwizard.booking_api.model.EventFunction;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductComponent;
 import com.stackwizard.booking_api.model.ProductPackageListing;
-import com.stackwizard.booking_api.model.ResourceSetupCapacity;
 import com.stackwizard.booking_api.repository.ProductComponentRepository;
 import com.stackwizard.booking_api.repository.ProductPackageListingRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
@@ -42,6 +41,7 @@ class PackageCatalogServiceTest {
     @Mock PackageService packageService;
     @Mock ResourceSetupCapacityService spaceService;
     @Mock ProductVisibilityService visibility;
+    @Mock CrmLookupService lookupService;
 
     PackageCatalogService service;
 
@@ -49,13 +49,14 @@ class PackageCatalogServiceTest {
     Product ddr = Product.builder().id(1L).tenantId(1L).name("DDR").packagePricing(Product.PackagePricing.SPLIT_PERCENT).build();
     ProductPackageListing listing = ProductPackageListing.builder().id(5L).tenantId(1L).productId(1L)
             .published(true).minPax(10).maxPax(80).duration(ProductPackageListing.Duration.FULL_DAY)
-            .defaultStartTime(LocalTime.of(9, 0)).setupStyle(ResourceSetupCapacity.SetupStyle.THEATRE)
+            .defaultStartTime(LocalTime.of(9, 0)).setupStyle("THEATRE")
             .validFrom(LocalDate.of(2026, 1, 1)).validTo(LocalDate.of(2026, 12, 31)).build();
 
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new PackageCatalogService(productRepo, componentRepo, listingRepo, packageService, spaceService, visibility);
+        service = new PackageCatalogService(productRepo, componentRepo, listingRepo, packageService, spaceService, visibility, lookupService);
+        when(lookupService.requireCode(any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
         when(visibility.isVisible(any(), any())).thenReturn(true);
         when(productRepo.findByIdAndTenantId(1L, 1L)).thenReturn(Optional.of(ddr));
         when(listingRepo.findByTenantIdAndProductId(1L, 1L)).thenReturn(Optional.of(listing));
@@ -98,7 +99,7 @@ class PackageCatalogServiceTest {
                 10L, "Hall A", "MEETING_ROOM", null, null, null, List.of(), true);
         ResourceSetupCapacityService.SpaceCandidate busy = new ResourceSetupCapacityService.SpaceCandidate(
                 11L, "Hall B", "MEETING_ROOM", null, null, null, List.of(), false);
-        when(spaceService.searchSpaces(20, ResourceSetupCapacity.SetupStyle.THEATRE, DAY.atTime(9, 0), DAY.atTime(17, 0)))
+        when(spaceService.searchSpaces(20, "THEATRE", DAY.atTime(9, 0), DAY.atTime(17, 0)))
                 .thenReturn(List.of(free, busy));
 
         PackageCatalogService.PackageAvailability result = service.availability(1L, DAY, 20, null, "EUR");

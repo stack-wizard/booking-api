@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.booking.BookingUom;
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.Event;
 import com.stackwizard.booking_api.model.EventFunction;
 import com.stackwizard.booking_api.model.EventFunctionItem;
@@ -33,6 +34,7 @@ public class EventFunctionService {
     private final ResourceRepository resourceRepo;
     private final TenantHierarchy hierarchy;
     private final ProductVisibilityService productVisibility;
+    private final CrmLookupService lookupService;
 
     public EventFunctionService(EventService eventService,
                                 EventFunctionRepository functionRepo,
@@ -43,7 +45,8 @@ public class EventFunctionService {
                                 EventItemPricing itemPricing,
                                 ResourceRepository resourceRepo,
                                 TenantHierarchy hierarchy,
-                                ProductVisibilityService productVisibility) {
+                                ProductVisibilityService productVisibility,
+                                CrmLookupService lookupService) {
         this.eventService = eventService;
         this.functionRepo = functionRepo;
         this.itemRepo = itemRepo;
@@ -54,6 +57,7 @@ public class EventFunctionService {
         this.resourceRepo = resourceRepo;
         this.hierarchy = hierarchy;
         this.productVisibility = productVisibility;
+        this.lookupService = lookupService;
     }
 
     public List<EventFunction> functions(Long eventId) {
@@ -70,6 +74,8 @@ public class EventFunctionService {
         if (function.getDisplayOrder() == null) {
             function.setDisplayOrder(0);
         }
+        function.setSetupStyle(lookupService.requireCode(event.getTenantId(), CrmLookup.Kind.SETUP_STYLE,
+                function.getSetupStyle(), null));
         normalizeAndValidate(event, function);
         EventFunction saved = functionRepo.save(function);
         reservationSync.syncFunction(event, saved);
@@ -88,7 +94,8 @@ public class EventFunctionService {
         existing.setResourceId(changes.getResourceId());
         existing.setFunctionType(changes.getFunctionType());
         existing.setName(changes.getName());
-        existing.setSetupStyle(changes.getSetupStyle());
+        existing.setSetupStyle(lookupService.requireCode(event.getTenantId(), CrmLookup.Kind.SETUP_STYLE,
+                changes.getSetupStyle(), existing.getSetupStyle()));
         existing.setStartsAt(changes.getStartsAt());
         existing.setEndsAt(changes.getEndsAt());
         existing.setOccupancyStartsAt(changes.getOccupancyStartsAt());

@@ -2,8 +2,6 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.EnumType;
-import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -32,9 +30,9 @@ public class ResourceSetupCapacity {
     @Column(name = "resource_id", nullable = false)
     private Long resourceId;
 
-    @Enumerated(EnumType.STRING)
+    /** Code from the chain's SETUP_STYLE code list ({@code crm_lookup}). */
     @Column(name = "setup_style", nullable = false)
-    private SetupStyle setupStyle;
+    private String setupStyle;
 
     @Column(nullable = false)
     private Integer capacity;
@@ -43,8 +41,4 @@ public class ResourceSetupCapacity {
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
-
-    public enum SetupStyle {
-        THEATRE, CLASSROOM, U_SHAPE, BOARDROOM, BANQUET, CABARET, RECEPTION, HOLLOW_SQUARE
-    }
 }

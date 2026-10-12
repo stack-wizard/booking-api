@@ -5,7 +5,6 @@ import com.stackwizard.booking_api.model.EventFunction;
 import com.stackwizard.booking_api.model.EventFunctionItem;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Resource;
-import com.stackwizard.booking_api.model.ResourceSetupCapacity;
 import com.stackwizard.booking_api.repository.EventFunctionItemRepository;
 import com.stackwizard.booking_api.repository.EventFunctionRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
@@ -44,6 +43,7 @@ class EventFunctionServiceTest {
     @Mock EventItemPricing itemPricing;
     @Mock ResourceRepository resourceRepo;
     @Mock ProductVisibilityService productVisibility;
+    @Mock CrmLookupService lookupService;
 
     EventFunctionService service;
 
@@ -52,7 +52,8 @@ class EventFunctionServiceTest {
     @BeforeEach
     void setUp() {
         service = new EventFunctionService(eventService, functionRepo, itemRepo, productRepo, reservationSync,
-                capacityService, itemPricing, resourceRepo, TenantHierarchyTestSupport.standalone(), productVisibility);
+                capacityService, itemPricing, resourceRepo, TenantHierarchyTestSupport.standalone(), productVisibility, lookupService);
+        when(lookupService.requireCode(any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
     }
 
     private Event event() {
@@ -63,13 +64,13 @@ class EventFunctionServiceTest {
 
     private EventFunction plenary(Integer pax) {
         return EventFunction.builder().tenantId(1L).resourceId(3L).functionType(EventFunction.FunctionType.PLENARY)
-                .setupStyle(ResourceSetupCapacity.SetupStyle.THEATRE)
+                .setupStyle("THEATRE")
                 .startsAt(NINE).endsAt(NINE.plusHours(8)).pax(pax).build();
     }
 
     @Test
     void occupancyDefaultsToEventWindow() {
-        when(capacityService.capacityFor(1L, 3L, ResourceSetupCapacity.SetupStyle.THEATRE)).thenReturn(Optional.of(200));
+        when(capacityService.capacityFor(1L, 3L, "THEATRE")).thenReturn(Optional.of(200));
         EventFunction function = plenary(150);
 
         service.normalizeAndValidate(event(), function);
@@ -80,7 +81,7 @@ class EventFunctionServiceTest {
 
     @Test
     void paxAboveSetupCapacityIsRejected() {
-        when(capacityService.capacityFor(1L, 3L, ResourceSetupCapacity.SetupStyle.THEATRE)).thenReturn(Optional.of(120));
+        when(capacityService.capacityFor(1L, 3L, "THEATRE")).thenReturn(Optional.of(120));
 
         assertThatThrownBy(() -> service.normalizeAndValidate(event(), plenary(150)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -89,7 +90,7 @@ class EventFunctionServiceTest {
 
     @Test
     void spaceWithoutSetupIsRejected() {
-        when(capacityService.capacityFor(1L, 3L, ResourceSetupCapacity.SetupStyle.THEATRE)).thenReturn(Optional.empty());
+        when(capacityService.capacityFor(1L, 3L, "THEATRE")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.normalizeAndValidate(event(), plenary(50)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -164,7 +165,7 @@ class EventFunctionServiceTest {
 
     private EventFunctionService chainService(TenantHierarchy hierarchy) {
         return new EventFunctionService(eventService, functionRepo, itemRepo, productRepo, reservationSync,
-                capacityService, itemPricing, resourceRepo, hierarchy, productVisibility);
+                capacityService, itemPricing, resourceRepo, hierarchy, productVisibility, lookupService);
     }
 
     @Test
@@ -246,7 +247,7 @@ class EventFunctionServiceTest {
             when(itemRepo.findByTenantIdAndEventFunctionIdOrderByServeAtAscDisplayOrderAscIdAsc(3L, 40L))
                     .thenReturn(List.of(item));
             when(functionRepo.save(existing)).thenReturn(existing);
-            when(capacityService.capacityFor(3L, 7L, ResourceSetupCapacity.SetupStyle.THEATRE)).thenReturn(Optional.of(200));
+            when(capacityService.capacityFor(3L, 7L, "THEATRE")).thenReturn(Optional.of(200));
             EventFunction changes = plenary(10);
             changes.setResourceId(7L);
 
