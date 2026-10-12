@@ -59,6 +59,9 @@ delete from event_order where event_id in (select id from wipe_events);
 delete from event_status_history where event_id in (select id from wipe_events);
 delete from event_function_item
  where event_function_id in (select id from event_function where event_id in (select id from wipe_events));
+-- reservation.event_function_id is ON DELETE RESTRICT; allocation follows the reservation.
+delete from reservation
+ where event_function_id in (select id from event_function where event_id in (select id from wipe_events));
 update event_function set resource_id = null where event_id in (select id from wipe_events);
 delete from event_function where event_id in (select id from wipe_events);
 delete from event where id in (select id from wipe_events);

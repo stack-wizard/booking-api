@@ -230,7 +230,8 @@ select c.tenant_id, c.event_id, 'TENTATIVE', 'DEFINITE', c.owner_id, 'Seed: quot
 from seed_ctx c where c.event_id is not null
   and not exists (select 1 from event_status_history h where h.event_id = c.event_id and h.to_status = 'DEFINITE');
 
--- Functions + package line items (no allocations — avoids capacity collisions with live bookings)
+-- Functions + package line items. Reservations are created by DhSalesFlowSeedRunner after this
+-- script commits, so a taken hall does not roll the event back.
 insert into event_function (
   tenant_id, event_id, resource_id, function_type, name, setup_style,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, package_product_id, display_order
