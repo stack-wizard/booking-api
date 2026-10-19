@@ -209,6 +209,10 @@ public class OperaBlockSyncService {
                 createBlock(booking, hotel, row, rooms, events, graph.startingFor(target), graph, config);
             } else if (!closed) {
                 extendDates(booking, hotel, row, rooms, events, config);
+                // Space-first create omits ratePlanCode; attach it when rooms are placed later.
+                if (!rooms.isEmpty()) {
+                    ensureRoomRatePlan(hotel, row, rooms, config);
+                }
             }
             moveStatus(config, hotel, row, graph, target);
             List<String> eventErrors = new ArrayList<>();
@@ -361,6 +365,37 @@ public class OperaBlockSyncService {
                 .map(String::trim)
                 .orElseThrow(() -> new IllegalStateException(
                         "Map price profile " + profileId + " to an OPERA RATE_CODE for hotel " + hotel.getHotelCode()));
+    }
+
+    /**
+     * Puts the mapped room rate plan on an existing block. Needed when the block was created for space/events first
+     * ({@code ratePlanCode} only goes out on create); without this Opera keeps no rate and no included packages
+     * (e.g. FJBB → FJBRFFJ breakfast).
+     */
+    private void ensureRoomRatePlan(OperaHotel hotel, BookingOperaBlock row, List<BookingRoomBlock> rooms,
+                                    OperaTenantConfigResolver.OperaResolvedConfig config) {
+        String ratePlan = resolveRatePlanCode(hotel, rooms);
+        ObjectNode body = roomRatePlanUpdateBody(hotel, row, ratePlan);
+        row.setLastRequest(body);
+        row.setLastResponse(client.put(config, hotel.getChainCode(), hotel.getHotelCode(),
+                "/blk/v1/hotels/" + hotel.getHotelCode() + "/blocks/" + row.getBlockId(), body));
+        blockRepo.save(row);
+    }
+
+    /** PUT body that flips catering-only off and sets {@code reservationDetails.ratePlanCode}. */
+    static ObjectNode roomRatePlanUpdateBody(OperaHotel hotel, BookingOperaBlock row, String ratePlan) {
+        ObjectNode body = MAPPER.createObjectNode();
+        ObjectNode block = body.putArray("blocks").addObject();
+        block.putArray("blockIdList").add(blockId(row));
+        block.put("hotelId", hotel.getHotelCode());
+        block.putObject("blockDetails").put("cateringOnlyBlock", false);
+        ObjectNode reservationDetails = block.putObject("reservationDetails");
+        ObjectNode rate = reservationDetails.putArray("ratePlanCode").addObject();
+        rate.put("primary", true);
+        rate.put("ratePlanCode", ratePlan);
+        reservationDetails.put("inventoryControl", "Elastic");
+        reservationDetails.put("elastic", 1);
+        return body;
     }
 
     /** Widens the OPERA block dates when a room night or function falls outside them; never shrinks. */

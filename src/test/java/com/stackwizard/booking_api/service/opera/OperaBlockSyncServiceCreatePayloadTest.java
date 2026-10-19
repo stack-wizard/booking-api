@@ -1,5 +1,7 @@
 package com.stackwizard.booking_api.service.opera;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.stackwizard.booking_api.model.BookingOperaBlock;
 import com.stackwizard.booking_api.model.BookingRoomBlock;
 import com.stackwizard.booking_api.model.OperaCodeMap;
 import com.stackwizard.booking_api.model.OperaHotel;
@@ -80,5 +82,22 @@ class OperaBlockSyncServiceCreatePayloadTest {
         assertThatThrownBy(() -> service().resolveRatePlanCode(hotel, List.of(room)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("rate price profile");
+    }
+
+    @Test
+    void roomRatePlanUpdateBodySetsMappedCodeAndClearsCateringOnly() {
+        OperaHotel hotel = OperaHotel.builder().id(9L).tenantId(2L).hotelCode("DH").build();
+        BookingOperaBlock row = BookingOperaBlock.builder().blockId("158786").build();
+
+        JsonNode body = OperaBlockSyncService.roomRatePlanUpdateBody(hotel, row, "FJBB");
+        JsonNode block = body.path("blocks").path(0);
+
+        assertThat(block.path("hotelId").asText()).isEqualTo("DH");
+        assertThat(block.path("blockIdList").path(0).path("id").asText()).isEqualTo("158786");
+        assertThat(block.path("blockDetails").path("cateringOnlyBlock").asBoolean()).isFalse();
+        assertThat(block.path("reservationDetails").path("ratePlanCode").path(0).path("ratePlanCode").asText())
+                .isEqualTo("FJBB");
+        assertThat(block.path("reservationDetails").path("ratePlanCode").path(0).path("primary").asBoolean()).isTrue();
+        assertThat(block.path("reservationDetails").path("inventoryControl").asText()).isEqualTo("Elastic");
     }
 }
