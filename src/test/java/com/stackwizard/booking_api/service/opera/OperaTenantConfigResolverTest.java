@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service.opera;
 
 import com.stackwizard.booking_api.model.TenantIntegrationConfig;
+import com.stackwizard.booking_api.service.TenantHierarchy;
 import com.stackwizard.booking_api.service.TenantIntegrationConfigService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +20,8 @@ class OperaTenantConfigResolverTest {
 
     @Mock
     private TenantIntegrationConfigService tenantIntegrationConfigService;
+    @Mock
+    private TenantHierarchy hierarchy;
 
     @InjectMocks
     private OperaTenantConfigResolver resolver;
@@ -51,6 +54,34 @@ class OperaTenantConfigResolverTest {
         assertThat(resolved.clientSecret()).isEqualTo("client-secret");
         assertThat(resolved.enterpriseId()).isEqualTo("MIKOSE");
         assertThat(resolved.accessToken()).isNull();
+    }
+
+    @Test
+    void resolveFallsBackToOrganizationWhenPropertyHasNoConfig() {
+        TenantIntegrationConfig orgConfig = TenantIntegrationConfig.builder()
+                .tenantId(1L)
+                .integrationType("PMS")
+                .provider("OPERA")
+                .active(Boolean.TRUE)
+                .baseUrl("https://opera.example")
+                .appKey("app-key")
+                .clientId("client-id")
+                .clientSecret("client-secret")
+                .enterpriseId("MIKOSE")
+                .build();
+
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(2L, "PMS", "OPERA"))
+                .thenReturn(Optional.empty());
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(2L, "BOOKING", "OPERA"))
+                .thenReturn(Optional.empty());
+        when(hierarchy.orgIdOf(2L)).thenReturn(1L);
+        when(tenantIntegrationConfigService.findByTenantIdAndTypeAndProvider(1L, "PMS", "OPERA"))
+                .thenReturn(Optional.of(orgConfig));
+
+        OperaTenantConfigResolver.OperaResolvedConfig resolved = resolver.resolve(2L);
+
+        assertThat(resolved.baseUrl()).isEqualTo("https://opera.example");
+        assertThat(resolved.enterpriseId()).isEqualTo("MIKOSE");
     }
 
     @Test

@@ -1,10 +1,12 @@
 package com.stackwizard.booking_api.service.opera;
 
 import com.stackwizard.booking_api.model.TenantIntegrationConfig;
+import com.stackwizard.booking_api.service.TenantHierarchy;
 import com.stackwizard.booking_api.service.TenantIntegrationConfigService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Objects;
 import java.util.Optional;
 
 @Component
@@ -15,28 +17,33 @@ public class OperaTenantConfigResolver {
     private static final String INTEGRATION_TYPE_BOOKING = "BOOKING";
 
     private final TenantIntegrationConfigService tenantConfigService;
+    private final TenantHierarchy hierarchy;
 
-    public OperaTenantConfigResolver(TenantIntegrationConfigService tenantConfigService) {
+    public OperaTenantConfigResolver(TenantIntegrationConfigService tenantConfigService,
+                                     TenantHierarchy hierarchy) {
         this.tenantConfigService = tenantConfigService;
+        this.hierarchy = hierarchy;
     }
 
     public OperaResolvedConfig resolve(Long tenantId) {
         TenantIntegrationConfig tenantConfig = findOperaConfig(tenantId)
-                .orElseThrow(() -> new IllegalStateException("Opera config is missing for tenant " + tenantId));
+                .orElseThrow(() -> new IllegalStateException("Opera config is missing for tenant " + tenantId
+                        + " (and its organization)"));
 
         if (!Boolean.TRUE.equals(tenantConfig.getActive())) {
-            throw new IllegalStateException("Opera config is disabled for tenant " + tenantId);
+            throw new IllegalStateException("Opera config is disabled for tenant " + tenantConfig.getTenantId());
         }
-        String baseUrl = requireValue(tenantConfig.getBaseUrl(), "baseUrl", tenantId);
-        String appKey = requireValue(tenantConfig.getAppKey(), "appKey", tenantId);
+        Long configTenantId = tenantConfig.getTenantId();
+        String baseUrl = requireValue(tenantConfig.getBaseUrl(), "baseUrl", configTenantId);
+        String appKey = requireValue(tenantConfig.getAppKey(), "appKey", configTenantId);
         String oauthPath = firstNonBlank(normalizeNullable(tenantConfig.getOauthPath()), DEFAULT_OAUTH_PATH);
         String clientId = normalizeNullable(tenantConfig.getClientId());
         String clientSecret = normalizeNullable(tenantConfig.getClientSecret());
         String enterpriseId = normalizeNullable(tenantConfig.getEnterpriseId());
 
-        requireValue(clientId, "clientId", tenantId);
-        requireValue(clientSecret, "clientSecret", tenantId);
-        requireValue(enterpriseId, "enterpriseId", tenantId);
+        requireValue(clientId, "clientId", configTenantId);
+        requireValue(clientSecret, "clientSecret", configTenantId);
+        requireValue(enterpriseId, "enterpriseId", configTenantId);
 
         return new OperaResolvedConfig(
                 baseUrl,
@@ -57,7 +64,26 @@ public class OperaTenantConfigResolver {
                 .map(String::toUpperCase);
     }
 
+    /**
+     * OPERA credentials are usually stored once on the chain (organization). A hotel looks there when it has
+     * no row of its own.
+     */
     private Optional<TenantIntegrationConfig> findOperaConfig(Long tenantId) {
+        Optional<TenantIntegrationConfig> own = findOnTenant(tenantId);
+        if (own.isPresent()) {
+            return own;
+        }
+        Long orgId = hierarchy.orgIdOf(tenantId);
+        if (orgId == null || Objects.equals(orgId, tenantId)) {
+            return Optional.empty();
+        }
+        return findOnTenant(orgId);
+    }
+
+    private Optional<TenantIntegrationConfig> findOnTenant(Long tenantId) {
+        if (tenantId == null) {
+            return Optional.empty();
+        }
         return tenantConfigService
                 .findByTenantIdAndTypeAndProvider(tenantId, INTEGRATION_TYPE_PMS, PROVIDER)
                 .or(() -> tenantConfigService.findByTenantIdAndTypeAndProvider(tenantId, INTEGRATION_TYPE_BOOKING, PROVIDER));
