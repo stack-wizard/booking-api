@@ -39,9 +39,13 @@ import java.util.regex.Pattern;
 public class BookingStatusService {
     private static final Pattern CODE = Pattern.compile("[A-Z0-9_]{1,40}");
     private static final Pattern COLOR = Pattern.compile("#[0-9a-fA-F]{6}");
-    /** Phases a pipeline stage may set; closing needs a reason and goes through the close dialog. */
+    /**
+     * Phases a pipeline stage may map to. Open phases move bookings on stage change; closed phases are preferred
+     * targets when the deal is closed via the outcome dialog (LOST / TURNED_DOWN / CANCELLED).
+     */
     private static final Set<Booking.Status> STAGE_PHASES = EnumSet.of(
-            Booking.Status.INQUIRY, Booking.Status.TENTATIVE, Booking.Status.DEFINITE, Booking.Status.ACTUAL);
+            Booking.Status.INQUIRY, Booking.Status.TENTATIVE, Booking.Status.DEFINITE, Booking.Status.ACTUAL,
+            Booking.Status.LOST, Booking.Status.TURNED_DOWN, Booking.Status.CANCELLED);
     private static final Map<String, Booking.Status> OPERA_STATUS_TYPES = Map.of(
             "Inquiry", Booking.Status.INQUIRY,
             "Waitlist", Booking.Status.INQUIRY,
@@ -191,7 +195,7 @@ public class BookingStatusService {
                 .filter(s -> Boolean.TRUE.equals(s.getActive()))
                 .orElseThrow(() -> new IllegalArgumentException("Unknown booking status: " + value.trim()));
         if (!STAGE_PHASES.contains(status.getPhase())) {
-            throw new IllegalArgumentException("A stage can set only inquiry, tentative, definite or actual statuses");
+            throw new IllegalArgumentException("Unknown booking status phase for a pipeline stage");
         }
         return status.getCode();
     }

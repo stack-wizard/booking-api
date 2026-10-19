@@ -362,12 +362,87 @@ public class BookingService {
             } catch (IllegalStateException ex) {
                 throw new IllegalStateException("Booking \"" + booking.getName() + "\": " + ex.getMessage(), ex);
             }
-            transition(booking, target, null, "Stage " + stageName, accessContext.currentUserId());
+            transition(booking, target, null, "Stage " + stageName, accessContext.currentUserId(), null);
         }
+    }
+
+    /**
+     * Deal closed as lost / refused / cancelled (outcome dialog): open bookings take an allowed close status and sync
+     * to OPERA. Preferred codes depend on the outcome kind and what the current status flow allows.
+     *
+     * @param preferredStatusCode optional stage {@code booking_status_code}; used when the flow allows it
+     */
+    @Transactional
+    public void closeBookingsFromOpportunity(Long orgTenantId, Long opportunityId, Long outcomeReasonId,
+                                             CrmOutcomeReason.Kind outcomeKind, String note,
+                                             String preferredStatusCode) {
+        if (outcomeKind != CrmOutcomeReason.Kind.LOST
+                && outcomeKind != CrmOutcomeReason.Kind.TURNED_DOWN
+                && outcomeKind != CrmOutcomeReason.Kind.CANCELLED) {
+            throw new IllegalArgumentException("Outcome kind must be LOST, TURNED_DOWN or CANCELLED");
+        }
+        BookingStatusRules rules = statusService.rules(orgTenantId);
+        for (Booking booking : bookingRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(orgTenantId, opportunityId)) {
+            if (booking.getStatus().isClosed()) {
+                continue;
+            }
+            accessContext.require(CrmPermission.EVENT_WRITE);
+            BookingStatus target = resolveAllowedClose(rules, booking, outcomeKind, preferredStatusCode);
+            try {
+                transition(booking, target, outcomeReasonId, note, accessContext.currentUserId(), outcomeKind);
+            } catch (IllegalStateException | IllegalArgumentException ex) {
+                throw new IllegalStateException("Booking \"" + booking.getName() + "\": " + ex.getMessage(), ex);
+            }
+        }
+    }
+
+    /**
+     * Among statuses the flow allows from the booking, pick a close status. Prefer the stage code, then Opera-ish
+     * codes for the outcome kind (LOS/RGT/CXL), then any closed phase.
+     */
+    static BookingStatus resolveAllowedClose(BookingStatusRules rules, Booking booking,
+                                             CrmOutcomeReason.Kind outcomeKind, String preferredStatusCode) {
+        List<BookingStatus> candidates = rules.next(booking).stream()
+                .filter(s -> s.getPhase() == Booking.Status.LOST
+                        || s.getPhase() == Booking.Status.TURNED_DOWN
+                        || s.getPhase() == Booking.Status.CANCELLED)
+                .toList();
+        if (candidates.isEmpty()) {
+            throw new IllegalStateException("Cannot close booking from " + BookingStatusRules.codeOf(booking)
+                    + " (no LOST / TURNED_DOWN / CANCELLED transition)");
+        }
+        if (preferredStatusCode != null && !preferredStatusCode.isBlank()) {
+            Optional<BookingStatus> preferred = candidates.stream()
+                    .filter(s -> s.getCode().equalsIgnoreCase(preferredStatusCode.trim()))
+                    .findFirst();
+            if (preferred.isPresent()) {
+                return preferred.get();
+            }
+        }
+        String[] preferredCodes = switch (outcomeKind) {
+            case LOST -> new String[]{"LOS", "LOST", "RGT", "CXL", "CANCELLED", "TURNED_DOWN"};
+            case TURNED_DOWN -> new String[]{"RGT", "TURNED_DOWN", "LOS", "LOST", "CXL", "CANCELLED"};
+            case CANCELLED -> new String[]{"CXL", "CANCELLED", "LOS", "LOST", "RGT", "TURNED_DOWN"};
+            default -> new String[]{};
+        };
+        for (String code : preferredCodes) {
+            Optional<BookingStatus> match = candidates.stream()
+                    .filter(s -> s.getCode().equalsIgnoreCase(code))
+                    .findFirst();
+            if (match.isPresent()) {
+                return match.get();
+            }
+        }
+        return candidates.getFirst();
     }
 
     /** Phase rules (decision date, space, quote, final pax, reason) apply only when the phase changes. */
     Booking transition(Booking booking, BookingStatus target, Long outcomeReasonId, String note, Long actorUserId) {
+        return transition(booking, target, outcomeReasonId, note, actorUserId, null);
+    }
+
+    Booking transition(Booking booking, BookingStatus target, Long outcomeReasonId, String note, Long actorUserId,
+                       CrmOutcomeReason.Kind expectedReasonKind) {
         Booking.Status from = booking.getStatus();
         String fromCode = BookingStatusRules.codeOf(booking);
         Booking.Status phase = target.getPhase();
@@ -399,7 +474,10 @@ public class BookingService {
         }
         Long reasonId = null;
         if (phaseChange && (phase == Booking.Status.TURNED_DOWN || phase == Booking.Status.LOST || phase == Booking.Status.CANCELLED)) {
-            reasonId = requireReason(booking.getTenantId(), outcomeReasonId, CrmOutcomeReason.Kind.valueOf(phase.name())).getId();
+            CrmOutcomeReason.Kind kind = expectedReasonKind != null
+                    ? expectedReasonKind
+                    : CrmOutcomeReason.Kind.valueOf(phase.name());
+            reasonId = requireReason(booking.getTenantId(), outcomeReasonId, kind).getId();
         }
         reservationSync.verifyOperaTransition(booking, target);
         booking.setStatus(phase);

@@ -315,6 +315,44 @@ class BookingServiceTest {
     }
 
     @Test
+    void closeFromOpportunityPicksAllowedCloseStatusAndAcceptsLostReasonOnTurnedDown() {
+        BookingStatus pro = BookingStatus.builder().id(1L).code("PRO").label("Prospect").phase(Booking.Status.INQUIRY)
+                .start(true).displayOrder(10).active(true).operaCode("PRO").build();
+        BookingStatus rgt = BookingStatus.builder().id(2L).code("RGT").label("Regret").phase(Booking.Status.TURNED_DOWN)
+                .start(false).displayOrder(20).active(true).operaCode("RGT").build();
+        BookingStatus los = BookingStatus.builder().id(3L).code("LOS").label("Lost").phase(Booking.Status.LOST)
+                .start(false).displayOrder(30).active(true).operaCode("LOS").build();
+        when(statusService.rules(any())).thenReturn(new BookingStatusRules(
+                java.util.List.of(pro, rgt, los),
+                java.util.List.of(BookingStatusFlow.builder().fromStatusId(1L).toStatusId(2L).build())));
+
+        Booking open = booking(Booking.Status.INQUIRY);
+        open.setStatusCode("PRO");
+        when(bookingRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(1L, 3L)).thenReturn(java.util.List.of(open));
+        when(outcomeRepo.findByIdAndTenantId(9L, 1L)).thenReturn(Optional.of(CrmOutcomeReason.builder()
+                .id(9L).tenantId(1L).kind(CrmOutcomeReason.Kind.LOST).code("PRICE").name("Price").active(true).build()));
+
+        service.closeBookingsFromOpportunity(1L, 3L, 9L, CrmOutcomeReason.Kind.LOST, "Lost the deal", "LOS");
+
+        assertThat(open.getStatus()).isEqualTo(Booking.Status.TURNED_DOWN);
+        assertThat(open.getStatusCode()).isEqualTo("RGT");
+        assertThat(open.getOutcomeReasonId()).isEqualTo(9L);
+        verify(reservationSync).syncBooking(open);
+    }
+
+    @Test
+    void resolveAllowedClosePrefersStageCodeWhenAllowed() {
+        BookingStatusRules rules = BookingStatusRules.defaults();
+        Booking booking = Booking.builder().status(Booking.Status.INQUIRY).statusCode("INQUIRY").build();
+
+        BookingStatus picked = BookingService.resolveAllowedClose(rules, booking, CrmOutcomeReason.Kind.CANCELLED, "LOST");
+
+        assertThat(picked.getCode()).isEqualTo("LOST");
+        assertThat(BookingService.resolveAllowedClose(rules, booking, CrmOutcomeReason.Kind.LOST, null).getCode())
+                .isEqualTo("LOST");
+    }
+
+    @Test
     void bookingCannotBeLimitedToAHotelWhileItHasFunctionsElsewhere() {
         TenantHierarchy chain = org.mockito.Mockito.mock(TenantHierarchy.class);
         when(chain.isPropertyOf(2L, 1L)).thenReturn(true);

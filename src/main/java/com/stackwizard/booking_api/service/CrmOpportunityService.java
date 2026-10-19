@@ -24,6 +24,7 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
@@ -214,6 +215,7 @@ public class CrmOpportunityService {
             opportunity.setIntakeLockedAt(OffsetDateTime.now());
         }
 
+        CrmOutcomeReason closeReason = null;
         if (target.getStageKind() == CrmPipelineStage.StageKind.WON
                 || target.getStageKind() == CrmPipelineStage.StageKind.LOST) {
             accessContext.require(CrmPermission.OPPORTUNITY_CLOSE);
@@ -232,6 +234,7 @@ public class CrmOpportunityService {
                     && reason.getKind() != CrmOutcomeReason.Kind.CANCELLED) {
                 throw new IllegalArgumentException("Outcome reason kind must be LOST, TURNED_DOWN or CANCELLED");
             }
+            closeReason = reason;
             opportunity.setOutcomeReasonId(reason.getId());
             opportunity.setOutcomeNote(request.getOutcomeNote());
             opportunity.setClosedAt(OffsetDateTime.now());
@@ -260,7 +263,17 @@ public class CrmOpportunityService {
                 .changedBy(accessContext.currentUserId())
                 .note(request.getNote())
                 .build());
-        if (target.getBookingStatusCode() != null && !target.getId().equals(fromStageId)) {
+        if (!target.getId().equals(fromStageId)
+                && target.getStageKind() == CrmPipelineStage.StageKind.LOST
+                && closeReason != null
+                && closeReason.getKind() != CrmOutcomeReason.Kind.WON) {
+            // Outcome dialog already collected LOST / TURNED_DOWN / CANCELLED — close linked bookings (OPERA cancel path)
+            String note = StringUtils.hasText(request.getOutcomeNote())
+                    ? request.getOutcomeNote()
+                    : ("Deal closed: " + target.getName());
+            bookingService.closeBookingsFromOpportunity(tenantId, saved.getId(), closeReason.getId(),
+                    closeReason.getKind(), note, target.getBookingStatusCode());
+        } else if (target.getBookingStatusCode() != null && !target.getId().equals(fromStageId)) {
             bookingService.applyStageStatus(tenantId, saved.getId(), target.getBookingStatusCode(), target.getName());
         }
         return saved;
