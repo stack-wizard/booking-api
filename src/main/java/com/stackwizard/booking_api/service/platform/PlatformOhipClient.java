@@ -1,11 +1,13 @@
 package com.stackwizard.booking_api.service.platform;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
+import org.springframework.web.client.RestClientException;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -13,10 +15,12 @@ import java.util.UUID;
 /**
  * Reads a tenant's OHIP credentials from Mikos Platform
  * ({@code GET /api/v1/service/integrations/ohip}). Platform resolves chain-level storage from the
- * effective property tenant id.
+ * effective property tenant id. Auth / network failures return empty so local config can be used.
  */
 @Component
 public class PlatformOhipClient {
+    private static final Logger log = LoggerFactory.getLogger(PlatformOhipClient.class);
+
     private final RestClient platform;
     private final PlatformServiceTokenClient serviceTokens;
 
@@ -38,18 +42,20 @@ public class PlatformOhipClient {
             return Optional.ofNullable(getServiceCredentials(platformTenantId));
         } catch (HttpClientErrorException.NotFound ex) {
             return Optional.empty();
-        } catch (RestClientResponseException ex) {
-            if (ex.getStatusCode().value() == 401) {
+        } catch (RestClientException ex) {
+            if (ex instanceof HttpClientErrorException http && http.getStatusCode().value() == 401) {
                 serviceTokens.invalidate();
                 try {
                     return Optional.ofNullable(getServiceCredentials(platformTenantId));
                 } catch (HttpClientErrorException.NotFound retry404) {
                     return Optional.empty();
+                } catch (RestClientException retry) {
+                    log.warn("Platform OHIP read failed after token retry: {}", retry.getMessage());
+                    return Optional.empty();
                 }
             }
-            throw new IllegalStateException(
-                    "Platform OHIP config HTTP " + ex.getStatusCode().value() + ": " + ex.getResponseBodyAsString(),
-                    ex);
+            log.warn("Platform OHIP read failed for {}: {}", platformTenantId, ex.getMessage());
+            return Optional.empty();
         }
     }
 

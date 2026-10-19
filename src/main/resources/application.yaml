@@ -50,10 +50,10 @@ payments:
 booking:
   public-base-url: ${BOOKING_PUBLIC_BASE_URL:}
   # Mikos Platform m2m client (scope integrations:read) for OHIP credentials.
-  # Defaults match mikos-platform booking-sync; override in prod via SSM/env.
+  # Leave blank until Platform registers booking-sync and SSM has the secret; then local OPERA config is used.
   platform:
-    sync-client-id: ${BOOKING_PLATFORM_SYNC_CLIENT_ID:booking-sync}
-    sync-client-secret: ${BOOKING_PLATFORM_SYNC_CLIENT_SECRET:dev-booking-sync-secret-change-me}
+    sync-client-id: ${BOOKING_PLATFORM_SYNC_CLIENT_ID:}
+    sync-client-secret: ${BOOKING_PLATFORM_SYNC_CLIENT_SECRET:}
   opera:
     check-in:
       enabled: ${BOOKING_OPERA_CHECKIN_ENABLED:true}
