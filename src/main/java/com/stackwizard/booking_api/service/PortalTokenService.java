@@ -1,6 +1,6 @@
 package com.stackwizard.booking_api.service;
 
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.PortalAccessToken;
 import com.stackwizard.booking_api.repository.PortalAccessTokenRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,8 +17,8 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Anonymous client links to an event's portal, modelled on reservation_request_access_token.
- * A link lives until 30 days after the event and is revoked on demand.
+ * Anonymous client links to an booking's portal, modelled on reservation_request_access_token.
+ * A link lives until 30 days after the booking and is revoked on demand.
  */
 @Service
 public class PortalTokenService {
@@ -35,43 +35,43 @@ public class PortalTokenService {
     }
 
     @Transactional
-    public PortalAccessToken ensureToken(Event event, Long createdBy) {
+    public PortalAccessToken ensureToken(Booking booking, Long createdBy) {
         OffsetDateTime now = OffsetDateTime.now();
-        OffsetDateTime expiresAt = expiryFor(event);
-        List<PortalAccessToken> active = tokenRepo.findByTenantIdAndEventIdAndRevokedAtIsNullOrderByCreatedAtDesc(
-                event.getTenantId(), event.getId());
+        OffsetDateTime expiresAt = expiryFor(booking);
+        List<PortalAccessToken> active = tokenRepo.findByTenantIdAndBookingIdAndRevokedAtIsNullOrderByCreatedAtDesc(
+                booking.getTenantId(), booking.getId());
         Optional<PortalAccessToken> reusable = active.stream().filter(t -> t.getExpiresAt().isAfter(now)).findFirst();
         if (reusable.isPresent()) {
             PortalAccessToken token = reusable.get();
             if (token.getExpiresAt().isBefore(expiresAt)) {
                 token.setExpiresAt(expiresAt);
             }
-            if (token.getContactId() == null && event.getPrimaryContactId() != null) {
-                token.setContactId(event.getPrimaryContactId());
+            if (token.getContactId() == null && booking.getPrimaryContactId() != null) {
+                token.setContactId(booking.getPrimaryContactId());
             }
             return tokenRepo.save(token);
         }
         return tokenRepo.save(PortalAccessToken.builder()
-                .tenantId(event.getTenantId())
-                .eventId(event.getId())
-                .contactId(event.getPrimaryContactId())
+                .tenantId(booking.getTenantId())
+                .bookingId(booking.getId())
+                .contactId(booking.getPrimaryContactId())
                 .token(newTokenValue())
                 .expiresAt(expiresAt)
                 .createdBy(createdBy)
                 .build());
     }
 
-    public Optional<PortalAccessToken> activeToken(Event event) {
+    public Optional<PortalAccessToken> activeToken(Booking booking) {
         OffsetDateTime now = OffsetDateTime.now();
-        return tokenRepo.findByTenantIdAndEventIdAndRevokedAtIsNullOrderByCreatedAtDesc(event.getTenantId(), event.getId())
+        return tokenRepo.findByTenantIdAndBookingIdAndRevokedAtIsNullOrderByCreatedAtDesc(booking.getTenantId(), booking.getId())
                 .stream().filter(t -> t.getExpiresAt().isAfter(now)).findFirst();
     }
 
     @Transactional
-    public void revokeAll(Event event) {
+    public void revokeAll(Booking booking) {
         OffsetDateTime now = OffsetDateTime.now();
-        List<PortalAccessToken> active = tokenRepo.findByTenantIdAndEventIdAndRevokedAtIsNullOrderByCreatedAtDesc(
-                event.getTenantId(), event.getId());
+        List<PortalAccessToken> active = tokenRepo.findByTenantIdAndBookingIdAndRevokedAtIsNullOrderByCreatedAtDesc(
+                booking.getTenantId(), booking.getId());
         active.forEach(t -> t.setRevokedAt(now));
         tokenRepo.saveAll(active);
     }
@@ -106,10 +106,10 @@ public class PortalTokenService {
         return base + token.getToken();
     }
 
-    static OffsetDateTime expiryFor(Event event) {
-        OffsetDateTime afterEvent = event.getDateTo().plusDays(DAYS_AFTER_EVENT).atTime(LocalTime.MAX).atOffset(ZoneOffset.UTC);
+    static OffsetDateTime expiryFor(Booking booking) {
+        OffsetDateTime afterBooking = booking.getDateTo().plusDays(DAYS_AFTER_EVENT).atTime(LocalTime.MAX).atOffset(ZoneOffset.UTC);
         OffsetDateTime minimum = OffsetDateTime.now().plusDays(DAYS_AFTER_EVENT);
-        return afterEvent.isAfter(minimum) ? afterEvent : minimum;
+        return afterBooking.isAfter(minimum) ? afterBooking : minimum;
     }
 
     static String newTokenValue() {

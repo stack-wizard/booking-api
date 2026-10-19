@@ -22,6 +22,10 @@ public class AvailabilityResourceDto {
     private Integer displayOrder;
     @JsonProperty("cap_total")
     private Integer capTotal;
+    /** Pool size; null for EXACT resources. */
+    private Integer totalUnits;
+    /** Units still free for the whole service window; null for EXACT resources. */
+    private Integer freeUnits;
     private LocalTime serviceWindowStart;
     private LocalTime serviceWindowEnd;
     private List<AvailabilitySlotDto> availableSlots;

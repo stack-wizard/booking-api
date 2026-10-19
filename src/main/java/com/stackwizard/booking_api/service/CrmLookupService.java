@@ -143,6 +143,42 @@ public class CrmLookupService {
                         "Unknown " + kind.name().toLowerCase(Locale.ROOT).replace('_', ' ') + ": " + trimmed));
     }
 
+    /**
+     * Makes the chain's list of a kind equal to OPERA's: every OPERA code is an active entry (label from OPERA),
+     * every other entry is deactivated. Returns the number of active OPERA entries.
+     */
+    @Transactional
+    public int alignWithOpera(Long orgTenantId, CrmLookup.Kind kind, Map<String, String> labelsByCode) {
+        List<CrmLookup> existing = entries(orgTenantId, kind);
+        int order = existing.stream().mapToInt(CrmLookup::getDisplayOrder).max().orElse(0);
+        java.util.Set<String> wanted = new java.util.HashSet<>();
+        for (Map.Entry<String, String> entry : labelsByCode.entrySet()) {
+            String code = entry.getKey().trim().toUpperCase(Locale.ROOT);
+            if (!CODE.matcher(code).matches()) {
+                continue;
+            }
+            wanted.add(code);
+            String label = StringUtils.hasText(entry.getValue()) ? entry.getValue().trim() : code;
+            CrmLookup row = existing.stream().filter(e -> e.getCode().equalsIgnoreCase(code)).findFirst().orElse(null);
+            if (row == null) {
+                order += 10;
+                repo.save(CrmLookup.builder().tenantId(orgTenantId).kind(kind).code(code).label(label)
+                        .displayOrder(order).active(true).build());
+            } else {
+                row.setLabel(label);
+                row.setActive(true);
+                repo.save(row);
+            }
+        }
+        for (CrmLookup row : existing) {
+            if (!wanted.contains(row.getCode().toUpperCase(Locale.ROOT)) && Boolean.TRUE.equals(row.getActive())) {
+                row.setActive(false);
+                repo.save(row);
+            }
+        }
+        return wanted.size();
+    }
+
     private List<CrmLookup> entries(Long tenantId, CrmLookup.Kind kind) {
         if (!repo.existsByTenantIdAndKind(tenantId, kind)) {
             int order = 0;

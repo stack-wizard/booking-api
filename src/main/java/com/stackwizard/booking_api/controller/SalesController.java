@@ -5,12 +5,12 @@ import com.stackwizard.booking_api.model.CrmCostItem;
 import com.stackwizard.booking_api.model.SalesContractDocument;
 import com.stackwizard.booking_api.model.SalesQuote;
 import com.stackwizard.booking_api.model.SalesQuoteLine;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.service.CrmCostService;
-import com.stackwizard.booking_api.service.EventService;
+import com.stackwizard.booking_api.service.BookingService;
 import com.stackwizard.booking_api.service.PortalTokenService;
-import com.stackwizard.booking_api.service.EventDocumentService;
+import com.stackwizard.booking_api.service.BookingDocumentService;
 import com.stackwizard.booking_api.service.SalesContractService;
 import com.stackwizard.booking_api.service.SalesDocumentService;
 import com.stackwizard.booking_api.service.SalesQuoteService;
@@ -42,7 +42,7 @@ public class SalesController {
     private final SalesDocumentService documentService;
     private final CrmCostService costService;
     private final PortalTokenService portalTokenService;
-    private final EventService eventService;
+    private final BookingService bookingService;
     private final CrmAccessContext accessContext;
 
     public SalesController(SalesQuoteService quoteService,
@@ -50,44 +50,44 @@ public class SalesController {
                            SalesDocumentService documentService,
                            CrmCostService costService,
                            PortalTokenService portalTokenService,
-                           EventService eventService,
+                           BookingService bookingService,
                            CrmAccessContext accessContext) {
         this.quoteService = quoteService;
         this.contractService = contractService;
         this.documentService = documentService;
         this.costService = costService;
         this.portalTokenService = portalTokenService;
-        this.eventService = eventService;
+        this.bookingService = bookingService;
         this.accessContext = accessContext;
     }
 
-    @GetMapping("/events/{eventId}/portal-link")
-    public Map<String, String> portalLink(@PathVariable Long eventId) {
-        Event event = eventService.requireEvent(eventId);
+    @GetMapping("/bookings/{bookingId}/portal-link")
+    public Map<String, String> portalLink(@PathVariable Long bookingId) {
+        Booking booking = bookingService.requireBooking(bookingId);
         return Collections.singletonMap("url",
-                portalTokenService.activeToken(event).map(portalTokenService::portalUrl).orElse(null));
+                portalTokenService.activeToken(booking).map(portalTokenService::portalUrl).orElse(null));
     }
 
-    @PostMapping("/events/{eventId}/portal-link")
-    public Map<String, String> issuePortalLink(@PathVariable Long eventId) {
-        Event event = eventService.requireEditable(eventId);
-        return Map.of("url", portalTokenService.portalUrl(portalTokenService.ensureToken(event, accessContext.currentUserId())));
+    @PostMapping("/bookings/{bookingId}/portal-link")
+    public Map<String, String> issuePortalLink(@PathVariable Long bookingId) {
+        Booking booking = bookingService.requireEditable(bookingId);
+        return Map.of("url", portalTokenService.portalUrl(portalTokenService.ensureToken(booking, accessContext.currentUserId())));
     }
 
-    @DeleteMapping("/events/{eventId}/portal-link")
-    public ResponseEntity<Void> revokePortalLink(@PathVariable Long eventId) {
-        portalTokenService.revokeAll(eventService.requireEditable(eventId));
+    @DeleteMapping("/bookings/{bookingId}/portal-link")
+    public ResponseEntity<Void> revokePortalLink(@PathVariable Long bookingId) {
+        portalTokenService.revokeAll(bookingService.requireEditable(bookingId));
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/events/{eventId}/quotes")
-    public List<SalesQuote> eventQuotes(@PathVariable Long eventId) {
-        return quoteService.forEvent(eventId);
+    @GetMapping("/bookings/{bookingId}/quotes")
+    public List<SalesQuote> bookingQuotes(@PathVariable Long bookingId) {
+        return quoteService.forBooking(bookingId);
     }
 
-    @PostMapping("/events/{eventId}/quotes")
-    public SalesDtos.QuoteView createQuote(@PathVariable Long eventId) {
-        return quoteService.view(quoteService.create(eventId).getId());
+    @PostMapping("/bookings/{bookingId}/quotes")
+    public SalesDtos.QuoteView createQuote(@PathVariable Long bookingId) {
+        return quoteService.view(quoteService.create(bookingId).getId());
     }
 
     @GetMapping("/quotes/pending-approval")
@@ -169,15 +169,15 @@ public class SalesController {
         return pdf(documentService.quotePdf(id));
     }
 
-    @GetMapping("/events/{eventId}/contracts")
-    public List<SalesDtos.ContractView> eventContracts(@PathVariable Long eventId) {
-        return contractService.forEvent(eventId);
+    @GetMapping("/bookings/{bookingId}/contracts")
+    public List<SalesDtos.ContractView> bookingContracts(@PathVariable Long bookingId) {
+        return contractService.forBooking(bookingId);
     }
 
-    @PostMapping("/events/{eventId}/contracts")
-    public SalesDtos.ContractView createContract(@PathVariable Long eventId,
+    @PostMapping("/bookings/{bookingId}/contracts")
+    public SalesDtos.ContractView createContract(@PathVariable Long bookingId,
                                                  @RequestBody(required = false) SalesDtos.ContractRequest request) {
-        return contractService.create(eventId, request);
+        return contractService.create(bookingId, request);
     }
 
     @GetMapping("/contracts/{id}")
@@ -239,14 +239,14 @@ public class SalesController {
         return contractService.invoiceMilestone(milestoneId);
     }
 
-    @GetMapping("/events/{eventId}/costs")
-    public List<CrmCostItem> eventCosts(@PathVariable Long eventId) {
-        return costService.forEvent(eventId);
+    @GetMapping("/bookings/{bookingId}/costs")
+    public List<CrmCostItem> bookingCosts(@PathVariable Long bookingId) {
+        return costService.forBooking(bookingId);
     }
 
-    @PostMapping("/events/{eventId}/costs")
-    public CrmCostItem addEventCost(@PathVariable Long eventId, @RequestBody CrmCostItem item) {
-        return costService.addToEvent(eventId, item);
+    @PostMapping("/bookings/{bookingId}/costs")
+    public CrmCostItem addBookingCost(@PathVariable Long bookingId, @RequestBody CrmCostItem item) {
+        return costService.addToBooking(bookingId, item);
     }
 
     @GetMapping("/crm/opportunities/{opportunityId}/costs")
@@ -270,9 +270,9 @@ public class SalesController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/events/{eventId}/profitability")
-    public SalesDtos.Profitability eventProfitability(@PathVariable Long eventId) {
-        return costService.eventProfitability(eventId);
+    @GetMapping("/bookings/{bookingId}/profitability")
+    public SalesDtos.Profitability bookingProfitability(@PathVariable Long bookingId) {
+        return costService.bookingProfitability(bookingId);
     }
 
     @GetMapping("/crm/opportunities/{opportunityId}/profitability")
@@ -280,7 +280,7 @@ public class SalesController {
         return costService.opportunityProfitability(opportunityId);
     }
 
-    static ResponseEntity<byte[]> pdf(EventDocumentService.PdfDocument pdf) {
+    static ResponseEntity<byte[]> pdf(BookingDocumentService.PdfDocument pdf) {
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + pdf.fileName() + "\"")

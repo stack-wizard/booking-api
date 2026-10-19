@@ -3,7 +3,7 @@ package com.stackwizard.booking_api.security;
 /**
  * Resolves the active booking tenant. The scope has two levels (see {@link TenantContext}):
  * <ul>
- *   <li>{@link #requireOrgTenantId()} — chain-level data (shared catalog, CRM, events)</li>
+ *   <li>{@link #requireOrgTenantId()} — chain-level data (shared catalog, CRM, bookings)</li>
  *   <li>{@link #requirePropertyTenantId()} / {@link #requireTenantId()} — hotel-level data (capacity, operations)</li>
  * </ul>
  * When {@link TenantContext} is set (Platform JWT / m2m + X-Tenant-Id [+ X-Property-Id]) that value wins;
@@ -58,7 +58,7 @@ public final class TenantResolver {
         return property == null || property.equals(TenantContext.getOrgTenantId()) ? null : property;
     }
 
-    /** Chain (parent) tenant for shared catalog / CRM / events. */
+    /** Chain (parent) tenant for shared catalog / CRM / bookings. */
     public static Long requireOrgTenantId() {
         return requireOrgTenantId(null);
     }

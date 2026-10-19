@@ -13,6 +13,10 @@ import java.util.Optional;
 public interface ReservationRequestRepository extends JpaRepository<ReservationRequest, Long>, JpaSpecificationExecutor<ReservationRequest> {
     Optional<ReservationRequest> findByConfirmationCodeAndTenantId(String confirmationCode, Long tenantId);
 
+    Optional<ReservationRequest> findByBookingIdAndTenantId(Long bookingId, Long tenantId);
+
+    List<ReservationRequest> findByBookingIdOrderByTenantIdAsc(Long bookingId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     List<ReservationRequest> findLockedByStatusInAndExpiresAtBefore(List<ReservationRequest.Status> statuses, OffsetDateTime threshold);
 }

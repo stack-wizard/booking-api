@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -19,14 +20,30 @@ public interface ReservationRepository extends JpaRepository<Reservation, Long> 
 
     boolean existsByRequestId(Long requestId);
 
-    List<Reservation> findByTenantIdAndEventFunctionIdIn(Long tenantId, Collection<Long> eventFunctionIds);
+    List<Reservation> findByTenantIdAndBookingFunctionIdIn(Long tenantId, Collection<Long> bookingFunctionIds);
+
+    List<Reservation> findByTenantIdAndBookingRoomBlockIdOrderByStartsAtAsc(Long tenantId, Long bookingRoomBlockId);
 
     @Query("""
             select r from Reservation r
             where r.tenantId = :tenantId
-              and r.eventFunctionId = :eventFunctionId
+              and r.bookingFunctionId = :bookingFunctionId
               and upper(r.status) <> 'CANCELLED'
             """)
-    List<Reservation> findActiveByEventFunctionId(@Param("tenantId") Long tenantId,
-                                                  @Param("eventFunctionId") Long eventFunctionId);
+    List<Reservation> findActiveByBookingFunctionId(@Param("tenantId") Long tenantId,
+                                                  @Param("bookingFunctionId") Long bookingFunctionId);
+
+    /** Room-block hold lines in a window (used when room_inventory=OPERA and there is no local allocation). */
+    @Query("""
+            select distinct r from Reservation r
+            join fetch r.requestedResource
+            where r.tenantId = :tenantId
+              and r.bookingRoomBlockId is not null
+              and upper(r.status) <> 'CANCELLED'
+              and r.startsAt < :end
+              and r.endsAt > :start
+            """)
+    List<Reservation> findActiveRoomBlockLinesInWindow(@Param("tenantId") Long tenantId,
+                                                       @Param("start") LocalDateTime start,
+                                                       @Param("end") LocalDateTime end);
 }

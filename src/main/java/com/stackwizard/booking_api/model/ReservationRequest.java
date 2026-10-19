@@ -82,6 +82,14 @@ public class ReservationRequest {
     @Column(name = "linked_opera_reservation_id")
     private Long linkedOperaReservationId;
 
+    /** Set when the request is this hotel's part of a booking; the booking drives its lines and status. */
+    @Column(name = "booking_id")
+    private Long bookingId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "opera_sync_status")
+    private OperaSyncStatus operaSyncStatus;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "opera_deposit_post_status")
     private OperaDepositPostStatus operaDepositPostStatus;
@@ -94,6 +102,12 @@ public class ReservationRequest {
 
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    public enum OperaSyncStatus {
+        PENDING,
+        SYNCED,
+        FAILED
+    }
 
     public enum Type {
         INTERNAL,

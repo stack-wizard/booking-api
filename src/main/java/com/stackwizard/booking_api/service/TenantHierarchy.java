@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Organization / hotel relations for code that holds a hotel tenant id but needs chain-level data (catalog,
- * CRM, events) or the other way round. A tenant without a mapping or without hotels is its own organization
+ * CRM, bookings) or the other way round. A tenant without a mapping or without hotels is its own organization
  * and its own hotel, so legacy single-tenant data keeps working.
  */
 @Service

@@ -1,14 +1,14 @@
 package com.stackwizard.booking_api.service;
 
-import com.stackwizard.booking_api.dto.EventDtos;
+import com.stackwizard.booking_api.dto.BookingDtos;
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.CrmCostItem;
 import com.stackwizard.booking_api.model.CrmOpportunity;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.SalesQuote;
 import com.stackwizard.booking_api.repository.CrmCostItemRepository;
 import com.stackwizard.booking_api.repository.CrmOpportunityRepository;
-import com.stackwizard.booking_api.repository.EventRepository;
+import com.stackwizard.booking_api.repository.BookingRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteRepository;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmOwnerScope;
@@ -26,55 +26,55 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Extra costs on events and opportunities, and margin = revenue - item cost - extra cost.
- * Revenue is the event's priced lines; the accepted quote total is reported next to it.
+ * Extra costs on bookings and opportunities, and margin = revenue - item cost - extra cost.
+ * Revenue is the booking's priced lines; the accepted quote total is reported next to it.
  */
 @Service
 public class CrmCostService {
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
 
     private final CrmCostItemRepository costRepo;
-    private final EventService eventService;
-    private final EventReadModelService readModelService;
-    private final EventRepository eventRepo;
+    private final BookingService bookingService;
+    private final BookingReadModelService readModelService;
+    private final BookingRepository bookingRepo;
     private final CrmOpportunityRepository opportunityRepo;
     private final SalesQuoteRepository quoteRepo;
     private final CrmAccessContext accessContext;
 
     public CrmCostService(CrmCostItemRepository costRepo,
-                          EventService eventService,
-                          EventReadModelService readModelService,
-                          EventRepository eventRepo,
+                          BookingService bookingService,
+                          BookingReadModelService readModelService,
+                          BookingRepository bookingRepo,
                           CrmOpportunityRepository opportunityRepo,
                           SalesQuoteRepository quoteRepo,
                           CrmAccessContext accessContext) {
         this.costRepo = costRepo;
-        this.eventService = eventService;
+        this.bookingService = bookingService;
         this.readModelService = readModelService;
-        this.eventRepo = eventRepo;
+        this.bookingRepo = bookingRepo;
         this.opportunityRepo = opportunityRepo;
         this.quoteRepo = quoteRepo;
         this.accessContext = accessContext;
     }
 
     @Transactional(readOnly = true)
-    public List<CrmCostItem> forEvent(Long eventId) {
-        Event event = eventService.requireEvent(eventId);
-        return costRepo.findByTenantIdAndEventIdOrderByIdAsc(event.getTenantId(), event.getId());
+    public List<CrmCostItem> forBooking(Long bookingId) {
+        Booking booking = bookingService.requireBooking(bookingId);
+        return costRepo.findByTenantIdAndBookingIdOrderByIdAsc(booking.getTenantId(), booking.getId());
     }
 
     @Transactional(readOnly = true)
     public List<CrmCostItem> forOpportunity(Long opportunityId) {
         CrmOpportunity opportunity = requireOpportunity(opportunityId);
-        return costRepo.findByTenantIdAndOpportunityIdAndEventIdIsNullOrderByIdAsc(opportunity.getTenantId(), opportunity.getId());
+        return costRepo.findByTenantIdAndOpportunityIdAndBookingIdIsNullOrderByIdAsc(opportunity.getTenantId(), opportunity.getId());
     }
 
     @Transactional
-    public CrmCostItem addToEvent(Long eventId, CrmCostItem item) {
-        Event event = eventService.requireEditable(eventId);
-        CrmCostItem row = normalize(item, event.getTenantId(), event.getCurrency());
-        row.setEventId(event.getId());
-        row.setOpportunityId(event.getOpportunityId());
+    public CrmCostItem addToBooking(Long bookingId, CrmCostItem item) {
+        Booking booking = bookingService.requireContentEditable(bookingId);
+        CrmCostItem row = normalize(item, booking.getTenantId(), booking.getCurrency());
+        row.setBookingId(booking.getId());
+        row.setOpportunityId(booking.getOpportunityId());
         return costRepo.save(row);
     }
 
@@ -84,7 +84,7 @@ public class CrmCostService {
         CrmOpportunity opportunity = requireOpportunity(opportunityId);
         CrmCostItem row = normalize(item, opportunity.getTenantId(), opportunity.getCurrency());
         row.setOpportunityId(opportunity.getId());
-        row.setEventId(null);
+        row.setBookingId(null);
         return costRepo.save(row);
     }
 
@@ -107,10 +107,10 @@ public class CrmCostService {
     }
 
     @Transactional(readOnly = true)
-    public SalesDtos.Profitability eventProfitability(Long eventId) {
-        Event event = eventService.requireEvent(eventId);
-        SalesDtos.EventProfit profit = profit(event);
-        return summary(event.getCurrency(), List.of(profit), BigDecimal.ZERO);
+    public SalesDtos.Profitability bookingProfitability(Long bookingId) {
+        Booking booking = bookingService.requireBooking(bookingId);
+        SalesDtos.BookingProfit profit = profit(booking);
+        return summary(booking.getCurrency(), List.of(profit), BigDecimal.ZERO);
     }
 
     @Transactional(readOnly = true)
@@ -118,38 +118,38 @@ public class CrmCostService {
         CrmOpportunity opportunity = requireOpportunity(opportunityId);
         accessContext.require(CrmPermission.EVENT_READ);
         CrmOwnerScope scope = CrmOwnerScope.from(accessContext);
-        List<SalesDtos.EventProfit> events = new ArrayList<>();
-        for (Event event : eventRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(opportunity.getTenantId(), opportunity.getId())) {
-            if (scope.allows(event.getOwnerUserId(), event.getTeamId(), event.getPropertyTenantId())) {
-                events.add(profit(event));
+        List<SalesDtos.BookingProfit> bookings = new ArrayList<>();
+        for (Booking booking : bookingRepo.findByTenantIdAndOpportunityIdOrderByDateFromAsc(opportunity.getTenantId(), opportunity.getId())) {
+            if (scope.allows(booking.getOwnerUserId(), booking.getTeamId(), booking.getPropertyTenantId())) {
+                bookings.add(profit(booking));
             }
         }
-        BigDecimal opportunityCost = costRepo.findByTenantIdAndOpportunityIdAndEventIdIsNullOrderByIdAsc(
+        BigDecimal opportunityCost = costRepo.findByTenantIdAndOpportunityIdAndBookingIdIsNullOrderByIdAsc(
                         opportunity.getTenantId(), opportunity.getId()).stream()
                 .map(CrmCostItem::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        return summary(opportunity.getCurrency(), events, opportunityCost);
+        return summary(opportunity.getCurrency(), bookings, opportunityCost);
     }
 
-    SalesDtos.EventProfit profit(Event event) {
-        EventDtos.Financials financials = readModelService.financials(event.getId());
-        BigDecimal extra = costRepo.findByTenantIdAndEventIdOrderByIdAsc(event.getTenantId(), event.getId()).stream()
+    SalesDtos.BookingProfit profit(Booking booking) {
+        BookingDtos.Financials financials = readModelService.financials(booking.getId());
+        BigDecimal extra = costRepo.findByTenantIdAndBookingIdOrderByIdAsc(booking.getTenantId(), booking.getId()).stream()
                 .map(CrmCostItem::getAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal quoted = quoteRepo.findFirstByTenantIdAndEventIdAndStatusOrderByIdDesc(
-                        event.getTenantId(), event.getId(), SalesQuote.Status.ACCEPTED)
+        BigDecimal quoted = quoteRepo.findFirstByTenantIdAndBookingIdAndStatusOrderByIdDesc(
+                        booking.getTenantId(), booking.getId(), SalesQuote.Status.ACCEPTED)
                 .map(SalesQuote::getTotalOffered).orElse(null);
         BigDecimal revenue = quoted != null ? quoted : financials.getTotal();
-        return new SalesDtos.EventProfit(event.getId(), event.getName(), event.getStatus().name(),
+        return new SalesDtos.BookingProfit(booking.getId(), booking.getName(), booking.getStatus().name(),
                 money(revenue), quoted, financials.getCostTotal(), money(extra),
                 money(revenue.subtract(financials.getCostTotal()).subtract(extra)));
     }
 
-    static SalesDtos.Profitability summary(String currency, List<SalesDtos.EventProfit> events, BigDecimal opportunityCost) {
+    static SalesDtos.Profitability summary(String currency, List<SalesDtos.BookingProfit> bookings, BigDecimal opportunityCost) {
         BigDecimal revenue = BigDecimal.ZERO;
         BigDecimal quoted = BigDecimal.ZERO;
         BigDecimal itemCost = BigDecimal.ZERO;
         BigDecimal extra = opportunityCost;
         boolean anyQuoted = false;
-        for (SalesDtos.EventProfit e : events) {
+        for (SalesDtos.BookingProfit e : bookings) {
             revenue = revenue.add(e.revenue());
             if (e.quotedTotal() != null) {
                 quoted = quoted.add(e.quotedTotal());
@@ -162,7 +162,7 @@ public class CrmCostService {
         BigDecimal marginPercent = revenue.signum() == 0 ? null
                 : margin.multiply(HUNDRED).divide(revenue, 2, RoundingMode.HALF_UP);
         return new SalesDtos.Profitability(currency, money(revenue), anyQuoted ? money(quoted) : null,
-                money(itemCost), money(extra), money(margin), marginPercent, events);
+                money(itemCost), money(extra), money(margin), marginPercent, bookings);
     }
 
     private CrmCostItem normalize(CrmCostItem item, Long tenantId, String defaultCurrency) {
@@ -191,8 +191,8 @@ public class CrmCostService {
     private CrmCostItem requireCostForWrite(Long costId) {
         CrmCostItem cost = costRepo.findByIdAndTenantId(costId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Cost not found"));
-        if (cost.getEventId() != null) {
-            eventService.requireEditable(cost.getEventId());
+        if (cost.getBookingId() != null) {
+            bookingService.requireContentEditable(cost.getBookingId());
         } else {
             accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
             requireOpportunity(cost.getOpportunityId());

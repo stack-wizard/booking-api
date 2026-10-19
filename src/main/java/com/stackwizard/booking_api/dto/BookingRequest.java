@@ -14,6 +14,7 @@ public class BookingRequest {
     private String requestType;
     private String uom;
     private Integer qty;
+    private Integer units;
     private String currency;
     private LocalDate serviceDate;
     private LocalTime startTime;

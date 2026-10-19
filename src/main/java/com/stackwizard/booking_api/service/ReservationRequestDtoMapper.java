@@ -119,6 +119,7 @@ public class ReservationRequestDtoMapper {
                 .extensionCount(request.getExtensionCount())
                 .operaHotelCode(request.getOperaHotelCode())
                 .linkedOperaReservationId(request.getLinkedOperaReservationId())
+                .bookingId(request.getBookingId())
                 .paymentTotalAmount(paymentSummary.totalAmount())
                 .paymentDueNowAmount(paymentSummary.dueNowAmount())
                 .paymentPaidAmount(paymentSummary.paidAmount())

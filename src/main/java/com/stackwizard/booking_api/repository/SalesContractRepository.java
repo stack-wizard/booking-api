@@ -11,9 +11,9 @@ import java.util.Optional;
 public interface SalesContractRepository extends JpaRepository<SalesContract, Long> {
     Optional<SalesContract> findByIdAndTenantId(Long id, Long tenantId);
 
-    List<SalesContract> findByTenantIdAndEventIdOrderByIdDesc(Long tenantId, Long eventId);
+    List<SalesContract> findByTenantIdAndBookingIdOrderByIdDesc(Long tenantId, Long bookingId);
 
-    Optional<SalesContract> findFirstByTenantIdAndEventIdAndStatusNot(Long tenantId, Long eventId, SalesContract.Status status);
+    Optional<SalesContract> findFirstByTenantIdAndBookingIdAndStatusNot(Long tenantId, Long bookingId, SalesContract.Status status);
 
     @Query("select count(c) from SalesContract c where c.tenantId = :tenantId and c.contractNumber like :prefix")
     long countByNumberPrefix(@Param("tenantId") Long tenantId, @Param("prefix") String prefix);

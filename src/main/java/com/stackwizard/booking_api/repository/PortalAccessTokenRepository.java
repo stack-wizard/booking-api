@@ -9,5 +9,5 @@ import java.util.Optional;
 public interface PortalAccessTokenRepository extends JpaRepository<PortalAccessToken, Long> {
     Optional<PortalAccessToken> findByToken(String token);
 
-    List<PortalAccessToken> findByTenantIdAndEventIdAndRevokedAtIsNullOrderByCreatedAtDesc(Long tenantId, Long eventId);
+    List<PortalAccessToken> findByTenantIdAndBookingIdAndRevokedAtIsNullOrderByCreatedAtDesc(Long tenantId, Long bookingId);
 }

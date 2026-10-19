@@ -32,6 +32,7 @@ public class ReservationRequestDto {
     private Integer extensionCount;
     private String operaHotelCode;
     private Long linkedOperaReservationId;
+    private Long bookingId;
     private BigDecimal paymentTotalAmount;
     private BigDecimal paymentDueNowAmount;
     private BigDecimal paymentPaidAmount;

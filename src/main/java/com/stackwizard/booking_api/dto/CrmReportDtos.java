@@ -49,7 +49,7 @@ public final class CrmReportDtos {
         private String dimension;
         private String key;
         private Long accountId;
-        private long events;
+        private long bookings;
         private BigDecimal revenue;
         private BigDecimal cost;
         private BigDecimal margin;

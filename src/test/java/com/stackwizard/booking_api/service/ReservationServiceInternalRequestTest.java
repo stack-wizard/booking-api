@@ -81,7 +81,8 @@ class ReservationServiceInternalRequestTest {
                 tenantConfigService,
                 accessTokenService,
                 cancellationPolicyService,
-                eventPublisher
+                eventPublisher,
+                new AllocationCapacityService(allocationRepo)
         );
     }
 
@@ -150,8 +151,6 @@ class ReservationServiceInternalRequestTest {
             return reservation;
         });
         when(compositionRepo.findByParentResourceId(resource.getId())).thenReturn(List.of());
-        when(allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
-                resource.getId(), endsAt, startsAt)).thenReturn(0L);
         when(allocationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
 
         List<Allocation> allocations = service.createBooking(bookingRequest);
@@ -259,8 +258,6 @@ class ReservationServiceInternalRequestTest {
         when(reservationRepo.findByRequestId(existingRequest.getId())).thenReturn(List.of(linkedReservation));
         when(reservationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
         when(allocationRepo.findByReservationIdIn(List.of(linkedReservation.getId()))).thenReturn(List.of());
-        when(allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
-                requestedResource.getId(), endsAt, startsAt)).thenReturn(0L);
         when(reservationRepo.save(any(Reservation.class))).thenAnswer(invocation -> {
             Reservation reservation = invocation.getArgument(0);
             reservation.setId(4178L);
@@ -482,8 +479,6 @@ class ReservationServiceInternalRequestTest {
             return reservation;
         });
         when(compositionRepo.findByParentResourceId(requestedResource.getId())).thenReturn(List.of());
-        when(allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
-                requestedResource.getId(), endsAt, startsAt)).thenReturn(0L);
         when(allocationRepo.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
 
         List<Allocation> allocations = service.createReservationAndAllocate(incoming);

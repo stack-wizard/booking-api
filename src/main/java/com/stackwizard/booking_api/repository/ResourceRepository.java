@@ -14,6 +14,8 @@ public interface ResourceRepository extends JpaRepository<Resource, Long> {
     List<Resource> findByTenantIdAndLocationId(Long tenantId, Long locationId);
     Optional<Resource> findByIdAndTenantId(Long id, Long tenantId);
 
+    Optional<Resource> findByTenantIdAndCode(Long tenantId, String code);
+
     @Query("select r from Resource r join fetch r.resourceType where r.id = :id")
     Optional<Resource> findByIdWithType(@Param("id") Long id);
 }

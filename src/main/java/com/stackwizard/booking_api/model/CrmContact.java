@@ -50,6 +50,10 @@ public class CrmContact extends CrmAuditableEntity {
     @Column(name = "platform_user_id")
     private UUID platformUserId;
 
+    /** OPERA guest profile id; set by the OPERA integration, not by the contact form. */
+    @Column(name = "opera_profile_id")
+    private String operaProfileId;
+
     @Column(nullable = false)
     private Boolean active;
 

@@ -3,13 +3,13 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.AppUser;
 import com.stackwizard.booking_api.model.CrmContact;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.PortalAccessToken;
 import com.stackwizard.booking_api.model.SalesContract;
 import com.stackwizard.booking_api.model.SalesQuote;
 import com.stackwizard.booking_api.repository.CrmAccountRepository;
 import com.stackwizard.booking_api.repository.CrmContactRepository;
-import com.stackwizard.booking_api.repository.EventRepository;
+import com.stackwizard.booking_api.repository.BookingRepository;
 import com.stackwizard.booking_api.repository.SalesContractDocumentRepository;
 import com.stackwizard.booking_api.repository.SalesContractRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteRepository;
@@ -51,7 +51,7 @@ class PortalServiceTest {
 
     @Mock PortalTokenService tokenService;
     @Mock AuthUserAccessor authUserAccessor;
-    @Mock EventRepository eventRepo;
+    @Mock BookingRepository bookingRepo;
     @Mock CrmContactRepository contactRepo;
     @Mock CrmAccountRepository accountRepo;
     @Mock SalesQuoteRepository quoteRepo;
@@ -65,16 +65,16 @@ class PortalServiceTest {
     @Mock InvoicePdfService invoicePdfService;
 
     PortalService service;
-    Event event = Event.builder().id(5L).tenantId(2L).accountId(3L).name("Pharma").status(Event.Status.TENTATIVE)
+    Booking booking = Booking.builder().id(5L).tenantId(2L).accountId(3L).name("Pharma").status(Booking.Status.TENTATIVE)
             .dateFrom(LocalDate.now().plusDays(10)).dateTo(LocalDate.now().plusDays(11)).build();
     PortalAccessContext ctx = new PortalAccessContext(2L, Set.of(5L), null, PortalAccessContext.Mode.TOKEN, "t");
 
     @BeforeEach
     void setUp() {
-        service = new PortalService(tokenService, authUserAccessor, eventRepo, contactRepo, accountRepo, quoteRepo, versionRepo,
+        service = new PortalService(tokenService, authUserAccessor, bookingRepo, contactRepo, accountRepo, quoteRepo, versionRepo,
                 quoteService, contractRepo, documentRepo, contractService, documentService, invoiceService, invoicePdfService);
-        when(eventRepo.findByIdAndTenantId(5L, 2L)).thenReturn(Optional.of(event));
-        when(contractRepo.findFirstByTenantIdAndEventIdAndStatusNot(2L, 5L, SalesContract.Status.CANCELLED)).thenReturn(Optional.empty());
+        when(bookingRepo.findByIdAndTenantId(5L, 2L)).thenReturn(Optional.of(booking));
+        when(contractRepo.findFirstByTenantIdAndBookingIdAndStatusNot(2L, 5L, SalesContract.Status.CANCELLED)).thenReturn(Optional.empty());
     }
 
     @AfterEach
@@ -83,11 +83,11 @@ class PortalServiceTest {
     }
 
     @Test
-    void tokenResolvesToItsEventOnly() {
-        when(tokenService.requireValid("abc")).thenReturn(PortalAccessToken.builder().tenantId(2L).eventId(5L).token("abc").build());
+    void tokenResolvesToItsBookingOnly() {
+        when(tokenService.requireValid("abc")).thenReturn(PortalAccessToken.builder().tenantId(2L).bookingId(5L).token("abc").build());
         PortalAccessContext resolved = service.fromToken("abc");
-        assertThat(resolved.eventIds()).containsExactly(5L);
-        assertThatThrownBy(() -> service.event(resolved, 6L)).isInstanceOf(ResponseStatusException.class);
+        assertThat(resolved.bookingIds()).containsExactly(5L);
+        assertThatThrownBy(() -> service.booking(resolved, 6L)).isInstanceOf(ResponseStatusException.class);
     }
 
     @Test
@@ -95,9 +95,9 @@ class PortalServiceTest {
         SalesQuote draft = quote(1L, SalesQuote.Status.DRAFT, 1);
         SalesQuote sent = quote(2L, SalesQuote.Status.SENT, 1);
         SalesQuote neverSent = quote(3L, SalesQuote.Status.SUPERSEDED, 0);
-        when(quoteRepo.findByTenantIdAndEventIdOrderByIdDesc(2L, 5L)).thenReturn(List.of(draft, sent, neverSent));
+        when(quoteRepo.findByTenantIdAndBookingIdOrderByIdDesc(2L, 5L)).thenReturn(List.of(draft, sent, neverSent));
 
-        PortalService.PortalEventView view = service.event(ctx, 5L);
+        PortalService.PortalBookingView view = service.booking(ctx, 5L);
 
         assertThat(view.quotes()).extracting(PortalService.PortalQuote::id).containsExactly(2L);
         assertThat(view.quotes().get(0).canDecide()).isTrue();
@@ -108,7 +108,7 @@ class PortalServiceTest {
     void acceptingRequiresNameAndScopedQuote() {
         SalesQuote sent = quote(2L, SalesQuote.Status.SENT, 1);
         when(quoteRepo.findByIdAndTenantId(2L, 2L)).thenReturn(Optional.of(sent));
-        when(quoteRepo.findByTenantIdAndEventIdOrderByIdDesc(2L, 5L)).thenReturn(List.of(sent));
+        when(quoteRepo.findByTenantIdAndBookingIdOrderByIdDesc(2L, 5L)).thenReturn(List.of(sent));
 
         assertThatThrownBy(() -> service.decide(ctx, 2L, true, new SalesDtos.DecisionRequest(" ", null)))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -122,7 +122,7 @@ class PortalServiceTest {
     }
 
     @Test
-    void platformUserSeesEventsOfLinkedContacts() {
+    void platformUserSeesBookingsOfLinkedContacts() {
         TenantContext.setTenantId(2L);
         UUID platformUser = UUID.randomUUID();
         AppUser user = new AppUser();
@@ -130,12 +130,12 @@ class PortalServiceTest {
         when(authUserAccessor.currentAppUser()).thenReturn(Optional.of(user));
         when(contactRepo.findByTenantIdAndPlatformUserId(2L, platformUser))
                 .thenReturn(List.of(CrmContact.builder().id(11L).accountId(3L).build()));
-        when(eventRepo.findForPortal(eq(2L), eq(Set.of(11L)), any())).thenReturn(List.of(event));
+        when(bookingRepo.findForPortal(eq(2L), eq(Set.of(11L)), any())).thenReturn(List.of(booking));
 
         PortalAccessContext resolved = service.fromPlatformUser();
 
         assertThat(resolved.mode()).isEqualTo(PortalAccessContext.Mode.PLATFORM_USER);
-        assertThat(resolved.eventIds()).containsExactly(5L);
+        assertThat(resolved.bookingIds()).containsExactly(5L);
         assertThat(resolved.contactId()).isEqualTo(11L);
     }
 
@@ -151,7 +151,7 @@ class PortalServiceTest {
     }
 
     private static SalesQuote quote(Long id, SalesQuote.Status status, int version) {
-        return SalesQuote.builder().id(id).tenantId(2L).eventId(5L).quoteNumber("Q-" + id).status(status).version(version)
+        return SalesQuote.builder().id(id).tenantId(2L).bookingId(5L).quoteNumber("Q-" + id).status(status).version(version)
                 .currency("EUR").validUntil(LocalDate.now().plusDays(5)).totalOffered(new BigDecimal("100"))
                 .totalTax(new BigDecimal("20")).sentAt(OffsetDateTime.now()).build();
     }

@@ -12,6 +12,9 @@ public class ReservationRequestSearchCriteria {
     private Long tenantId;
     private Long requestId;
     private Long reservationId;
+    private Long bookingId;
+    /** true: only requests of a booking, false: only guest requests. */
+    private Boolean bookingManaged;
 
     private String confirmationNumber;
 

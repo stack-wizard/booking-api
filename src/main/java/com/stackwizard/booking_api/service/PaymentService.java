@@ -209,6 +209,7 @@ public class PaymentService {
     public PaymentInitiateResponse initiateForReservationRequest(Long reservationRequestId, PaymentInitiateRequest request) {
         ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        ReservationRequestService.requireNotBookingManaged(reservationRequest);
         if (reservationRequest.getStatus() == ReservationRequest.Status.CANCELLED
                 || reservationRequest.getStatus().isConfirmedStay()
                 || reservationRequest.getStatus() == ReservationRequest.Status.MANUAL_REVIEW
@@ -406,6 +407,7 @@ public class PaymentService {
     public PaymentIntent markReservationRequestPaidManually(Long reservationRequestId) {
         ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        ReservationRequestService.requireNotBookingManaged(reservationRequest);
         List<PaymentIntent> intents = paymentIntentRepo.findLockedByReservationRequestIdOrderByCreatedAtDesc(reservationRequestId);
         if (intents.isEmpty()) {
             throw new IllegalArgumentException("Payment intent not found for reservation request");

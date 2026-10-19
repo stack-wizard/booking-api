@@ -5,7 +5,7 @@ import java.util.Set;
 
 /**
  * Row visibility: OWN sees records it owns; TEAM also sees records owned by members of visible teams or
- * carrying one of those teams; ALL sees everything. Opportunities and events are narrowed by hotel for TEAM. Collections are never empty so JPQL {@code in} stays valid.
+ * carrying one of those teams; ALL sees everything. Opportunities and bookings are narrowed by hotel for TEAM. Collections are never empty so JPQL {@code in} stays valid.
  */
 public record CrmOwnerScope(boolean all,
                             boolean own,
@@ -57,7 +57,7 @@ public record CrmOwnerScope(boolean all,
     }
 
     /**
-     * Opportunities and events also carry an optional hotel. The owner always sees their own record; a team
+     * Opportunities and bookings also carry an optional hotel. The owner always sees their own record; a team
      * sees a record only when its teams cover the hotel, and a chain-wide record (no hotel) only when they
      * cover every hotel.
      */

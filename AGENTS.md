@@ -120,6 +120,24 @@ Tijelo je `ApiError(timestamp, status, error, message, path)`. Bacaj `IllegalArg
 
 `JpaRepository`, imenovane metode ili `@Query` s JPQL-om. Native SQL samo kad JPQL ne može (vidi `ManagementStayDashboardRepository`).
 
+## Booking i kapacitet
+
+- `booking` je B2B blok na razini lanca (ORG), u Operi **block**; `booking_function` je Opera **event** (space × vrijeme), a `booking_room_block` + `booking_room_block_night` su room grid (kvota po tipu sobe i noći)
+- svaki hotel u kojem booking nešto drži ima točno jedan `reservation_request` s `booking_id` (`INTERNAL`, `expires_at null`); stvara ga i briše `BookingReservationSync`, status prati fazu bookinga. Guest tokovi (plaćanje, istek, finalize, delete, otkaz) takve requestove odbijaju kroz `ReservationRequestService.requireNotBookingManaged`
+- svaki `reservation` redak ima `request_id` (nema više retka bez requesta); `booking_function_id` / `booking_room_block_id` su samo veza na potrebu
+- `allocation.units` / `reservation.units` = koliko jedinica resursa redak drži; `qty` ostaje cjenovna količina, bruto = `unit_price × qty × units`
+- POOL resurs: kapacitet je `pool_total_units`, zauzeće je zbroj `units` na poolu i na EXACT članovima (`parent_pool_id`); EXACT član je slobodan samo kad je slobodan on **i** pool ima slobodnu jedinicu. Provjera ide isključivo kroz `AllocationCapacityService`
+- tip sobe = POOL resurs tipa `ROOM` ili `APARTMENT`; noć room blocka je jedan redak 15:00 → 11:00 s `units` = kvota
+- `opera_hotel.space_inventory` i `room_inventory` (`LOCAL|OPERA`) odvojeno biraju tko vodi sale i sobe; `billing` tko izdaje račun
+- hotel s `room_inventory = OPERA` (ili `space_inventory = OPERA`) za te potrebe ne piše lokalni allocation; request dobiva `opera_sync_status = PENDING/SYNCED/FAILED`, a `OperaBlockSyncService` šalje OPERA blok + room grid (`booking_opera_block`)
+- uvoz ROOM_TYPE kodova (`Import codes`) zatim `Sync room types` stvara lokalne POOL resurse tipa `ROOM` i mapira ih
+- `OperaSetupService` (`POST /api/opera/hotels/{id}/setup`) radi cijeli setup: kodovi, tipovi soba, function spaceovi (`MEETING_ROOM`), EVENT_TYPE/SETUP_STYLE lookupi i 1:1 mape, price profile → RATE_CODE, `default_rental_code=CUSTOM`, statusi bloka
+- kad lanac ima uvezene Opera statuse, svaki `booking_status` mora imati `opera_code` iste faze, a `booking_status_flow` smije sadržavati samo prijelaze koje Opera dopušta (`OperaStatusGraph`)
+- `BookingService.transition` prvo zove `verifyOperaTransition` (Opera `verificationOnly`), tek onda mijenja status; `OperaBlockSyncService` vodi blok Opera putanjom do ciljnog koda
+- function sa spaceom u hotelu sa `space_inventory = OPERA` je Opera event (`booking_function.opera_event_id`, obavezan `event_type`); brisanje ili premještanje prvo briše event
+- catering i najam idu na Posting Master bloka kroz `OperaPmPostingService`: šalje se samo razlika prema `booking_opera_posting` (POSTED), ništa se ne briše
+- račun (i iz ugovora i iz BEO-a) izdaje hotel odabran u `X-Property-Id` (`SalesContractService.invoicingHotel`); broj računa je jedinstven po tenantu (V123)
+
 ## Što ne raditi
 
 - ne dirati `allocation` semantiku ni njezina ograničenja — to je registar kapaciteta i jedino mjesto gdje se termin zauzima

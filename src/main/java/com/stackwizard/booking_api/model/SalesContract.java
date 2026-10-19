@@ -32,8 +32,8 @@ public class SalesContract extends CrmAuditableEntity {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "event_id", nullable = false)
-    private Long eventId;
+    @Column(name = "booking_id", nullable = false)
+    private Long bookingId;
 
     @Column(name = "quote_id", nullable = false)
     private Long quoteId;

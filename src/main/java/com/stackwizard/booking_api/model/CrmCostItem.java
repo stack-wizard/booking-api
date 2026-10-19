@@ -31,8 +31,8 @@ public class CrmCostItem {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "event_id")
-    private Long eventId;
+    @Column(name = "booking_id")
+    private Long bookingId;
 
     @Column(name = "opportunity_id")
     private Long opportunityId;

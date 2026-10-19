@@ -10,5 +10,6 @@ spring:
 #   dev:
 #     reference-date: 2026-04-01
 #     # Demo sales flow for Platform "Demo Hotel (DH)" 21111111-… (hotel_code DH). Default true.
+#     # Seeds a TENTATIVE booking (accepted quote, local holds) — no OPERA call; tester confirms then posts.
 #     # dh-sales-flow-seed: false
 #     # dh-sales-flow-platform-tenant-id: 21111111-1111-1111-1111-111111111111

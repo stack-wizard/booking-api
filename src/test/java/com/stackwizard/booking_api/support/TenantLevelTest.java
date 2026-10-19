@@ -27,6 +27,8 @@ class TenantLevelTest {
             "alter table (\\w+)\\s+add column (?:if not exists )?tenant_id", Pattern.CASE_INSENSITIVE);
     private static final Pattern DROP_COLUMN = Pattern.compile(
             "alter table (\\w+)\\s+drop column tenant_id", Pattern.CASE_INSENSITIVE);
+    private static final Pattern RENAME = Pattern.compile(
+            "^alter table (\\w+)\\s+rename to (\\w+);", Pattern.CASE_INSENSITIVE | Pattern.MULTILINE);
 
     @Test
     void everyTenantScopedTableIsClassified() throws IOException {
@@ -103,6 +105,12 @@ class TenantLevelTest {
             Matcher drop = DROP_COLUMN.matcher(sql);
             while (drop.find()) {
                 tables.remove(drop.group(1));
+            }
+            Matcher rename = RENAME.matcher(sql);
+            while (rename.find()) {
+                if (tables.remove(rename.group(1))) {
+                    tables.add(rename.group(2));
+                }
             }
         }
         // Dropped in later migrations (renamed to tenant_payment_provider_config).

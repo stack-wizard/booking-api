@@ -48,6 +48,7 @@ public class ReservationAmendmentService {
     private final ResourceCompositionRepository compositionRepo;
     private final ReservationRequestAmendmentRepository amendmentRepo;
     private final ApplicationEventPublisher eventPublisher;
+    private final AllocationCapacityService capacityService;
     /** Same pattern as {@link PaymentService}: no Jackson {@code ObjectMapper} bean in this app. */
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -59,7 +60,8 @@ public class ReservationAmendmentService {
             ProductRepository productRepo,
             ResourceCompositionRepository compositionRepo,
             ReservationRequestAmendmentRepository amendmentRepo,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            AllocationCapacityService capacityService) {
         this.requestRepo = requestRepo;
         this.reservationRepo = reservationRepo;
         this.allocationRepo = allocationRepo;
@@ -68,6 +70,7 @@ public class ReservationAmendmentService {
         this.compositionRepo = compositionRepo;
         this.amendmentRepo = amendmentRepo;
         this.eventPublisher = eventPublisher;
+        this.capacityService = capacityService;
     }
 
     @Transactional(readOnly = true)
@@ -91,7 +94,7 @@ public class ReservationAmendmentService {
             validateProductResource(product, newRequested);
 
             LocalDateTime[] window = resolveStayWindow(old, rep.getNewStayStartDate());
-            ensureAvailabilityForNewResource(newRequested, window[0], window[1], excludeReservationIds);
+            ensureAvailabilityForNewResource(newRequested, window[0], window[1], unitsOf(old), excludeReservationIds);
 
             oldGross = oldGross.add(nz(old.getGrossAmount()));
             newGross = newGross.add(nz(old.getGrossAmount()));
@@ -122,7 +125,7 @@ public class ReservationAmendmentService {
             Product product = loadProduct(old.getProductId());
             validateProductResource(product, newRequested);
             LocalDateTime[] window = resolveStayWindow(old, rep.getNewStayStartDate());
-            ensureAvailabilityForNewResource(newRequested, window[0], window[1], excludeReservationIds);
+            ensureAvailabilityForNewResource(newRequested, window[0], window[1], unitsOf(old), excludeReservationIds);
         }
 
         for (ReservationRequestAmendmentReplacementDto rep : body.getReplacements()) {
@@ -168,6 +171,7 @@ public class ReservationAmendmentService {
     private ReservationRequest loadEligibleRequest(Long tenantId, Long reservationRequestId) {
         ReservationRequest request = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        ReservationRequestService.requireNotBookingManaged(request);
         if (!Objects.equals(request.getTenantId(), tenantId)) {
             throw new IllegalArgumentException("Tenant mismatch");
         }
@@ -299,20 +303,20 @@ public class ReservationAmendmentService {
     }
 
     private void ensureAvailabilityForNewResource(
-            Resource requested, LocalDateTime starts, LocalDateTime ends, Set<Long> excludeReservationIds) {
+            Resource requested, LocalDateTime starts, LocalDateTime ends, int units, Set<Long> excludeReservationIds) {
         List<ResourceComposition> members = compositionRepo.findByParentResourceId(requested.getId());
         boolean isComposition = isCompositionResource(requested);
         if (members.isEmpty()) {
             if (isComposition) {
                 throw new IllegalStateException("Composition resource has no members");
             }
-            ensureAvailabilityExcluding(requested, starts, ends, excludeReservationIds);
+            capacityService.ensure(requested, starts, ends, units, excludeReservationIds);
         } else {
             for (ResourceComposition member : members) {
                 Resource memberResource = member.getMemberResource();
                 int memberQty = member.getQty() != null ? member.getQty() : 1;
                 for (int i = 0; i < memberQty; i++) {
-                    ensureAvailabilityExcluding(memberResource, starts, ends, excludeReservationIds);
+                    capacityService.ensure(memberResource, starts, ends, 1, excludeReservationIds);
                 }
             }
         }
@@ -324,27 +328,8 @@ public class ReservationAmendmentService {
                 && "COMPOSITION".equalsIgnoreCase(resource.getResourceType().getCode());
     }
 
-    private void ensureAvailabilityExcluding(
-            Resource resource, LocalDateTime starts, LocalDateTime ends, Set<Long> excludeReservationIds) {
-        List<Allocation> active = allocationRepo.findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan(
-                List.of(resource.getId()), ends, starts);
-        long overlapping = active.stream()
-                .filter(a -> a.getReservation() != null
-                        && (excludeReservationIds.isEmpty()
-                        || !excludeReservationIds.contains(a.getReservation().getId())))
-                .count();
-
-        int capacity = resource.getUnitCount() != null ? resource.getUnitCount() : 1;
-        if ("POOL".equalsIgnoreCase(resource.getKind())) {
-            if (resource.getPoolTotalUnits() == null) {
-                throw new IllegalStateException("Pool resource missing poolTotalUnits");
-            }
-            capacity = resource.getPoolTotalUnits();
-        }
-
-        if (overlapping >= capacity) {
-            throw new IllegalStateException("No availability for the requested resource in the given time range");
-        }
+    private static int unitsOf(Reservation reservation) {
+        return reservation.getUnits() != null && reservation.getUnits() > 0 ? reservation.getUnits() : 1;
     }
 
     private void cancelReservationLine(Long reservationId) {
@@ -413,6 +398,7 @@ public class ReservationAmendmentService {
                 .cancellationPolicySnapshot(old.getCancellationPolicySnapshot())
                 .currency(old.getCurrency())
                 .qty(old.getQty())
+                .units(unitsOf(old))
                 .unitPrice(old.getUnitPrice())
                 .grossAmount(old.getGrossAmount())
                 .build();
@@ -435,6 +421,7 @@ public class ReservationAmendmentService {
                     .productId(product.getId())
                     .uom(uom)
                     .qty(qty)
+                    .units(unitsOf(saved))
                     .reservation(saved)
                     .requestedResource(requested)
                     .allocatedResource(requested)

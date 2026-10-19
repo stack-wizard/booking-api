@@ -65,6 +65,10 @@ public class CrmPipelineStage extends CrmAuditableEntity {
     @Column(name = "locks_intake", nullable = false)
     private Boolean locksIntake = false;
 
+    /** Entering this stage moves the open bookings of the deal to this booking status ({@code booking_status.code}). */
+    @Column(name = "booking_status_code")
+    private String bookingStatusCode;
+
     public enum StageKind {
         OPEN, WON, LOST
     }

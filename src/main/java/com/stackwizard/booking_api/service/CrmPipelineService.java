@@ -25,17 +25,20 @@ public class CrmPipelineService {
     private final CrmStageRequirementRepository requirementRepo;
     private final CrmOutcomeReasonRepository outcomeRepo;
     private final CrmAccessContext accessContext;
+    private final BookingStatusService bookingStatusService;
 
     public CrmPipelineService(CrmPipelineRepository pipelineRepo,
                               CrmPipelineStageRepository stageRepo,
                               CrmStageRequirementRepository requirementRepo,
                               CrmOutcomeReasonRepository outcomeRepo,
-                              CrmAccessContext accessContext) {
+                              CrmAccessContext accessContext,
+                              BookingStatusService bookingStatusService) {
         this.pipelineRepo = pipelineRepo;
         this.stageRepo = stageRepo;
         this.requirementRepo = requirementRepo;
         this.outcomeRepo = outcomeRepo;
         this.accessContext = accessContext;
+        this.bookingStatusService = bookingStatusService;
     }
 
     public List<CrmPipeline> findAll() {
@@ -117,6 +120,7 @@ public class CrmPipelineService {
         if (stage.getLocksIntake() == null) {
             stage.setLocksIntake(false);
         }
+        stage.setBookingStatusCode(bookingStatusService.requireStageStatus(tenantId, stage.getBookingStatusCode(), null));
         return stageRepo.save(stage);
     }
 
@@ -143,6 +147,8 @@ public class CrmPipelineService {
         if (changes.getLocksIntake() != null) {
             existing.setLocksIntake(changes.getLocksIntake());
         }
+        existing.setBookingStatusCode(bookingStatusService.requireStageStatus(
+                existing.getTenantId(), changes.getBookingStatusCode(), existing.getBookingStatusCode()));
         return stageRepo.save(existing);
     }
 

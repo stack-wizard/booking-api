@@ -13,15 +13,15 @@ import java.util.Optional;
 public interface SalesQuoteRepository extends JpaRepository<SalesQuote, Long> {
     Optional<SalesQuote> findByIdAndTenantId(Long id, Long tenantId);
 
-    List<SalesQuote> findByTenantIdAndEventIdOrderByIdDesc(Long tenantId, Long eventId);
+    List<SalesQuote> findByTenantIdAndBookingIdOrderByIdDesc(Long tenantId, Long bookingId);
 
-    List<SalesQuote> findByTenantIdAndEventIdAndStatusIn(Long tenantId, Long eventId, Collection<SalesQuote.Status> statuses);
+    List<SalesQuote> findByTenantIdAndBookingIdAndStatusIn(Long tenantId, Long bookingId, Collection<SalesQuote.Status> statuses);
 
     List<SalesQuote> findByTenantIdAndStatusOrderByIdDesc(Long tenantId, SalesQuote.Status status);
 
-    boolean existsByTenantIdAndEventIdAndStatus(Long tenantId, Long eventId, SalesQuote.Status status);
+    boolean existsByTenantIdAndBookingIdAndStatus(Long tenantId, Long bookingId, SalesQuote.Status status);
 
-    Optional<SalesQuote> findFirstByTenantIdAndEventIdAndStatusOrderByIdDesc(Long tenantId, Long eventId, SalesQuote.Status status);
+    Optional<SalesQuote> findFirstByTenantIdAndBookingIdAndStatusOrderByIdDesc(Long tenantId, Long bookingId, SalesQuote.Status status);
 
     @Query("select count(q) from SalesQuote q where q.tenantId = :tenantId and q.quoteNumber like :prefix")
     long countByNumberPrefix(@Param("tenantId") Long tenantId, @Param("prefix") String prefix);

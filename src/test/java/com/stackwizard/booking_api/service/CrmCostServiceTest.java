@@ -12,13 +12,13 @@ class CrmCostServiceTest {
 
     @Test
     void summaryAddsOpportunityCostsAndComputesMarginPercent() {
-        List<SalesDtos.EventProfit> events = List.of(
-                new SalesDtos.EventProfit(1L, "Day 1", "DEFINITE", new BigDecimal("1000.00"), new BigDecimal("1000.00"),
+        List<SalesDtos.BookingProfit> bookings = List.of(
+                new SalesDtos.BookingProfit(1L, "Day 1", "DEFINITE", new BigDecimal("1000.00"), new BigDecimal("1000.00"),
                         new BigDecimal("300.00"), new BigDecimal("100.00"), new BigDecimal("600.00")),
-                new SalesDtos.EventProfit(2L, "Day 2", "TENTATIVE", new BigDecimal("500.00"), null,
+                new SalesDtos.BookingProfit(2L, "Day 2", "TENTATIVE", new BigDecimal("500.00"), null,
                         new BigDecimal("100.00"), BigDecimal.ZERO, new BigDecimal("400.00")));
 
-        SalesDtos.Profitability summary = CrmCostService.summary("EUR", events, new BigDecimal("50"));
+        SalesDtos.Profitability summary = CrmCostService.summary("EUR", bookings, new BigDecimal("50"));
 
         assertThat(summary.revenue()).isEqualByComparingTo("1500.00");
         assertThat(summary.quotedTotal()).isEqualByComparingTo("1000.00");

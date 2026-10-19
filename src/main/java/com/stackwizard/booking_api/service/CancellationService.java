@@ -200,6 +200,7 @@ public class CancellationService {
                                            boolean allowSettlementOverride) {
         ReservationRequest reservationRequest = requestRepo.findById(reservationRequestId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation request not found"));
+        ReservationRequestService.requireNotBookingManaged(reservationRequest);
 
         Optional<CancellationRequest> latestExisting = cancellationRequestRepo
                 .findFirstByReservationRequestIdOrderByCreatedAtDescIdDesc(reservationRequestId);

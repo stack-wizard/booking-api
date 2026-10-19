@@ -38,6 +38,14 @@ public final class ReservationRequestSpecifications {
             if (criteria.getRequestId() != null) {
                 predicates.add(cb.equal(root.get("id"), criteria.getRequestId()));
             }
+            if (criteria.getBookingId() != null) {
+                predicates.add(cb.equal(root.get("bookingId"), criteria.getBookingId()));
+            }
+            if (criteria.getBookingManaged() != null) {
+                predicates.add(criteria.getBookingManaged()
+                        ? cb.isNotNull(root.get("bookingId"))
+                        : cb.isNull(root.get("bookingId")));
+            }
             if (StringUtils.hasText(criteria.getConfirmationNumber())) {
                 predicates.add(containsIgnoreCase(cb, root.get("confirmationCode").as(String.class), criteria.getConfirmationNumber()));
             }

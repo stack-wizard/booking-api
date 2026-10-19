@@ -44,7 +44,7 @@ class ResourceSetupCapacityServiceTest {
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new ResourceSetupCapacityService(capacityRepo, resourceRepo, compositionRepo, allocationRepo, accessContext, lookupService);
+        service = new ResourceSetupCapacityService(capacityRepo, resourceRepo, compositionRepo, new AllocationCapacityService(allocationRepo), accessContext, lookupService);
         when(lookupService.requireCode(any(), any(), any(), any())).thenAnswer(inv -> inv.getArgument(2));
         when(capacityRepo.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
     }

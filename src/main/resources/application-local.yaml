@@ -22,6 +22,8 @@ booking:
     reference-date: 2026-04-01
     # Local only: first login of an unmapped Platform tenant creates an ORG mapping (see TenantSetupService).
     auto-provision-tenant: true
+    # DH sales starts from Setup from OPERA (scripts/dev/reset-dh-for-opera.sql), not from the demo seed.
+    dh-sales-flow-seed: false
 
 crm:
   portal:

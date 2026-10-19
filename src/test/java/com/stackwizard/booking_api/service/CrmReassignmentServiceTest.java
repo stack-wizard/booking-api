@@ -12,7 +12,7 @@ import com.stackwizard.booking_api.repository.CrmOpportunityRepository;
 import com.stackwizard.booking_api.repository.CrmReassignmentRepository;
 import com.stackwizard.booking_api.repository.CrmTeamMemberRepository;
 import com.stackwizard.booking_api.repository.CrmTeamRepository;
-import com.stackwizard.booking_api.repository.EventRepository;
+import com.stackwizard.booking_api.repository.BookingRepository;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmScope;
 import com.stackwizard.booking_api.security.TenantContext;
@@ -44,7 +44,7 @@ class CrmReassignmentServiceTest {
     @Mock CrmLeadRepository leadRepo;
     @Mock CrmOpportunityRepository opportunityRepo;
     @Mock CrmAccountRepository accountRepo;
-    @Mock EventRepository eventRepo;
+    @Mock BookingRepository bookingRepo;
     @Mock CrmTeamMemberRepository memberRepo;
     @Mock CrmTeamRepository teamRepo;
     @Mock CrmReassignmentRepository reassignmentRepo;
@@ -56,7 +56,7 @@ class CrmReassignmentServiceTest {
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new CrmReassignmentService(leadRepo, opportunityRepo, accountRepo, eventRepo, memberRepo, teamRepo,
+        service = new CrmReassignmentService(leadRepo, opportunityRepo, accountRepo, bookingRepo, memberRepo, teamRepo,
                 reassignmentRepo, teamDirectory, accessContext);
         when(accessContext.currentUserId()).thenReturn(100L);
         when(accessContext.scope()).thenReturn(CrmScope.TEAM);
@@ -65,7 +65,7 @@ class CrmReassignmentServiceTest {
         when(teamDirectory.resolveTeam(1L, 102L, null, null)).thenReturn(5L);
         when(reassignmentRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(accountRepo.findByTenantIdAndOwnerUserIdAndActiveTrue(1L, 101L)).thenReturn(List.of());
-        when(eventRepo.findByTenantIdAndOwnerUserIdAndStatusInAndDateToGreaterThanEqual(any(), any(), any(), any())).thenReturn(List.of());
+        when(bookingRepo.findByTenantIdAndOwnerUserIdAndStatusInAndDateToGreaterThanEqual(any(), any(), any(), any())).thenReturn(List.of());
     }
 
     @AfterEach

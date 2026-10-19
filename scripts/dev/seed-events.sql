@@ -1,4 +1,4 @@
--- Dev seed for event management (Faza 3/4). Not a migration; safe to re-run.
+-- Dev seed for booking management (Faza 3/4). Not a migration; safe to re-run.
 -- Usage: docker exec -i booking-postgres psql -U booking_user -d booking_db -v tenant=2 < scripts/dev/seed-events.sql
 -- Also called by scripts/dev/seed-dh-sales-flow.sh when Opera hotel DH exists (never via Flyway/deploy).
 
@@ -29,20 +29,24 @@ where pp.tenant_id = :tenant and pp.name = 'Events EUR'
   and not exists (select 1 from price_profile_date d where d.price_profile_id = pp.id and d.date_from = date '2028-01-01');
 
 -- Products: rent (per space), catering, equipment.
+-- Product / space names follow OPERA hotel DH (functionSpaces + roomTypes).
 create temporary table seed_product (name text, uom text, extra text[], price numeric, extra_prices numeric[], tax numeric, ord int) on commit drop;
 insert into seed_product values
-  ('Main Hall rent',     'DAY',  array['HALF_DAY','HOUR'], 1800, array[1100, 250], 25, 10),
-  ('Hall A rent',        'DAY',  array['HALF_DAY','HOUR'], 950,  array[600, 140],  25, 11),
-  ('Hall B rent',        'DAY',  array['HALF_DAY','HOUR'], 950,  array[600, 140],  25, 12),
-  ('Boardroom rent',     'HOUR', array['HALF_DAY','DAY'],  60,   array[220, 400],  25, 13),
-  ('Breakout room rent', 'HOUR', array['HALF_DAY','DAY'],  45,   array[160, 290],  25, 14),
+  ('Sala1 rent',         'DAY',  array['HALF_DAY','HOUR'], 1200, array[750, 180],  25, 10),
+  ('Sala 2 rent',        'DAY',  array['HALF_DAY','HOUR'], 800,  array[500, 120],  25, 11),
+  ('Galija rent',        'DAY',  array['HALF_DAY','HOUR'], 900,  array[550, 140],  25, 12),
+  ('Restoran rent',      'DAY',  array['HALF_DAY','HOUR'], 700,  array[450, 100],  25, 13),
+  ('GALRES rent',        'DAY',  array['HALF_DAY','HOUR'], 1600, array[1000, 250], 25, 14),
   ('Coffee break',       'UNIT', array[]::text[],          8,    array[]::numeric[], 13, 20),
   ('Business lunch',     'UNIT', array[]::text[],          28,   array[]::numeric[], 13, 21),
   ('Gala dinner',        'UNIT', array[]::text[],          55,   array[]::numeric[], 13, 22),
   ('Welcome drink',      'UNIT', array[]::text[],          12,   array[]::numeric[], 13, 23),
   ('Projector & screen', 'UNIT', array[]::text[],          60,   array[]::numeric[], 25, 30),
   ('Day Delegate Rate',  'UNIT', array[]::text[],          65,   array[]::numeric[], 13, 40),
-  ('Half-day DDR',       'UNIT', array[]::text[],          0,    array[]::numeric[], 13, 41);
+  ('Half-day DDR',       'UNIT', array[]::text[],          0,    array[]::numeric[], 13, 41),
+  ('DBL night',          'NIGHT', array[]::text[],         120,  array[]::numeric[], 13, 50),
+  ('SAE night',          'NIGHT', array[]::text[],         260,  array[]::numeric[], 13, 51),
+  ('TWC night',          'NIGHT', array[]::text[],         115,  array[]::numeric[], 13, 52);
 
 insert into product (tenant_id, name, default_uom, product_type, tax1_percent, display_order, description)
 select :tenant, s.name, s.uom, 'SEALABLE_PRODUCT', s.tax, s.ord, 'Event seed'
@@ -71,14 +75,16 @@ where not exists (
   select 1 from price_list l where l.product_id = p.id and upper(l.uom) = upper(x.uom) and l.price_profile_id = pp.id
 );
 
--- Spaces are plain resources (MEETING_ROOM / COMPOSITION) with setup capacities.
+-- Function spaces = OPERA roomCode / spaceName for hotel DH (space_inventory LOCAL; mapped 1:1).
+-- Room-type pools are NOT seeded here — Import codes + Sync room types creates DBL / SAE / TWC.
 create temporary table seed_space (code text, name text, type_code text, product text, area numeric, floor text, light boolean, ord int) on commit drop;
 insert into seed_space values
-  ('EVT-HALL-A',   'Hall A',        'MEETING_ROOM', 'Hall A rent',        180, 'Ground', true,  2),
-  ('EVT-HALL-B',   'Hall B',        'MEETING_ROOM', 'Hall B rent',        180, 'Ground', true,  3),
-  ('EVT-MAIN',     'Main Hall',     'COMPOSITION',  'Main Hall rent',     360, 'Ground', true,  1),
-  ('EVT-BOARD',    'Boardroom',     'MEETING_ROOM', 'Boardroom rent',     60,  '1',      true,  4),
-  ('EVT-BREAKOUT', 'Breakout Room', 'MEETING_ROOM', 'Breakout room rent', 45,  '1',      false, 5);
+  ('SALA1',  'Sala1',    'MEETING_ROOM', 'Sala1 rent',    120, 'Ground', true,  1),
+  ('SAL2',   'Sala 2',   'MEETING_ROOM', 'Sala 2 rent',   80,  'Ground', true,  2),
+  ('GALIJA', 'Galija',   'MEETING_ROOM', 'Galija rent',   100, 'Ground', true,  3),
+  ('RES',    'restoran', 'MEETING_ROOM', 'Restoran rent', 90,  'Ground', true,  4),
+  ('REST',   'Restoran', 'MEETING_ROOM', 'Restoran rent', 90,  'Ground', true,  5),
+  ('GR',     'GALRES',   'COMPOSITION',  'GALRES rent',   190, 'Ground', true,  6);
 
 insert into resource (tenant_id, resource_type_id, kind, code, name, status, unit_count, cap_total, product_id,
                       can_book_alone, display_order, area_sqm, floor, natural_light)
@@ -88,21 +94,23 @@ join resource_type rt on rt.code = s.type_code
 join product p on p.tenant_id = :tenant and p.name = s.product
 on conflict (tenant_id, code) do nothing;
 
+-- OPERA combo space GR (GALRES) = Galija + restoran.
 insert into resource_composition (tenant_id, parent_resource_id, member_resource_id, qty)
 select :tenant, parent.id, member.id, 1
 from resource parent
-join resource member on member.tenant_id = :tenant and member.code in ('EVT-HALL-A', 'EVT-HALL-B')
-where parent.tenant_id = :tenant and parent.code = 'EVT-MAIN'
+join resource member on member.tenant_id = :tenant and member.code in ('GALIJA', 'RES')
+where parent.tenant_id = :tenant and parent.code = 'GR'
 on conflict (parent_resource_id, member_resource_id) do nothing;
 
+-- Setup styles = OPERA codes (THEATER, CLASS, USHAPE, AS, TBD).
 create temporary table seed_setup (code text, style text, capacity int) on commit drop;
 insert into seed_setup values
-  ('EVT-MAIN', 'THEATRE', 400), ('EVT-MAIN', 'CLASSROOM', 220), ('EVT-MAIN', 'BANQUET', 300),
-  ('EVT-MAIN', 'CABARET', 240), ('EVT-MAIN', 'RECEPTION', 500),
-  ('EVT-HALL-A', 'THEATRE', 180), ('EVT-HALL-A', 'CLASSROOM', 100), ('EVT-HALL-A', 'BANQUET', 130), ('EVT-HALL-A', 'U_SHAPE', 50),
-  ('EVT-HALL-B', 'THEATRE', 180), ('EVT-HALL-B', 'CLASSROOM', 100), ('EVT-HALL-B', 'BANQUET', 130), ('EVT-HALL-B', 'U_SHAPE', 50),
-  ('EVT-BOARD', 'BOARDROOM', 16), ('EVT-BOARD', 'U_SHAPE', 14),
-  ('EVT-BREAKOUT', 'BOARDROOM', 12), ('EVT-BREAKOUT', 'CLASSROOM', 20), ('EVT-BREAKOUT', 'THEATRE', 30);
+  ('SALA1',  'THEATER', 180), ('SALA1',  'CLASS', 100), ('SALA1',  'USHAPE', 40), ('SALA1',  'AS', 180),
+  ('SAL2',   'THEATER', 80),  ('SAL2',   'CLASS', 50),  ('SAL2',   'USHAPE', 24), ('SAL2',   'TBD', 80),
+  ('GALIJA', 'THEATER', 120), ('GALIJA', 'CLASS', 70),  ('GALIJA', 'USHAPE', 30), ('GALIJA', 'AS', 120),
+  ('RES',    'THEATER', 100), ('RES',    'CLASS', 60),  ('RES',    'AS', 100),
+  ('REST',   'THEATER', 100), ('REST',   'CLASS', 60),  ('REST',   'AS', 100),
+  ('GR',     'THEATER', 220), ('GR',     'CLASS', 130), ('GR',     'USHAPE', 50), ('GR',     'AS', 220);
 
 insert into resource_setup_capacity (tenant_id, resource_id, setup_style, capacity)
 select :tenant, r.id, s.style, s.capacity
@@ -125,10 +133,10 @@ where tenant_id = :tenant and name = 'Half-day DDR' and package_pricing is null;
 create temporary table seed_component (pkg text, component text, qty int, basis text, share numeric,
                                        function_type text, start_offset int, duration int, ord int) on commit drop;
 insert into seed_component values
-  ('Day Delegate Rate', 'Main Hall rent', 1, 'PER_PAX', 40, 'PLENARY',      0,   480, 0),
+  ('Day Delegate Rate', 'Sala1 rent', 1, 'PER_PAX', 40, 'PLENARY',      0,   480, 0),
   ('Day Delegate Rate', 'Coffee break',   2, 'PER_PAX', 20, 'COFFEE_BREAK', 90,  30,  1),
   ('Day Delegate Rate', 'Business lunch', 1, 'PER_PAX', 40, 'LUNCH',        210, 60,  2),
-  ('Half-day DDR',      'Boardroom rent', 4, 'FIXED',   null, 'PLENARY',    0,   240, 0),
+  ('Half-day DDR',      'Sala 2 rent', 4, 'FIXED',   null, 'PLENARY',    0,   240, 0),
   ('Half-day DDR',      'Coffee break',   1, 'PER_PAX', null, 'COFFEE_BREAK', 120, 30, 1);
 
 insert into product_component (tenant_id, package_product_id, component_product_id, qty, qty_basis, included,
@@ -156,7 +164,7 @@ insert into product_package_listing (tenant_id, product_id, public_name, public_
                                      duration, default_start_time, setup_style, published)
 select :tenant, p.id, 'Day Delegate Package',
        'Meeting room for the day, two coffee breaks and a business lunch.', 10, 120,
-       'FULL_DAY', '09:00', 'THEATRE', true
+       'FULL_DAY', '09:00', 'THEATER', true
 from product p
 where p.tenant_id = :tenant and p.name = 'Day Delegate Rate'
 on conflict (product_id) do nothing;

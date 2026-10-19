@@ -1,6 +1,6 @@
 package com.stackwizard.booking_api.service;
 
-import com.stackwizard.booking_api.model.EventFunction;
+import com.stackwizard.booking_api.model.BookingFunction;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductComponent;
 import com.stackwizard.booking_api.model.ProductPackageListing;
@@ -74,8 +74,8 @@ class PackageCatalogServiceTest {
     void spaceWindowSpansFunctionComponents() {
         LocalDateTime start = DAY.atTime(9, 0);
         List<ProductComponent> components = List.of(
-                component(EventFunction.FunctionType.PLENARY, 0, 480),
-                component(EventFunction.FunctionType.COFFEE_BREAK, 90, 30),
+                component(BookingFunction.FunctionType.PLENARY, 0, 480),
+                component(BookingFunction.FunctionType.COFFEE_BREAK, 90, 30),
                 component(null, null, null));
         LocalDateTime[] window = PackageCatalogService.spaceWindow(start, ProductPackageListing.Duration.HALF_DAY, components);
         assertThat(window[0]).isEqualTo(start);
@@ -94,7 +94,7 @@ class PackageCatalogServiceTest {
     @Test
     void availabilityReturnsOnlyFreeSpacesForTheWindow() {
         when(componentRepo.findByTenantIdAndPackageProductIdOrderByDisplayOrderAscIdAsc(1L, 1L))
-                .thenReturn(List.of(component(EventFunction.FunctionType.PLENARY, 0, 480)));
+                .thenReturn(List.of(component(BookingFunction.FunctionType.PLENARY, 0, 480)));
         ResourceSetupCapacityService.SpaceCandidate free = new ResourceSetupCapacityService.SpaceCandidate(
                 10L, "Hall A", "MEETING_ROOM", null, null, null, List.of(), true);
         ResourceSetupCapacityService.SpaceCandidate busy = new ResourceSetupCapacityService.SpaceCandidate(
@@ -128,7 +128,7 @@ class PackageCatalogServiceTest {
         assertThat(service.catalog(LocalDate.of(2027, 5, 1), null)).isEmpty();
     }
 
-    private static ProductComponent component(EventFunction.FunctionType type, Integer offset, Integer duration) {
+    private static ProductComponent component(BookingFunction.FunctionType type, Integer offset, Integer duration) {
         return ProductComponent.builder().componentProductId(2L).qty(1).included(true)
                 .qtyBasis(ProductComponent.QtyBasis.PER_PAX)
                 .functionType(type).startOffsetMinutes(offset).durationMinutes(duration).build();

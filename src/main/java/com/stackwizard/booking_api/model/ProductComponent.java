@@ -54,7 +54,7 @@ public class ProductComponent {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "function_type")
-    private EventFunction.FunctionType functionType;
+    private BookingFunction.FunctionType functionType;
 
     @Column(name = "start_offset_minutes")
     private Integer startOffsetMinutes;

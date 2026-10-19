@@ -21,10 +21,12 @@ import java.util.List;
 public class CrmReportService {
     private final EntityManager entityManager;
     private final CrmAccessContext accessContext;
+    private final TenantHierarchy hierarchy;
 
-    public CrmReportService(EntityManager entityManager, CrmAccessContext accessContext) {
+    public CrmReportService(EntityManager entityManager, CrmAccessContext accessContext, TenantHierarchy hierarchy) {
         this.entityManager = entityManager;
         this.accessContext = accessContext;
+        this.hierarchy = hierarchy;
     }
 
     @Transactional(readOnly = true)
@@ -135,8 +137,8 @@ public class CrmReportService {
     }
 
     /**
-     * DEFINITE and ACTUAL events starting in the range. Revenue is the accepted quote total, otherwise the
-     * event's priced lines; cost is item cost plus crm_cost_item.
+     * DEFINITE and ACTUAL bookings starting in the range. Revenue is the accepted quote total, otherwise the
+     * booking's priced lines; cost is item cost plus crm_cost_item.
      */
     @Transactional(readOnly = true)
     public CrmReportDtos.RevenueResponse revenue(LocalDate from, LocalDate to) {
@@ -147,19 +149,19 @@ public class CrmReportService {
                   select e.id, e.account_id,
                          coalesce(q.total_offered,
                                   coalesce((select sum(r.gross_amount) from reservation r
-                                            join event_function f on f.id = r.event_function_id
-                                            where f.event_id = e.id and r.status <> 'CANCELLED'), 0)
-                                + coalesce((select sum(i.gross_amount) from event_function_item i
-                                            join event_function f on f.id = i.event_function_id
-                                            where f.event_id = e.id), 0)) as revenue,
-                         coalesce((select sum(i.cost_amount) from event_function_item i
-                                   join event_function f on f.id = i.event_function_id
-                                   where f.event_id = e.id), 0)
-                       + coalesce((select sum(c.amount) from crm_cost_item c where c.event_id = e.id), 0) as cost
-                  from event e
+                                            join booking_function f on f.id = r.booking_function_id
+                                            where f.booking_id = e.id and r.status <> 'CANCELLED'), 0)
+                                + coalesce((select sum(i.gross_amount) from booking_function_item i
+                                            join booking_function f on f.id = i.booking_function_id
+                                            where f.booking_id = e.id), 0)) as revenue,
+                         coalesce((select sum(i.cost_amount) from booking_function_item i
+                                   join booking_function f on f.id = i.booking_function_id
+                                   where f.booking_id = e.id), 0)
+                       + coalesce((select sum(c.amount) from crm_cost_item c where c.booking_id = e.id), 0) as cost
+                  from booking e
                   left join lateral (
                     select sq.total_offered from sales_quote sq
-                    where sq.event_id = e.id and sq.status = 'ACCEPTED'
+                    where sq.booking_id = e.id and sq.status = 'ACCEPTED'
                     order by sq.id desc limit 1
                   ) q on true
                   where e.tenant_id = :tenantId
@@ -182,20 +184,20 @@ public class CrmReportService {
         List<Object[]> rows = query.getResultList();
         List<CrmReportDtos.RevenueRow> byAccount = new ArrayList<>();
         java.util.Map<String, BigDecimal[]> segments = new java.util.TreeMap<>();
-        java.util.Map<String, Long> segmentEvents = new java.util.HashMap<>();
+        java.util.Map<String, Long> segmentBookings = new java.util.HashMap<>();
         for (Object[] row : rows) {
             BigDecimal revenue = toDecimal(row[4]);
             BigDecimal cost = toDecimal(row[5]);
-            long events = ((Number) row[3]).longValue();
-            byAccount.add(revenueRow("account", (String) row[1], ((Number) row[0]).longValue(), events, revenue, cost));
+            long bookings = ((Number) row[3]).longValue();
+            byAccount.add(revenueRow("account", (String) row[1], ((Number) row[0]).longValue(), bookings, revenue, cost));
             String segment = (String) row[2];
             BigDecimal[] sum = segments.computeIfAbsent(segment, k -> new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO});
             sum[0] = sum[0].add(revenue);
             sum[1] = sum[1].add(cost);
-            segmentEvents.merge(segment, events, Long::sum);
+            segmentBookings.merge(segment, bookings, Long::sum);
         }
         List<CrmReportDtos.RevenueRow> bySegment = segments.entrySet().stream()
-                .map(e -> revenueRow("segment", e.getKey(), null, segmentEvents.get(e.getKey()), e.getValue()[0], e.getValue()[1]))
+                .map(e -> revenueRow("segment", e.getKey(), null, segmentBookings.get(e.getKey()), e.getValue()[0], e.getValue()[1]))
                 .toList();
         return CrmReportDtos.RevenueResponse.builder().byAccount(byAccount).bySegment(bySegment).build();
     }
@@ -207,7 +209,9 @@ public class CrmReportService {
     @Transactional(readOnly = true)
     public CrmReportDtos.UtilisationResponse spaceUtilisation(LocalDate from, LocalDate to) {
         accessContext.require(CrmPermission.REPORT_READ);
-        Long tenantId = TenantResolver.requireOrgTenantId();
+        Long orgTenantId = TenantResolver.requireOrgTenantId();
+        Long selected = TenantResolver.selectedHotelId();
+        List<Long> hotels = selected != null ? List.of(selected) : hierarchy.propertyIdsOf(orgTenantId);
         LocalDate start = from != null ? from : LocalDate.now().withDayOfMonth(1);
         LocalDate end = to != null ? to : start.plusMonths(1).minusDays(1);
         if (end.isBefore(start)) {
@@ -216,17 +220,17 @@ public class CrmReportService {
         int days = (int) java.time.temporal.ChronoUnit.DAYS.between(start, end) + 1;
         String sql = """
                 with spaces as (
-                  select distinct r.id, r.name, r.location_id
+                  select distinct r.id, r.name, r.location_id, r.tenant_id
                   from resource r
                   join resource_setup_capacity c on c.resource_id = r.id and c.tenant_id = r.tenant_id
-                  where r.tenant_id = :tenantId
+                  where r.tenant_id in (:tenantIds)
                 ),
                 booked as (
                   select a.allocated_resource_id as resource_id,
                          sum(extract(epoch from (least(a.ends_at, cast(:rangeEnd as timestamp))
                                                - greatest(a.starts_at, cast(:rangeStart as timestamp)))) / 3600.0) as hours
                   from allocation a
-                  where a.tenant_id = :tenantId
+                  where a.tenant_id in (:tenantIds)
                     and a.starts_at < cast(:rangeEnd as timestamp)
                     and a.ends_at > cast(:rangeStart as timestamp)
                     and (upper(a.status) = 'CONFIRMED'
@@ -236,7 +240,7 @@ public class CrmReportService {
                 select s.id, s.name, coalesce(b.hours, 0),
                        coalesce((select extract(epoch from (bc.close_time - bc.open_time)) / 3600.0
                                  from booking_calendar bc
-                                 where bc.tenant_id = :tenantId
+                                 where bc.tenant_id = s.tenant_id
                                    and (bc.location_node_id = s.location_id or bc.location_node_id is null)
                                  order by (bc.location_node_id is null), bc.id
                                  limit 1), 24) as open_hours
@@ -245,7 +249,7 @@ public class CrmReportService {
                 order by s.name
                 """;
         Query query = entityManager.createNativeQuery(sql);
-        query.setParameter("tenantId", tenantId);
+        query.setParameter("tenantIds", hotels);
         query.setParameter("rangeStart", start.atStartOfDay());
         query.setParameter("rangeEnd", end.plusDays(1).atStartOfDay());
         @SuppressWarnings("unchecked")
@@ -266,14 +270,14 @@ public class CrmReportService {
         return CrmReportDtos.UtilisationResponse.builder().days(days).spaces(spaces).build();
     }
 
-    static CrmReportDtos.RevenueRow revenueRow(String dimension, String key, Long accountId, long events,
+    static CrmReportDtos.RevenueRow revenueRow(String dimension, String key, Long accountId, long bookings,
                                                BigDecimal revenue, BigDecimal cost) {
         BigDecimal margin = revenue.subtract(cost);
         return CrmReportDtos.RevenueRow.builder()
                 .dimension(dimension)
                 .key(key)
                 .accountId(accountId)
-                .events(events)
+                .bookings(bookings)
                 .revenue(revenue.setScale(2, RoundingMode.HALF_UP))
                 .cost(cost.setScale(2, RoundingMode.HALF_UP))
                 .margin(margin.setScale(2, RoundingMode.HALF_UP))

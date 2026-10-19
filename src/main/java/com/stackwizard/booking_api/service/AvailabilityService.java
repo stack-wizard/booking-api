@@ -210,12 +210,49 @@ public class AvailabilityService {
             }
         }
 
+        Map<Long, List<Long>> membersByPool = new HashMap<>();
+        for (Resource resource : resources) {
+            if (resource.getParentPool() != null && !AllocationCapacityService.isPool(resource)) {
+                membersByPool.computeIfAbsent(resource.getParentPool().getId(), ignored -> new ArrayList<>()).add(resource.getId());
+            }
+        }
+        Map<Long, List<Interval>> fullByPool = new HashMap<>();
+        Map<Long, Integer> freeUnitsByPool = new HashMap<>();
+        for (Resource resource : resources) {
+            ServiceCalendarService.ServiceWindow window = windowByResourceId.get(resource.getId());
+            if (window == null || !AllocationCapacityService.isPool(resource)) {
+                continue;
+            }
+            List<Allocation> usage = new ArrayList<>(allocationsByResourceId.getOrDefault(resource.getId(), List.of()));
+            for (Long memberId : membersByPool.getOrDefault(resource.getId(), List.of())) {
+                usage.addAll(allocationsByResourceId.getOrDefault(memberId, List.of()));
+            }
+            int capacity = capacityOf(resource);
+            fullByPool.put(resource.getId(), toIntervals(
+                    AllocationCapacityService.saturated(usage, capacity, window.open(), window.close())));
+            freeUnitsByPool.put(resource.getId(),
+                    Math.max(capacity - AllocationCapacityService.peakUnits(usage, window.open(), window.close()), 0));
+        }
+
         Map<Long, List<Interval>> freeSlotsByResourceId = new HashMap<>();
         for (Resource resource : resources) {
             ServiceCalendarService.ServiceWindow window = windowByResourceId.get(resource.getId());
-            List<Allocation> allocations = allocationsByResourceId.getOrDefault(resource.getId(), List.of());
-            List<Interval> freeSlots = computeFreeSlots(window, allocations);
-            freeSlotsByResourceId.put(resource.getId(), freeSlots);
+            if (window == null) {
+                freeSlotsByResourceId.put(resource.getId(), List.of());
+                continue;
+            }
+            List<Interval> busy;
+            if (AllocationCapacityService.isPool(resource)) {
+                busy = fullByPool.getOrDefault(resource.getId(), List.of());
+            } else {
+                busy = toIntervals(AllocationCapacityService.saturated(
+                        allocationsByResourceId.getOrDefault(resource.getId(), List.of()),
+                        capacityOf(resource), window.open(), window.close()));
+                if (resource.getParentPool() != null) {
+                    busy = unionIntervals(busy, fullByPool.getOrDefault(resource.getParentPool().getId(), List.of()));
+                }
+            }
+            freeSlotsByResourceId.put(resource.getId(), computeFreeSlots(window, busy));
         }
 
         Map<Long, List<Interval>> effectiveSlotsByResourceId = computeEffectiveSlots(
@@ -293,6 +330,8 @@ public class AvailabilityService {
                     .colorHex(resource.getColorHex())
                     .displayOrder(resource.getDisplayOrder())
                     .capTotal(resource.getCapTotal())
+                    .totalUnits(AllocationCapacityService.isPool(resource) ? capacityOf(resource) : null)
+                    .freeUnits(freeUnitsByPool.get(resource.getId()))
                     .serviceWindowStart(window != null ? window.open().toLocalTime() : null)
                     .serviceWindowEnd(window != null ? window.close().toLocalTime() : null)
                     .availableSlots(slotDtos)
@@ -472,14 +511,25 @@ public class AvailabilityService {
         return fallback;
     }
 
-    private List<Interval> computeFreeSlots(ServiceCalendarService.ServiceWindow window, List<Allocation> allocations) {
+    private static int capacityOf(Resource resource) {
+        if (AllocationCapacityService.isPool(resource) && resource.getPoolTotalUnits() == null) {
+            return 1;
+        }
+        return AllocationCapacityService.capacityOf(resource);
+    }
+
+    private static List<Interval> toIntervals(List<AllocationCapacityService.Window> windows) {
+        return windows.stream().map(w -> new Interval(w.start(), w.end())).collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private List<Interval> computeFreeSlots(ServiceCalendarService.ServiceWindow window, List<Interval> busyIntervals) {
         if (window == null) {
             return List.of();
         }
         List<Interval> busy = new ArrayList<>();
-        for (Allocation allocation : allocations) {
-            LocalDateTime start = max(allocation.getStartsAt(), window.open());
-            LocalDateTime end = min(allocation.getEndsAt(), window.close());
+        for (Interval interval : busyIntervals) {
+            LocalDateTime start = max(interval.start, window.open());
+            LocalDateTime end = min(interval.end, window.close());
             if (end.isAfter(start)) {
                 busy.add(new Interval(start, end));
             }

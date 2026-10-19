@@ -98,10 +98,10 @@ public final class SalesDtos {
                                 BigDecimal extraCost,
                                 BigDecimal margin,
                                 BigDecimal marginPercent,
-                                List<EventProfit> events) {
+                                List<BookingProfit> bookings) {
     }
 
-    public record EventProfit(Long eventId,
+    public record BookingProfit(Long bookingId,
                               String name,
                               String status,
                               BigDecimal revenue,

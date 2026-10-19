@@ -8,11 +8,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface CrmCostItemRepository extends JpaRepository<CrmCostItem, Long> {
-    List<CrmCostItem> findByTenantIdAndEventIdOrderByIdAsc(Long tenantId, Long eventId);
+    List<CrmCostItem> findByTenantIdAndBookingIdOrderByIdAsc(Long tenantId, Long bookingId);
 
-    List<CrmCostItem> findByTenantIdAndEventIdIn(Long tenantId, Collection<Long> eventIds);
+    List<CrmCostItem> findByTenantIdAndBookingIdIn(Long tenantId, Collection<Long> bookingIds);
 
-    List<CrmCostItem> findByTenantIdAndOpportunityIdAndEventIdIsNullOrderByIdAsc(Long tenantId, Long opportunityId);
+    List<CrmCostItem> findByTenantIdAndOpportunityIdAndBookingIdIsNullOrderByIdAsc(Long tenantId, Long opportunityId);
 
     Optional<CrmCostItem> findByIdAndTenantId(Long id, Long tenantId);
 }

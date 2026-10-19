@@ -31,11 +31,14 @@ public class Reservation {
     private Long productId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "request_id")
+    @JoinColumn(name = "request_id", nullable = false)
     private ReservationRequest request;
 
-    @Column(name = "event_function_id")
-    private Long eventFunctionId;
+    @Column(name = "booking_function_id")
+    private Long bookingFunctionId;
+
+    @Column(name = "booking_room_block_id")
+    private Long bookingRoomBlockId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "request_type", nullable = false)
@@ -90,6 +93,10 @@ public class Reservation {
 
     @Column(name = "qty")
     private Integer qty;
+
+    @Builder.Default
+    @Column(name = "units", nullable = false)
+    private Integer units = 1;
 
     @Column(name = "unit_price")
     private BigDecimal unitPrice;

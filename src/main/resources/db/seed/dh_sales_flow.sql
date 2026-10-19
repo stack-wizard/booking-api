@@ -1,8 +1,7 @@
 -- JDBC seed (classpath). Placeholders replaced at runtime: __TENANT_ID__ = chain, __PROPERTY_TENANT_ID__ = hotel hosting the functions. Not a Flyway migration.
--- Manual demo: one complete sales flow for a resolved tenant (__TENANT_ID__).
--- Invoked only by seed-dh-sales-flow.sh after Opera hotel DH is confirmed.
--- Not a Flyway migration — never runs on deploy by itself.
--- Safe to re-run: fixed seed codes; skips when the demo deal already exists.
+-- Demo sales flow for Platform DH: booking stops at TENTATIVE (option held, accepted quote).
+-- Does not call OPERA — tester confirms to DEFINITE, then Send / Post to OPERA manually.
+-- Safe to re-run: wipe + reseed when the TENTATIVE demo booking is missing.
 
 
 
@@ -22,7 +21,7 @@ create temporary table seed_ctx (
   contact_id bigint,
   lead_id bigint,
   opportunity_id bigint,
-  event_id bigint,
+  booking_id bigint,
   quote_id bigint,
   contract_id bigint,
   main_resource_id bigint,
@@ -54,7 +53,7 @@ from seed_ctx c
 where not exists (
   select 1 from crm_pipeline p where p.tenant_id = c.tenant_id and upper(p.code) = 'DH_EVENTS'
 )
-  and not exists (select 1 from event e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
+  and not exists (select 1 from booking e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
 
 insert into crm_pipeline_stage (tenant_id, pipeline_id, code, name, display_order, probability, stage_kind)
 select c.tenant_id, p.id, s.code, s.name, s.ord, s.prob, s.kind
@@ -94,10 +93,10 @@ update seed_ctx c set
   stage_won = (select s.id from crm_pipeline_stage s join crm_pipeline p on p.id = s.pipeline_id
                where p.tenant_id = c.tenant_id and upper(p.code) = 'DH_EVENTS' and upper(s.code) = 'WON'),
   reason_won = (select r.id from crm_outcome_reason r where r.tenant_id = c.tenant_id and r.code = 'DH_VENUE_FIT'),
-  main_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'EVT-MAIN'),
-  breakout_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'EVT-BREAKOUT'),
+  main_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'SALA1'),
+  breakout_resource_id = (select r.id from resource r where r.tenant_id = c.property_tenant_id and r.code = 'SAL2'),
   package_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Day Delegate Rate'),
-  rent_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Breakout room rent'),
+  rent_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Sala 2 rent'),
   coffee_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Coffee break'),
   lunch_product_id = (select p.id from product p where p.tenant_id = c.tenant_id and p.name = 'Business lunch');
 
@@ -111,7 +110,7 @@ from seed_ctx c
 where c.pipeline_id is not null
   and c.main_resource_id is not null
   and c.package_id is not null
-  and not exists (select 1 from event e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW')
+  and not exists (select 1 from booking e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW')
   and not exists (select 1 from crm_account a where a.tenant_id = c.tenant_id and a.vat_id = 'HRDHSEED001');
 
 insert into crm_contact (tenant_id, account_id, first_name, last_name, email, phone, job_title, attrs)
@@ -149,7 +148,7 @@ from seed_ctx c
 where c.account_id is not null
   and c.pipeline_id is not null
   and c.stage_won is not null
-  and not exists (select 1 from event e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW')
+  and not exists (select 1 from booking e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW')
   and not exists (
     select 1 from crm_opportunity o where o.tenant_id = c.tenant_id and o.attrs->>'seed' = 'DH_SALES_FLOW'
   );
@@ -196,110 +195,115 @@ from seed_ctx c
 where c.opportunity_id is not null
   and not exists (select 1 from crm_lead l where l.tenant_id = c.tenant_id and l.attrs->>'seed' = 'DH_SALES_FLOW');
 
--- Event DEFINITE
-insert into event (
-  tenant_id, property_tenant_id, account_id, primary_contact_id, opportunity_id, name, status, event_type,
+-- Booking TENTATIVE: option held + accepted quote. Tester → Definite → Send/Post to OPERA.
+insert into booking (
+  tenant_id, property_tenant_id, account_id, primary_contact_id, opportunity_id, name, status, status_code, event_type,
   decision_date, date_from, date_to, expected_pax, guaranteed_pax, guarantee_due_date,
   currency, owner_user_id, team_id, notes, attrs
 )
 select c.tenant_id, c.property_tenant_id, c.account_id, c.contact_id, c.opportunity_id, 'DH Seed Congress',
-       'DEFINITE', 'CONFERENCE',
+       'TENTATIVE',
+       coalesce(
+         (select s.code from booking_status s
+           where s.tenant_id = c.tenant_id and s.phase = 'TENTATIVE' and s.active
+           order by case when s.opera_code = 'TEN' then 0 else 1 end, s.display_order nulls last, s.id
+           limit 1),
+         'TEN'
+       ),
+       'MET',
        c.date_from - 45, c.date_from, c.date_to, 130, 120, c.date_from - 14,
-       'EUR', c.owner_id, c.team_id, 'Seeded definite event after accepted quote',
-       jsonb_build_object('seed', 'DH_SALES_FLOW', 'setupStyle', 'CLASSROOM', 'cocktail', true)
+       'EUR', c.owner_id, c.team_id,
+       'Seeded TENTATIVE booking for OPERA post testing (confirm → Send to OPERA → Post to PM). No OPERA call from seed.',
+       jsonb_build_object('seed', 'DH_SALES_FLOW', 'purpose', 'OPERA_POST_READY', 'setupStyle', 'CLASS', 'cocktail', true)
 from seed_ctx c
 where c.opportunity_id is not null
   and c.main_resource_id is not null
-  and not exists (select 1 from event e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
+  and not exists (select 1 from booking e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
 
 update seed_ctx c set
-  event_id = (select id from event e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
+  booking_id = (select id from booking e where e.tenant_id = c.tenant_id and e.attrs->>'seed' = 'DH_SALES_FLOW');
 
-insert into event_status_history (tenant_id, event_id, from_status, to_status, changed_by, note, created_at)
-select c.tenant_id, c.event_id, null, 'INQUIRY', c.owner_id, 'Seed', now() - interval '18 days'
-from seed_ctx c where c.event_id is not null
-  and not exists (select 1 from event_status_history h where h.event_id = c.event_id);
+insert into booking_status_history (tenant_id, booking_id, from_status, to_status, changed_by, note, created_at)
+select c.tenant_id, c.booking_id, null, 'INQUIRY', c.owner_id, 'Seed', now() - interval '18 days'
+from seed_ctx c where c.booking_id is not null
+  and not exists (select 1 from booking_status_history h where h.booking_id = c.booking_id);
 
-insert into event_status_history (tenant_id, event_id, from_status, to_status, changed_by, note, created_at)
-select c.tenant_id, c.event_id, 'INQUIRY', 'TENTATIVE', c.owner_id, 'Seed', now() - interval '10 days'
-from seed_ctx c where c.event_id is not null
-  and not exists (select 1 from event_status_history h where h.event_id = c.event_id and h.to_status = 'TENTATIVE');
-
-insert into event_status_history (tenant_id, event_id, from_status, to_status, changed_by, note, created_at)
-select c.tenant_id, c.event_id, 'TENTATIVE', 'DEFINITE', c.owner_id, 'Seed: quote accepted', now() - interval '5 days'
-from seed_ctx c where c.event_id is not null
-  and not exists (select 1 from event_status_history h where h.event_id = c.event_id and h.to_status = 'DEFINITE');
+insert into booking_status_history (tenant_id, booking_id, from_status, to_status, changed_by, note, created_at)
+select c.tenant_id, c.booking_id, 'INQUIRY', 'TENTATIVE', c.owner_id, 'Seed: option held, quote accepted — confirm to post to OPERA',
+       now() - interval '10 days'
+from seed_ctx c where c.booking_id is not null
+  and not exists (select 1 from booking_status_history h where h.booking_id = c.booking_id and h.to_status = 'TENTATIVE');
 
 -- Functions + package line items. Reservations are created by DhSalesFlowSeedRunner after this
--- script commits, so a taken hall does not roll the event back.
-insert into event_function (
-  tenant_id, event_id, resource_id, function_type, name, setup_style,
+-- script commits, so a taken hall does not roll the booking back. Local holds only — no OPERA push.
+insert into booking_function (
+  tenant_id, booking_id, resource_id, function_type, name, event_type, setup_style,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, package_product_id, display_order
 )
-select c.property_tenant_id, c.event_id, c.main_resource_id, 'PLENARY', 'Day Delegate Rate', 'CLASSROOM',
+select c.property_tenant_id, c.booking_id, c.main_resource_id, 'PLENARY', 'Day Delegate Rate', 'MET', 'CLASS',
        c.date_from + time '09:00', c.date_from + time '17:00',
        c.date_from + time '08:00', c.date_from + time '18:00',
        120, c.package_id, 10
 from seed_ctx c
-where c.event_id is not null
-  and not exists (select 1 from event_function f where f.event_id = c.event_id and f.function_type = 'PLENARY');
+where c.booking_id is not null
+  and not exists (select 1 from booking_function f where f.booking_id = c.booking_id and f.function_type = 'PLENARY');
 
-insert into event_function (
-  tenant_id, event_id, resource_id, function_type, name, setup_style,
+insert into booking_function (
+  tenant_id, booking_id, resource_id, function_type, name, event_type, setup_style,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, display_order
 )
-select c.property_tenant_id, c.event_id, c.breakout_resource_id, 'BREAKOUT', 'Workshop', 'CLASSROOM',
+select c.property_tenant_id, c.booking_id, c.breakout_resource_id, 'BREAKOUT', 'Workshop', 'MET', 'CLASS',
        c.date_to + time '09:00', c.date_to + time '12:00',
        c.date_to + time '08:30', c.date_to + time '12:30',
        20, 20
 from seed_ctx c
-where c.event_id is not null and c.breakout_resource_id is not null
-  and not exists (select 1 from event_function f where f.event_id = c.event_id and f.function_type = 'BREAKOUT');
+where c.booking_id is not null and c.breakout_resource_id is not null
+  and not exists (select 1 from booking_function f where f.booking_id = c.booking_id and f.function_type = 'BREAKOUT');
 
-insert into event_function (
-  tenant_id, event_id, function_type, name,
+insert into booking_function (
+  tenant_id, booking_id, function_type, name,
   starts_at, ends_at, occupancy_starts_at, occupancy_ends_at, pax, package_product_id, display_order
 )
-select c.property_tenant_id, c.event_id, 'COFFEE_BREAK', 'Coffee break',
+select c.property_tenant_id, c.booking_id, 'COFFEE_BREAK', 'Coffee break',
        c.date_from + time '10:30', c.date_from + time '11:00',
        c.date_from + time '10:30', c.date_from + time '11:00',
        120, c.package_id, 15
 from seed_ctx c
-where c.event_id is not null
-  and not exists (select 1 from event_function f where f.event_id = c.event_id and f.function_type = 'COFFEE_BREAK');
+where c.booking_id is not null
+  and not exists (select 1 from booking_function f where f.booking_id = c.booking_id and f.function_type = 'COFFEE_BREAK');
 
-insert into event_function_item (
-  tenant_id, event_function_id, product_id, package_product_id, description, uom, qty, qty_basis,
+insert into booking_function_item (
+  tenant_id, booking_function_id, product_id, package_product_id, description, uom, qty, qty_basis,
   unit_price, discount_amount, gross_amount, display_order
 )
 select c.property_tenant_id, f.id, c.package_id, c.package_id, 'Day Delegate Rate', 'UNIT', 120, 'PER_GUARANTEED_PAX',
        65.00, 0, 7800.00, 1
 from seed_ctx c
-join event_function f on f.event_id = c.event_id and f.function_type = 'PLENARY'
-where not exists (select 1 from event_function_item i where i.event_function_id = f.id);
+join booking_function f on f.booking_id = c.booking_id and f.function_type = 'PLENARY'
+where not exists (select 1 from booking_function_item i where i.booking_function_id = f.id);
 
-insert into event_function_item (
-  tenant_id, event_function_id, product_id, description, uom, qty, qty_basis,
+insert into booking_function_item (
+  tenant_id, booking_function_id, product_id, description, uom, qty, qty_basis,
   unit_price, discount_amount, gross_amount, display_order
 )
 select c.property_tenant_id, f.id, c.rent_product_id, 'Breakout room rent', 'HOUR', 3, 'FIXED',
        45.00, 0, 135.00, 1
 from seed_ctx c
-join event_function f on f.event_id = c.event_id and f.function_type = 'BREAKOUT'
+join booking_function f on f.booking_id = c.booking_id and f.function_type = 'BREAKOUT'
 where c.rent_product_id is not null
-  and not exists (select 1 from event_function_item i where i.event_function_id = f.id);
+  and not exists (select 1 from booking_function_item i where i.booking_function_id = f.id);
 
 -- Accepted quote + signed contract + BEO snapshot + deposit milestone
 insert into sales_quote (
-  tenant_id, event_id, opportunity_id, account_id, quote_number, status, currency, valid_until, version,
+  tenant_id, booking_id, opportunity_id, account_id, quote_number, status, currency, valid_until, version,
   total_base, total_offered, total_tax, discount_percent, notes, terms, sent_at, decided_at, decided_by_name, decision_note
 )
-select c.tenant_id, c.event_id, c.opportunity_id, c.account_id, 'Q-DH-SEED-001', 'ACCEPTED', 'EUR',
+select c.tenant_id, c.booking_id, c.opportunity_id, c.account_id, 'Q-DH-SEED-001', 'ACCEPTED', 'EUR',
        c.date_from - 30, 1, 7800.00, 7800.00, 1014.00, 0,
        'DH seed quote', 'Net 14. Cancellation per hotel policy.',
        now() - interval '10 days', now() - interval '6 days', 'Ana Horvat', 'Accepted via portal (seed)'
 from seed_ctx c
-where c.event_id is not null
+where c.booking_id is not null
   and not exists (select 1 from sales_quote q where q.tenant_id = c.tenant_id and q.quote_number = 'Q-DH-SEED-001');
 
 update seed_ctx c set
@@ -307,28 +311,28 @@ update seed_ctx c set
 
 insert into sales_quote_version (tenant_id, quote_id, version, snapshot, total_offered, sent_by)
 select c.tenant_id, c.quote_id, 1,
-       jsonb_build_object('seed', 'DH_SALES_FLOW', 'event', 'DH Seed Congress', 'total', 7800),
+       jsonb_build_object('seed', 'DH_SALES_FLOW', 'booking', 'DH Seed Congress', 'total', 7800),
        7800.00, c.owner_id
 from seed_ctx c
 where c.quote_id is not null
 on conflict (quote_id, version) do nothing;
 
 insert into sales_quote_line (
-  tenant_id, quote_id, line_group, product_id, event_function_id, description, service_date, uom, qty,
+  tenant_id, quote_id, line_group, product_id, booking_function_id, description, service_date, uom, qty,
   base_rate, offered_rate, tax1_percent, amount_base, amount_offered, display_order
 )
 select c.tenant_id, c.quote_id, 'F_AND_B', c.package_id, f.id, 'Day Delegate Rate', c.date_from, 'UNIT', 120,
        65.00, 65.00, 13, 7800.00, 7800.00, 10
 from seed_ctx c
-join event_function f on f.event_id = c.event_id and f.function_type = 'PLENARY'
+join booking_function f on f.booking_id = c.booking_id and f.function_type = 'PLENARY'
 where c.quote_id is not null
   and not exists (select 1 from sales_quote_line l where l.quote_id = c.quote_id);
 
 insert into sales_contract (
-  tenant_id, event_id, quote_id, contract_number, status, currency, total_amount, terms, sent_at, signed_at, signed_by_name
+  tenant_id, booking_id, quote_id, contract_number, status, currency, total_amount, terms, sent_at, signed_at, signed_by_name
 )
-select c.tenant_id, c.event_id, c.quote_id, 'C-DH-SEED-001', 'SIGNED', 'EUR', 7800.00,
-       'Seeded contract terms', now() - interval '5 days', now() - interval '4 days', 'Ana Horvat'
+select c.tenant_id, c.booking_id, c.quote_id, 'C-DH-SEED-001', 'SENT', 'EUR', 7800.00,
+       'Seeded contract terms (unsigned until DEFINITE)', now() - interval '5 days', null, null
 from seed_ctx c
 where c.quote_id is not null
   and not exists (select 1 from sales_contract x where x.tenant_id = c.tenant_id and x.contract_number = 'C-DH-SEED-001');
@@ -348,18 +352,18 @@ from seed_ctx c
 where c.contract_id is not null
   and not exists (select 1 from sales_payment_milestone m where m.contract_id = c.contract_id and m.kind = 'FINAL');
 
-insert into event_order (tenant_id, event_id, version, status, snapshot, note, issued_by)
-select c.tenant_id, c.event_id, 1, 'ISSUED',
+insert into booking_order (tenant_id, booking_id, version, status, snapshot, note, issued_by)
+select c.tenant_id, c.booking_id, 1, 'ISSUED',
        jsonb_build_object(
          'seed', 'DH_SALES_FLOW',
-         'eventName', 'DH Seed Congress',
+         'bookingName', 'DH Seed Congress',
          'pax', 120,
          'functions', jsonb_build_array('PLENARY', 'COFFEE_BREAK', 'BREAKOUT')
        ),
        'Seed BEO', c.owner_id
 from seed_ctx c
-where c.event_id is not null
-on conflict (event_id, version) do nothing;
+where c.booking_id is not null
+on conflict (booking_id, version) do nothing;
 
 insert into crm_activity (tenant_id, account_id, lead_id, opportunity_id, contact_id, activity_type, subject, body, assigned_to, done_at)
 select c.tenant_id, c.account_id,

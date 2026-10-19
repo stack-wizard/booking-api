@@ -168,7 +168,7 @@ public class TenantSetupService {
     }
 
     /**
-     * Moves the chain-level data of a hotel (catalog, CRM, events, sales documents, people) to its organization,
+     * Moves the chain-level data of a hotel (catalog, CRM, bookings, sales documents, people) to its organization,
      * see {@code TenantLevel.ORG_TABLES}. All or nothing; fails when the organization already owns a row with the
      * same unique code. Idempotent: a second run finds nothing to move.
      */

@@ -3,7 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.stackwizard.booking_api.dto.InvoiceCreateItemRequest;
 import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.dto.SalesDtos;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.Product;
@@ -52,7 +52,7 @@ class SalesContractServiceTest {
     @Mock SalesPaymentMilestoneRepository milestoneRepo;
     @Mock SalesQuoteRepository quoteRepo;
     @Mock SalesQuoteLineRepository quoteLineRepo;
-    @Mock EventService eventService;
+    @Mock BookingService bookingService;
     @Mock CrmAccountRepository accountRepo;
     @Mock CrmContactRepository contactRepo;
     @Mock ProductRepository productRepo;
@@ -60,23 +60,24 @@ class SalesContractServiceTest {
     @Mock InvoiceRepository invoiceRepo;
     @Mock MediaStorageService mediaStorageService;
     @Mock CrmAccessContext accessContext;
+    @Mock TenantHierarchy hierarchy;
 
     SalesContractService service;
     static final LocalDate TODAY = LocalDate.of(2026, 10, 6);
-    Event event = Event.builder().id(5L).tenantId(1L).accountId(2L).name("Pharma")
+    Booking booking = Booking.builder().id(5L).tenantId(1L).accountId(2L).name("Pharma")
             .dateFrom(LocalDate.of(2026, 11, 10)).dateTo(LocalDate.of(2026, 11, 11)).build();
-    SalesContract contract = SalesContract.builder().id(9L).tenantId(1L).eventId(5L).quoteId(50L)
+    SalesContract contract = SalesContract.builder().id(9L).tenantId(1L).bookingId(5L).quoteId(50L)
             .contractNumber("C2026-0001").status(SalesContract.Status.SIGNED).currency("EUR")
             .totalAmount(new BigDecimal("1000.00")).build();
 
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new SalesContractService(contractRepo, documentRepo, milestoneRepo, quoteRepo, quoteLineRepo, eventService,
-                accountRepo, contactRepo, productRepo, invoiceService, invoiceRepo, mediaStorageService, accessContext,
+        service = new SalesContractService(contractRepo, documentRepo, milestoneRepo, quoteRepo, quoteLineRepo, bookingService,
+                accountRepo, contactRepo, productRepo, invoiceService, invoiceRepo, mediaStorageService, accessContext, hierarchy,
                 new BigDecimal("30"));
-        when(eventService.requireEvent(5L)).thenReturn(event);
-        when(eventService.requireEditable(5L)).thenReturn(event);
+        when(bookingService.requireBooking(5L)).thenReturn(booking);
+        when(bookingService.requireEditable(5L)).thenReturn(booking);
         when(contractRepo.findByIdAndTenantId(9L, 1L)).thenReturn(Optional.of(contract));
         when(contractRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(invoiceRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
@@ -89,18 +90,18 @@ class SalesContractServiceTest {
 
     @Test
     void defaultPlanIsDepositThenFinal() {
-        List<SalesPaymentMilestone> rows = SalesContractService.defaultMilestones(contract, event, new BigDecimal("30"), TODAY);
+        List<SalesPaymentMilestone> rows = SalesContractService.defaultMilestones(contract, booking, new BigDecimal("30"), TODAY);
         assertThat(rows).extracting(SalesPaymentMilestone::getKind)
                 .containsExactly(SalesPaymentMilestone.Kind.DEPOSIT, SalesPaymentMilestone.Kind.FINAL);
         assertThat(rows.get(0).getAmount()).isEqualByComparingTo("300.00");
         assertThat(rows.get(0).getDueDate()).isEqualTo(TODAY.plusDays(7));
         assertThat(rows.get(1).getAmount()).isEqualByComparingTo("700.00");
-        assertThat(rows.get(1).getDueDate()).isEqualTo(event.getDateTo());
+        assertThat(rows.get(1).getDueDate()).isEqualTo(booking.getDateTo());
     }
 
     @Test
-    void depositIsDueBeforeAnImminentEvent() {
-        Event soon = Event.builder().dateFrom(TODAY.plusDays(3)).dateTo(TODAY.plusDays(3)).build();
+    void depositIsDueBeforeAnImminentBooking() {
+        Booking soon = Booking.builder().dateFrom(TODAY.plusDays(3)).dateTo(TODAY.plusDays(3)).build();
         List<SalesPaymentMilestone> rows = SalesContractService.defaultMilestones(contract, soon, new BigDecimal("30"), TODAY);
         assertThat(rows.get(0).getDueDate()).isEqualTo(TODAY.plusDays(2));
     }
@@ -144,16 +145,29 @@ class SalesContractServiceTest {
         when(milestoneRepo.findByIdAndTenantId(70L, 1L)).thenReturn(Optional.of(deposit));
         when(productRepo.findFirstByTenantIdAndProductTypeIgnoreCaseOrderByDisplayOrderAscIdAsc(1L, "DEPOSIT"))
                 .thenReturn(Optional.of(Product.builder().id(99L).name("Deposit").build()));
-        when(invoiceService.createManualDraft(any())).thenReturn(Invoice.builder().id(500L).tenantId(1L).build());
+        when(invoiceService.createManualDraft(any())).thenReturn(Invoice.builder().id(500L).tenantId(7L).build());
+        TenantContext.setScope(1L, 7L);
 
         service.invoiceMilestone(70L);
 
         ArgumentCaptor<InvoiceCreateRequest> request = ArgumentCaptor.forClass(InvoiceCreateRequest.class);
         verify(invoiceService).createManualDraft(request.capture());
+        assertThat(request.getValue().getTenantId()).isEqualTo(7L);
         assertThat(request.getValue().getInvoiceType()).isEqualTo(InvoiceType.DEPOSIT);
         assertThat(request.getValue().getItems().get(0).getUnitPriceGross()).isEqualByComparingTo("300.00");
         assertThat(deposit.getStatus()).isEqualTo(SalesPaymentMilestone.Status.INVOICED);
         assertThat(deposit.getInvoiceId()).isEqualTo(500L);
+    }
+
+    @Test
+    void invoiceNeedsTheBookingsHotel() {
+        TenantContext.setScope(1L, 1L);
+        assertThatThrownBy(() -> SalesContractService.invoicingHotel(Booking.builder().build()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("Select the hotel");
+        TenantContext.setScope(1L, 7L);
+        assertThatThrownBy(() -> SalesContractService.invoicingHotel(Booking.builder().propertyTenantId(8L).build()))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("booking's hotel");
+        assertThat(SalesContractService.invoicingHotel(Booking.builder().propertyTenantId(7L).build())).isEqualTo(7L);
     }
 
     @Test
@@ -168,7 +182,7 @@ class SalesContractServiceTest {
 
     @Test
     void contractNeedsAcceptedQuote() {
-        when(quoteRepo.findFirstByTenantIdAndEventIdAndStatusOrderByIdDesc(1L, 5L, SalesQuote.Status.ACCEPTED))
+        when(quoteRepo.findFirstByTenantIdAndBookingIdAndStatusOrderByIdDesc(1L, 5L, SalesQuote.Status.ACCEPTED))
                 .thenReturn(Optional.empty());
         assertThatThrownBy(() -> service.create(5L, null)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("accepted quote");

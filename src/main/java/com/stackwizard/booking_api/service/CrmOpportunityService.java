@@ -49,6 +49,7 @@ public class CrmOpportunityService {
     private final CrmAccessContext accessContext;
     private final CrmTeamDirectory teamDirectory;
     private final TenantHierarchy hierarchy;
+    private final BookingService bookingService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CrmOpportunityService(CrmOpportunityRepository opportunityRepo,
@@ -60,7 +61,8 @@ public class CrmOpportunityService {
                                  CrmContactRepository contactRepo,
                                  CrmAccessContext accessContext,
                                  CrmTeamDirectory teamDirectory,
-                                 TenantHierarchy hierarchy) {
+                                 TenantHierarchy hierarchy,
+                                 BookingService bookingService) {
         this.opportunityRepo = opportunityRepo;
         this.stageRepo = stageRepo;
         this.requirementRepo = requirementRepo;
@@ -71,6 +73,7 @@ public class CrmOpportunityService {
         this.accessContext = accessContext;
         this.teamDirectory = teamDirectory;
         this.hierarchy = hierarchy;
+        this.bookingService = bookingService;
     }
 
     private void requireHotelOfChain(Long orgTenantId, Long propertyTenantId) {
@@ -257,6 +260,9 @@ public class CrmOpportunityService {
                 .changedBy(accessContext.currentUserId())
                 .note(request.getNote())
                 .build());
+        if (target.getBookingStatusCode() != null && !target.getId().equals(fromStageId)) {
+            bookingService.applyStageStatus(tenantId, saved.getId(), target.getBookingStatusCode(), target.getName());
+        }
         return saved;
     }
 

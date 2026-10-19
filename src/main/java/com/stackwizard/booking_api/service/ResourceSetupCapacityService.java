@@ -1,11 +1,9 @@
 package com.stackwizard.booking_api.service;
 
-import com.stackwizard.booking_api.model.Allocation;
 import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.ResourceComposition;
 import com.stackwizard.booking_api.model.ResourceSetupCapacity;
-import com.stackwizard.booking_api.repository.AllocationRepository;
 import com.stackwizard.booking_api.repository.ResourceCompositionRepository;
 import com.stackwizard.booking_api.repository.ResourceRepository;
 import com.stackwizard.booking_api.repository.ResourceSetupCapacityRepository;
@@ -29,24 +27,42 @@ import java.util.Set;
 @Service
 public class ResourceSetupCapacityService {
     static final Set<String> SPACE_RESOURCE_TYPES = Set.of("MEETING_ROOM", "MEETING_OFFICE", "COMPOSITION");
+    /** Accommodation; a room type of a hotel is a POOL resource of one of these types. */
+    static final Set<String> ROOM_RESOURCE_TYPES = Set.of("ROOM", "APARTMENT");
+
+    /** Meeting space (hall / office / composition), not a sleeping-room pool. */
+    public static boolean isFunctionSpace(Resource resource) {
+        return resource != null
+                && isActive(resource)
+                && resource.getResourceType() != null && resource.getResourceType().getCode() != null
+                && SPACE_RESOURCE_TYPES.contains(resource.getResourceType().getCode().trim().toUpperCase(Locale.ROOT));
+    }
+
+    /** Active room-type pool: what a room block is placed on and what the room grid shows. */
+    public static boolean isRoomType(Resource resource) {
+        return AllocationCapacityService.isPool(resource)
+                && isActive(resource)
+                && resource.getResourceType() != null && resource.getResourceType().getCode() != null
+                && ROOM_RESOURCE_TYPES.contains(resource.getResourceType().getCode().trim().toUpperCase(Locale.ROOT));
+    }
 
     private final ResourceSetupCapacityRepository capacityRepo;
     private final ResourceRepository resourceRepo;
     private final ResourceCompositionRepository compositionRepo;
-    private final AllocationRepository allocationRepo;
+    private final AllocationCapacityService capacityService;
     private final CrmAccessContext accessContext;
     private final CrmLookupService lookupService;
 
     public ResourceSetupCapacityService(ResourceSetupCapacityRepository capacityRepo,
                                         ResourceRepository resourceRepo,
                                         ResourceCompositionRepository compositionRepo,
-                                        AllocationRepository allocationRepo,
+                                        AllocationCapacityService capacityService,
                                         CrmAccessContext accessContext,
                                         CrmLookupService lookupService) {
         this.capacityRepo = capacityRepo;
         this.resourceRepo = resourceRepo;
         this.compositionRepo = compositionRepo;
-        this.allocationRepo = allocationRepo;
+        this.capacityService = capacityService;
         this.accessContext = accessContext;
         this.lookupService = lookupService;
     }
@@ -115,7 +131,17 @@ public class ResourceSetupCapacityService {
                                              String setupStyle,
                                              LocalDateTime from,
                                              LocalDateTime to) {
-        Long tenantId = TenantResolver.requireTenantId();
+        return searchSpaces(TenantResolver.requireTenantId(), minPax, setupStyle, from, to, Set.of());
+    }
+
+    /** Same search in a given hotel; {@code excludeReservationIds} do not count as occupying (the booking's own lines). */
+    @Transactional(readOnly = true)
+    public List<SpaceCandidate> searchSpaces(Long tenantId,
+                                             Integer minPax,
+                                             String setupStyle,
+                                             LocalDateTime from,
+                                             LocalDateTime to,
+                                             Set<Long> excludeReservationIds) {
         int pax = minPax == null ? 1 : minPax;
         if (pax <= 0) {
             throw new IllegalArgumentException("minPax must be > 0");
@@ -134,7 +160,7 @@ public class ResourceSetupCapacityService {
             if (resource == null || !tenantId.equals(resource.getTenantId()) || !isActive(resource)) {
                 continue;
             }
-            boolean available = from == null || isFree(resource, from, to);
+            boolean available = from == null || isFree(resource, from, to, excludeReservationIds);
             out.add(new SpaceCandidate(
                     resource.getId(),
                     resource.getName(),
@@ -150,17 +176,47 @@ public class ResourceSetupCapacityService {
         return out;
     }
 
+    /** Every active space of the hotel, regardless of setup capacity (offices, spaces without setups). */
+    @Transactional(readOnly = true)
+    public List<SpaceCandidate> listSpaces(Long tenantId, LocalDateTime from, LocalDateTime to, Set<Long> excludeReservationIds) {
+        List<SpaceCandidate> out = new ArrayList<>();
+        for (Resource resource : resourceRepo.findByTenantId(tenantId)) {
+            String code = resource.getResourceType() != null && resource.getResourceType().getCode() != null
+                    ? resource.getResourceType().getCode().trim().toUpperCase(Locale.ROOT) : "";
+            if (!SPACE_RESOURCE_TYPES.contains(code) || !isActive(resource)) {
+                continue;
+            }
+            out.add(new SpaceCandidate(
+                    resource.getId(),
+                    resource.getName(),
+                    code,
+                    resource.getAreaSqm() != null ? resource.getAreaSqm().toPlainString() : null,
+                    resource.getFloor(),
+                    resource.getNaturalLight(),
+                    capacityRepo.findByTenantIdAndResourceIdOrderBySetupStyleAsc(tenantId, resource.getId()).stream()
+                            .map(c -> new SetupCapacity(c.getSetupStyle(), c.getCapacity()))
+                            .toList(),
+                    from == null || isFree(resource, from, to, excludeReservationIds)));
+        }
+        return out;
+    }
+
     boolean isFree(Resource resource, LocalDateTime from, LocalDateTime to) {
-        Set<Long> ids = new HashSet<>();
-        ids.add(resource.getId());
+        return isFree(resource, from, to, Set.of());
+    }
+
+    boolean isFree(Resource resource, LocalDateTime from, LocalDateTime to, Set<Long> excludeReservationIds) {
+        if (capacityService.freeUnits(resource, from, to, excludeReservationIds) < 1) {
+            return false;
+        }
         for (ResourceComposition member : compositionRepo.findByParentResourceId(resource.getId())) {
-            if (member.getMemberResource() != null) {
-                ids.add(member.getMemberResource().getId());
+            Resource memberResource = member.getMemberResource();
+            int needed = member.getQty() != null ? member.getQty() : 1;
+            if (memberResource != null && capacityService.freeUnits(memberResource, from, to, excludeReservationIds) < needed) {
+                return false;
             }
         }
-        List<Allocation> busy = allocationRepo.findActiveByAllocatedResourceIdInAndStartsAtLessThanAndEndsAtGreaterThan(
-                List.copyOf(ids), to, from);
-        return busy.isEmpty();
+        return true;
     }
 
     Resource requireSpaceResource(Long tenantId, Long resourceId) {

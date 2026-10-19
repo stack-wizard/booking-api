@@ -71,6 +71,10 @@ public class CrmAccount extends CrmAuditableEntity {
     @Column(length = 2)
     private String country;
 
+    /** OPERA company / agent profile id; set by the OPERA integration, not by the account form. */
+    @Column(name = "opera_profile_id")
+    private String operaProfileId;
+
     @Column(nullable = false)
     private Boolean active;
 

@@ -102,6 +102,7 @@ public class ReservationRequestService {
         }
         ReservationRequest existing = requestRepo.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        requireNotBookingManaged(existing);
         if (existing.getStatus() != ReservationRequest.Status.DRAFT) {
             throw new IllegalStateException("Only draft reservation requests can be updated");
         }
@@ -236,12 +237,22 @@ public class ReservationRequestService {
         return value;
     }
 
+    /** Requests of a booking follow the booking; the guest request flows (payment, expiry, delete) do not apply. */
+    public static void requireNotBookingManaged(ReservationRequest request) {
+        if (request.getBookingId() != null) {
+            throw new IllegalStateException("Reservation request is managed by booking " + request.getBookingId());
+        }
+    }
+
     @Scheduled(fixedDelayString = "${reservation-requests.expiry-scan-ms:60000}")
     @Transactional
     public void expireStaleRequests() {
         OffsetDateTime now = OffsetDateTime.now();
         List<ReservationRequest> stale = requestRepo.findLockedByStatusInAndExpiresAtBefore(EXPIRABLE_REQUEST_STATUSES, now);
         for (ReservationRequest request : stale) {
+            if (request.getBookingId() != null) {
+                continue;
+            }
             if (request.getStatus() == ReservationRequest.Status.PENDING_PAYMENT) {
                 handlePendingPaymentExpiry(request, now);
                 continue;
@@ -334,6 +345,7 @@ public class ReservationRequestService {
     public ReservationRequest cancelPaymentForRequest(Long requestId) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        requireNotBookingManaged(request);
 
         if (request.getStatus() == ReservationRequest.Status.PENDING_PAYMENT) {
             cancelPaymentAttempt(request);
@@ -354,6 +366,7 @@ public class ReservationRequestService {
             // Idempotent delete/cancel: treat missing request as already removed.
             return;
         }
+        requireNotBookingManaged(request);
         if (request.getStatus() == ReservationRequest.Status.DRAFT) {
             deleteReservationsAndAllocations(requestId);
             requestRepo.deleteById(requestId);

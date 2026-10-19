@@ -13,7 +13,7 @@ public final class CrmTeamDtos {
     }
 
     /** Open work of one user that a reassignment would move. */
-    public record ReassignCounts(int leads, int opportunities, int accounts, int events) {
+    public record ReassignCounts(int leads, int opportunities, int accounts, int bookings) {
     }
 
     public record ReassignRequest(Long fromUserId,
@@ -22,7 +22,7 @@ public final class CrmTeamDtos {
                                   Boolean includeLeads,
                                   Boolean includeOpportunities,
                                   Boolean includeAccounts,
-                                  Boolean includeEvents,
+                                  Boolean includeBookings,
                                   Boolean endMemberships,
                                   String note) {
     }

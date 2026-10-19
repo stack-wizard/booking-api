@@ -49,4 +49,21 @@ public interface AllocationRepository extends JpaRepository<Allocation, Long> {
 			@Param("resourceIds") List<Long> resourceIds,
 			@Param("endsAt") LocalDateTime endsAt,
 			@Param("startsAt") LocalDateTime startsAt);
+
+	@Query("""
+			select a from Allocation a
+			join a.allocatedResource r
+			left join r.parentPool p
+			where (r.id = :poolId or p.id = :poolId)
+			  and a.startsAt < :endsAt
+			  and a.endsAt > :startsAt
+			  and (
+			    upper(a.status) = 'CONFIRMED'
+			    or (upper(a.status) = 'HOLD' and (a.expiresAt is null or a.expiresAt > current_timestamp))
+			  )
+			""")
+	List<Allocation> findActiveOnPoolOrMembers(
+			@Param("poolId") Long poolId,
+			@Param("endsAt") LocalDateTime endsAt,
+			@Param("startsAt") LocalDateTime startsAt);
 }

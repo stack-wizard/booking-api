@@ -48,6 +48,13 @@ public class OperaPostingConfigurationService {
         if (hotel.getActive() == null) {
             hotel.setActive(Boolean.TRUE);
         }
+        OperaHotel existing = hotel.getId() == null ? null : hotelRepo.findById(hotel.getId()).orElse(null);
+        if (hotel.getSpaceInventory() == null) {
+            hotel.setSpaceInventory(existing != null ? existing.getSpaceInventory() : OperaHotel.Mode.LOCAL);
+        }
+        if (hotel.getBilling() == null) {
+            hotel.setBilling(existing != null ? existing.getBilling() : OperaHotel.Mode.LOCAL);
+        }
         return hotelRepo.save(hotel);
     }
 

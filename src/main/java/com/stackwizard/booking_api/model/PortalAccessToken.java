@@ -27,8 +27,8 @@ public class PortalAccessToken {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "event_id", nullable = false)
-    private Long eventId;
+    @Column(name = "booking_id", nullable = false)
+    private Long bookingId;
 
     @Column(name = "contact_id")
     private Long contactId;

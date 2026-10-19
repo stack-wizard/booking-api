@@ -60,6 +60,7 @@ class CrmOpportunityLeadServiceTest {
     @Mock CrmTeamDirectory teamDirectory;
     @Mock CrmSegmentService segmentService;
     @Mock CrmLeadAssignmentService assignmentService;
+    @Mock BookingService bookingService;
 
     ObjectMapper objectMapper = new ObjectMapper();
     CrmOpportunityService opportunityService;
@@ -70,7 +71,7 @@ class CrmOpportunityLeadServiceTest {
         TenantContext.setTenantId(1L);
         opportunityService = new CrmOpportunityService(
                 opportunityRepo, stageRepo, requirementRepo, outcomeRepo, transitionRepo, accountRepo, contactRepo,
-                accessContext, teamDirectory, TenantHierarchyTestSupport.standalone());
+                accessContext, teamDirectory, TenantHierarchyTestSupport.standalone(), bookingService);
         leadService = new CrmLeadService(
                 leadRepo, accountRepo, contactRepo, pipelineRepo, stageRepo, opportunityRepo, transitionRepo,
                 accessContext, teamDirectory, segmentService, assignmentService);

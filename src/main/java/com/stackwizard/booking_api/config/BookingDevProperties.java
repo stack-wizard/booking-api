@@ -27,8 +27,9 @@ public class BookingDevProperties {
 
     /**
      * When true (default), startup seeds one demo sales flow for {@link #dhSalesFlowPlatformTenantId}
-     * if that Platform tenant is mapped. An older/incomplete seed (wrong tenant or missing hotel) is wiped
-     * and re-seeded. No-op when mapping is missing. Disable via SSM on real prod.
+     * if that Platform tenant is mapped. The booking stops at TENTATIVE (local holds only — no OPERA call).
+     * An older/incomplete seed (wrong tenant, missing hotel, or already DEFINITE) is wiped and re-seeded.
+     * No-op when mapping is missing. Disable via SSM on real prod.
      */
     private boolean dhSalesFlowSeed = true;
 

@@ -2,9 +2,9 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.CrmAlert;
-import com.stackwizard.booking_api.model.Event;
-import com.stackwizard.booking_api.model.EventFunction;
-import com.stackwizard.booking_api.model.EventFunctionItem;
+import com.stackwizard.booking_api.model.Booking;
+import com.stackwizard.booking_api.model.BookingFunction;
+import com.stackwizard.booking_api.model.BookingFunctionItem;
 import com.stackwizard.booking_api.model.PortalAccessToken;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
@@ -13,9 +13,13 @@ import com.stackwizard.booking_api.model.SalesQuoteApproval;
 import com.stackwizard.booking_api.model.SalesQuoteLine;
 import com.stackwizard.booking_api.model.SalesQuoteVersion;
 import com.stackwizard.booking_api.repository.CrmAccountRepository;
-import com.stackwizard.booking_api.repository.EventFunctionItemRepository;
-import com.stackwizard.booking_api.repository.EventFunctionRepository;
+import com.stackwizard.booking_api.repository.BookingFunctionItemRepository;
+import com.stackwizard.booking_api.repository.BookingFunctionRepository;
+import com.stackwizard.booking_api.repository.BookingRoomBlockNightRepository;
+import com.stackwizard.booking_api.repository.BookingRoomBlockRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.repository.ReservationRepository;
+import com.stackwizard.booking_api.repository.ResourceRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteApprovalRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteLineRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteRepository;
@@ -60,10 +64,14 @@ class SalesQuoteServiceTest {
     @Mock SalesQuoteLineRepository lineRepo;
     @Mock SalesQuoteVersionRepository versionRepo;
     @Mock SalesQuoteApprovalRepository approvalRepo;
-    @Mock EventService eventService;
-    @Mock EventFunctionRepository functionRepo;
-    @Mock EventFunctionItemRepository itemRepo;
-    @Mock EventReservationSync reservationSync;
+    @Mock BookingService bookingService;
+    @Mock BookingFunctionRepository functionRepo;
+    @Mock BookingFunctionItemRepository itemRepo;
+    @Mock BookingRoomBlockRepository roomBlockRepo;
+    @Mock BookingRoomBlockNightRepository roomNightRepo;
+    @Mock ReservationRepository reservationRepo;
+    @Mock ResourceRepository resourceRepo;
+    @Mock BookingReservationSync reservationSync;
     @Mock ProductRepository productRepo;
     @Mock CrmAccountRepository accountRepo;
     @Mock PortalTokenService portalTokenService;
@@ -72,21 +80,24 @@ class SalesQuoteServiceTest {
     @Mock PlatformTransactionManager transactionManager;
 
     SalesQuoteService service;
-    Event event;
+    Booking booking;
     List<SalesQuoteLine> lines;
 
     @BeforeEach
     void setUp() {
         TenantContext.setTenantId(1L);
-        service = new SalesQuoteService(quoteRepo, lineRepo, versionRepo, approvalRepo, eventService, functionRepo, itemRepo,
+        service = new SalesQuoteService(quoteRepo, lineRepo, versionRepo, approvalRepo, bookingService, functionRepo, itemRepo,
+                roomBlockRepo, roomNightRepo, reservationRepo, resourceRepo,
                 reservationSync, productRepo, accountRepo, portalTokenService, alertService, accessContext,
                 transactionManager, new BigDecimal("10"), 14);
-        event = Event.builder().id(5L).tenantId(1L).accountId(2L).ownerUserId(7L).name("Pharma")
-                .status(Event.Status.TENTATIVE).currency("EUR")
+        when(roomBlockRepo.findByTenantIdAndBookingIdOrderByDateFromAscIdAsc(any(), any())).thenReturn(List.of());
+        booking = Booking.builder().id(5L).tenantId(1L).accountId(2L).ownerUserId(7L).name("Pharma")
+                .status(Booking.Status.TENTATIVE).currency("EUR")
                 .dateFrom(LocalDate.now().plusDays(30)).dateTo(LocalDate.now().plusDays(31)).build();
-        when(eventService.requireEvent(5L)).thenReturn(event);
-        when(eventService.requireEditable(5L)).thenReturn(event);
-        when(eventService.findForSystem(1L, 5L)).thenReturn(Optional.of(event));
+        when(bookingService.requireBooking(5L)).thenReturn(booking);
+        when(bookingService.requireContentEditable(5L)).thenReturn(booking);
+        when(bookingService.requireEditable(5L)).thenReturn(booking);
+        when(bookingService.findForSystem(1L, 5L)).thenReturn(Optional.of(booking));
         when(quoteRepo.save(any())).thenAnswer(inv -> {
             SalesQuote q = inv.getArgument(0);
             if (q.getId() == null) {
@@ -107,13 +118,14 @@ class SalesQuoteServiceTest {
 
     @Test
     void buildLinesGroupsRentCateringAndAvAtOfferedRates() {
-        EventFunction plenary = function(1L, EventFunction.FunctionType.PLENARY);
-        EventFunction lunch = function(2L, EventFunction.FunctionType.LUNCH);
-        Reservation rent = Reservation.builder().productId(10L).eventFunctionId(1L).qty(1).uom("DAY")
+        BookingFunction plenary = function(1L, BookingFunction.FunctionType.PLENARY);
+        BookingFunction lunch = function(2L, BookingFunction.FunctionType.LUNCH);
+        lunch.setResourceId(null);
+        Reservation rent = Reservation.builder().productId(10L).bookingFunctionId(1L).qty(1).uom("DAY")
                 .unitPrice(new BigDecimal("1200")).build();
-        EventFunctionItem projector = EventFunctionItem.builder().eventFunctionId(1L).productId(11L).qty(1)
+        BookingFunctionItem projector = BookingFunctionItem.builder().bookingFunctionId(1L).productId(11L).qty(1)
                 .unitPrice(new BigDecimal("60")).grossAmount(new BigDecimal("60")).build();
-        EventFunctionItem meal = EventFunctionItem.builder().eventFunctionId(2L).productId(12L).qty(40)
+        BookingFunctionItem meal = BookingFunctionItem.builder().bookingFunctionId(2L).productId(12L).qty(40)
                 .unitPrice(new BigDecimal("28")).grossAmount(new BigDecimal("1008")).build();
         Map<Long, Product> products = Map.of(
                 10L, product(10L, "Hall A rent", null),
@@ -129,6 +141,21 @@ class SalesQuoteServiceTest {
         assertThat(lunchLine.getBaseRate()).isEqualByComparingTo("28.00");
         assertThat(lunchLine.getOfferedRate()).isEqualByComparingTo("25.20");
         assertThat(lunchLine.getAmountOffered()).isEqualByComparingTo("1008.00");
+    }
+
+    @Test
+    void buildLinesIncludesZeroRentForPlacedSpace() {
+        BookingFunction plenary = function(1L, BookingFunction.FunctionType.PLENARY);
+        Reservation rent = Reservation.builder().productId(10L).bookingFunctionId(1L).qty(1).uom("DAY")
+                .unitPrice(BigDecimal.ZERO).build();
+
+        List<SalesQuoteLine> built = SalesQuoteService.buildLines(1L, List.of(plenary),
+                Map.of(1L, rent), Map.of(), Map.of(10L, product(10L, "Hall", null)));
+
+        assertThat(built).hasSize(1);
+        assertThat(built.get(0).getLineGroup()).isEqualTo(SalesQuoteLine.Group.MEETING);
+        assertThat(built.get(0).getBaseRate()).isEqualByComparingTo("0.00");
+        assertThat(built.get(0).getAmountOffered()).isEqualByComparingTo("0.00");
     }
 
     @Test
@@ -151,12 +178,12 @@ class SalesQuoteServiceTest {
     void createSupersedesOpenQuotesAndNumbersPerYear() {
         SalesQuote old = quote(SalesQuote.Status.SENT, "0");
         old.setId(40L);
-        when(quoteRepo.findByTenantIdAndEventIdAndStatusIn(eq(1L), eq(5L), any())).thenReturn(List.of(old));
+        when(quoteRepo.findByTenantIdAndBookingIdAndStatusIn(eq(1L), eq(5L), any())).thenReturn(List.of(old));
         when(quoteRepo.countByNumberPrefix(eq(1L), any())).thenReturn(2L);
-        EventFunction plenary = function(1L, EventFunction.FunctionType.PLENARY);
-        when(functionRepo.findForEvent(1L, 5L)).thenReturn(List.of(plenary));
+        BookingFunction plenary = function(1L, BookingFunction.FunctionType.PLENARY);
+        when(functionRepo.findForBooking(1L, 5L)).thenReturn(List.of(plenary));
         when(reservationSync.activeLines(List.of(plenary))).thenReturn(List.of(Reservation.builder().productId(10L)
-                .eventFunctionId(1L).qty(1).uom("DAY").unitPrice(new BigDecimal("500")).build()));
+                .bookingFunctionId(1L).qty(1).uom("DAY").unitPrice(new BigDecimal("500")).build()));
         when(productRepo.findAllById(anyList())).thenReturn(List.of(product(10L, "Hall", null)));
 
         SalesQuote created = service.create(5L);
@@ -168,8 +195,8 @@ class SalesQuoteServiceTest {
     }
 
     @Test
-    void createRejectsEventWithAcceptedQuote() {
-        when(quoteRepo.existsByTenantIdAndEventIdAndStatus(1L, 5L, SalesQuote.Status.ACCEPTED)).thenReturn(true);
+    void createRejectsBookingWithAcceptedQuote() {
+        when(quoteRepo.existsByTenantIdAndBookingIdAndStatus(1L, 5L, SalesQuote.Status.ACCEPTED)).thenReturn(true);
         assertThatThrownBy(() -> service.create(5L)).isInstanceOf(IllegalStateException.class).hasMessageContaining("accepted");
     }
 
@@ -193,7 +220,7 @@ class SalesQuoteServiceTest {
         verify(accessContext).require(CrmPermission.QUOTE_APPROVE);
 
         PortalAccessToken token = PortalAccessToken.builder().token("abc").build();
-        when(portalTokenService.ensureToken(event, 7L)).thenReturn(token);
+        when(portalTokenService.ensureToken(booking, 7L)).thenReturn(token);
         when(portalTokenService.portalUrl(token)).thenReturn("http://portal/abc");
         SalesDtos.QuoteView view = service.send(50L);
 
@@ -259,7 +286,7 @@ class SalesQuoteServiceTest {
     }
 
     private SalesQuote quote(SalesQuote.Status status, String discount) {
-        SalesQuote quote = SalesQuote.builder().id(50L).tenantId(1L).eventId(5L).accountId(2L).quoteNumber("Q-1")
+        SalesQuote quote = SalesQuote.builder().id(50L).tenantId(1L).bookingId(5L).accountId(2L).quoteNumber("Q-1")
                 .status(status).currency("EUR").version(0).validUntil(LocalDate.now().plusDays(10))
                 .totalBase(BigDecimal.ZERO).totalOffered(BigDecimal.ZERO).totalTax(BigDecimal.ZERO)
                 .discountPercent(new BigDecimal(discount)).build();
@@ -267,10 +294,10 @@ class SalesQuoteServiceTest {
         return quote;
     }
 
-    private static EventFunction function(Long id, EventFunction.FunctionType type) {
+    private static BookingFunction function(Long id, BookingFunction.FunctionType type) {
         LocalDateTime start = LocalDate.of(2026, 11, 10).atTime(9, 0);
-        return EventFunction.builder().id(id).tenantId(1L).eventId(5L).functionType(type).name(type.name())
-                .startsAt(start).endsAt(start.plusHours(8)).build();
+        return BookingFunction.builder().id(id).tenantId(1L).bookingId(5L).functionType(type).name(type.name())
+                .resourceId(100L + id).startsAt(start).endsAt(start.plusHours(8)).build();
     }
 
     private static Product product(Long id, String name, SalesQuoteLine.Group group) {

@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -49,6 +50,7 @@ public class ReservationService {
     private final ReservationRequestAccessTokenService accessTokenService;
     private final CancellationPolicyService cancellationPolicyService;
     private final ApplicationEventPublisher eventPublisher;
+    private final AllocationCapacityService capacityService;
 
     public ReservationService(ReservationRepository repo,
                               AllocationRepository allocationRepo,
@@ -61,7 +63,8 @@ public class ReservationService {
                               TenantConfigService tenantConfigService,
                               ReservationRequestAccessTokenService accessTokenService,
                               CancellationPolicyService cancellationPolicyService,
-                              ApplicationEventPublisher eventPublisher) {
+                              ApplicationEventPublisher eventPublisher,
+                              AllocationCapacityService capacityService) {
         this.repo = repo;
         this.allocationRepo = allocationRepo;
         this.resourceRepo = resourceRepo;
@@ -74,6 +77,7 @@ public class ReservationService {
         this.accessTokenService = accessTokenService;
         this.cancellationPolicyService = cancellationPolicyService;
         this.eventPublisher = eventPublisher;
+        this.capacityService = capacityService;
     }
 
     public List<Reservation> findAll() { return repo.findAll(); }
@@ -86,6 +90,7 @@ public class ReservationService {
     public ReservationRequest refreshDraftRequestExpiry(Long requestId) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        ReservationRequestService.requireNotBookingManaged(request);
         if (request.getStatus() != ReservationRequest.Status.DRAFT) {
             throw new IllegalStateException("Only DRAFT requests can refresh expiry");
         }
@@ -109,6 +114,9 @@ public class ReservationService {
     public Reservation updateHoldReservation(Long reservationId, Reservation changes) {
         Reservation existing = repo.findById(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
+        if (existing.getRequest() != null) {
+            ReservationRequestService.requireNotBookingManaged(existing.getRequest());
+        }
 
         if (existing.getExpiresAt() != null && existing.getExpiresAt().isBefore(OffsetDateTime.now())) {
             throw new IllegalStateException("Reservation expired");
@@ -129,9 +137,31 @@ public class ReservationService {
         existing.setCustomerPhone(changes.getCustomerPhone());
         existing.setCurrency(changes.getCurrency());
         existing.setUom(changes.getUom());
+        boolean unitsChanged = changes.getUnits() != null && !changes.getUnits().equals(existing.getUnits());
+        if (unitsChanged) {
+            existing.setUnits(changes.getUnits());
+        }
 
         prepareReservationForHold(existing, false);
-        return repo.save(existing);
+        Reservation saved = repo.save(existing);
+        if (unitsChanged) {
+            resizeUnits(saved);
+        }
+        return saved;
+    }
+
+    private void resizeUnits(Reservation reservation) {
+        int units = unitsOf(reservation);
+        List<Allocation> own = allocationRepo.findByReservationIdIn(List.of(reservation.getId())).stream()
+                .filter(a -> !Boolean.TRUE.equals(a.getCompositResource()))
+                .filter(a -> !"CANCELLED".equalsIgnoreCase(a.getStatus()))
+                .toList();
+        for (Allocation allocation : own) {
+            capacityService.ensure(allocation.getAllocatedResource(), allocation.getStartsAt(), allocation.getEndsAt(),
+                    units, Set.of(reservation.getId()));
+            allocation.setUnits(units);
+        }
+        allocationRepo.saveAll(own);
     }
 
     @Transactional
@@ -161,12 +191,13 @@ public class ReservationService {
             if (isComposition) {
                 throw new IllegalStateException("Composition resource has no members");
             }
-            ensureAvailability(res, starts, ends);
+            ensureAvailability(res, starts, ends, unitsOf(saved));
             allocations.add(Allocation.builder()
                     .tenantId(saved.getTenantId())
                     .productId(saved.getProductId())
                     .uom(saved.getUom())
                     .qty(saved.getQty())
+                    .units(unitsOf(saved))
                     .reservation(saved)
                     .requestedResource(res)
                     .allocatedResource(res)
@@ -183,7 +214,7 @@ public class ReservationService {
                 Resource memberResource = member.getMemberResource();
                 int memberQty = member.getQty() != null ? member.getQty() : 1;
                 for (int i = 0; i < memberQty; i++) {
-                    ensureAvailability(memberResource, starts, ends);
+                    ensureAvailability(memberResource, starts, ends, 1);
                     allocations.add(Allocation.builder()
                             .tenantId(saved.getTenantId())
                             .productId(saved.getProductId())
@@ -207,13 +238,16 @@ public class ReservationService {
     }
 
     /**
-     * Rent line for an event function. The line has no reservation_request; it is priced from
+     * Rent line for a booking function, filed under the booking's request for the hotel. It is priced from
      * price_list (INTERNAL profile) because the request-based hold path clears prices for INTERNAL.
      */
     @Transactional
-    public Reservation holdEventFunctionLine(EventLineCommand command) {
+    public Reservation holdBookingFunctionLine(BookingLineCommand command) {
         if (command.resourceId() == null) {
             throw new IllegalArgumentException("Function has no space");
+        }
+        if (command.request() == null || !command.tenantId().equals(command.request().getTenantId())) {
+            throw new IllegalArgumentException("Booking line needs the booking's request of the same hotel");
         }
         LocalDateTime starts = command.startsAt();
         LocalDateTime ends = command.endsAt();
@@ -226,7 +260,8 @@ public class ReservationService {
 
         Reservation line = Reservation.builder()
                 .tenantId(command.tenantId())
-                .eventFunctionId(command.eventFunctionId())
+                .bookingFunctionId(command.bookingFunctionId())
+                .request(command.request())
                 .requestType(ReservationRequest.Type.INTERNAL)
                 .requestedResource(resource)
                 .startsAt(starts)
@@ -244,31 +279,114 @@ public class ReservationService {
         if (command.includedInPackage()) {
             applyPackageIncludedRent(line, resource);
         } else {
-            applyEventLinePricing(line, resource);
+            applyBookingLinePricing(line, resource);
         }
         Reservation saved = repo.save(line);
-        allocationRepo.saveAll(buildHoldAllocations(saved, resource, starts, ends));
+        if (command.localInventory()) {
+            allocationRepo.saveAll(buildHoldAllocations(saved, resource, starts, ends));
+        }
         return saved;
     }
 
+    /**
+     * One night of a room block: {@code units} rooms of a room-type pool. Priced from the INTERNAL price list
+     * when the pool has a product with a price, otherwise at zero until the group rate is agreed.
+     */
     @Transactional
-    public void confirmEventLines(List<Reservation> lines) {
-        setEventLineState(lines, "CONFIRMED", null);
+    public Reservation holdBookingRoomNight(RoomNightCommand command) {
+        if (command.request() == null || !command.tenantId().equals(command.request().getTenantId())) {
+            throw new IllegalArgumentException("Booking line needs the booking's request of the same hotel");
+        }
+        if (command.units() <= 0) {
+            throw new IllegalArgumentException("Room quota must be positive");
+        }
+        Resource resource = resourceRepo.findByIdWithType(command.resourceId())
+                .filter(r -> command.tenantId().equals(r.getTenantId()))
+                .orElseThrow(() -> new IllegalArgumentException("Room type not found: " + command.resourceId()));
+        Reservation line = Reservation.builder()
+                .tenantId(command.tenantId())
+                .bookingRoomBlockId(command.roomBlockId())
+                .request(command.request())
+                .requestType(ReservationRequest.Type.INTERNAL)
+                .requestedResource(resource)
+                .startsAt(command.startsAt())
+                .endsAt(command.endsAt())
+                .units(command.units())
+                .status("HOLD")
+                .adults(0)
+                .children(0)
+                .infants(0)
+                .customerName(command.customerName())
+                .customerEmail(command.customerEmail())
+                .customerPhone(command.customerPhone())
+                .currency(normalizeCurrency(command.currency()))
+                .expiresAt(command.expiresAt())
+                .build();
+        applyRoomNightPricing(line, resource);
+        Reservation saved = repo.save(line);
+        if (command.localInventory()) {
+            allocationRepo.saveAll(buildHoldAllocations(saved, resource, command.startsAt(), command.endsAt()));
+        }
+        return saved;
+    }
+
+    /** New room count for a booking line; the allocation follows and the pool is checked again. */
+    @Transactional
+    public Reservation resizeBookingLine(Reservation line, int units) {
+        if (units <= 0) {
+            throw new IllegalArgumentException("units must be positive");
+        }
+        line.setUnits(units);
+        if (line.getUnitPrice() != null && line.getQty() != null) {
+            line.setGrossAmount(money(line.getUnitPrice().multiply(BigDecimal.valueOf((long) line.getQty() * units))));
+        }
+        Reservation saved = repo.save(line);
+        resizeUnits(saved);
+        return saved;
+    }
+
+    private void applyRoomNightPricing(Reservation line, Resource resource) {
+        line.setQty(1);
+        Product product = resource.getProduct();
+        if (product == null) {
+            line.setUnitPrice(BigDecimal.ZERO.setScale(2));
+            line.setGrossAmount(BigDecimal.ZERO.setScale(2));
+            return;
+        }
+        String uom = BookingUom.normalize(product.getDefaultUom());
+        line.setProductId(product.getId());
+        line.setUom(uom);
+        List<PriceListEntry> entries = priceListEntryResolver.findEffectiveForProductUomOnDate(
+                product.getId(), uom, line.getCurrency(), line.getTenantId(),
+                line.getStartsAt().toLocalDate(), ReservationRequest.Type.INTERNAL);
+        BigDecimal unitPrice = entries.isEmpty() ? null
+                : selectPriceEntry(entries, line.getStartsAt(), line.getEndsAt()).getPrice();
+        if (unitPrice == null) {
+            unitPrice = BigDecimal.ZERO;
+        }
+        line.setUnitPrice(money(unitPrice));
+        line.setGrossAmount(money(unitPrice.multiply(BigDecimal.valueOf(unitsOf(line)))));
     }
 
     @Transactional
-    public void extendEventLineHolds(List<Reservation> lines, OffsetDateTime expiresAt) {
-        setEventLineState(lines, "HOLD", expiresAt);
+    public void confirmBookingLines(List<Reservation> lines) {
+        setBookingLineState(lines, "CONFIRMED", null);
     }
 
     @Transactional
-    public void releaseEventLines(List<Reservation> lines) {
-        setEventLineState(lines, "CANCELLED", null);
+    public void extendBookingLineHolds(List<Reservation> lines, OffsetDateTime expiresAt) {
+        setBookingLineState(lines, "HOLD", expiresAt);
     }
 
-    private void setEventLineState(List<Reservation> lines, String status, OffsetDateTime expiresAt) {
+    @Transactional
+    public void releaseBookingLines(List<Reservation> lines) {
+        setBookingLineState(lines, "CANCELLED", null);
+    }
+
+    private void setBookingLineState(List<Reservation> lines, String status, OffsetDateTime expiresAt) {
         List<Reservation> active = lines.stream()
-                .filter(r -> r.getEventFunctionId() != null && !"CANCELLED".equalsIgnoreCase(r.getStatus()))
+                .filter(r -> (r.getBookingFunctionId() != null || r.getBookingRoomBlockId() != null)
+                        && !"CANCELLED".equalsIgnoreCase(r.getStatus()))
                 .toList();
         if (active.isEmpty()) {
             return;
@@ -286,8 +404,19 @@ public class ReservationService {
         allocationRepo.saveAllAndFlush(allocations);
     }
 
-    private void applyEventLinePricing(Reservation line, Resource resource) {
-        Product product = resolveReservationProduct(line, resource);
+    private void applyBookingLinePricing(Reservation line, Resource resource) {
+        Product product = resource.getProduct();
+        if (product == null && line.getProductId() != null) {
+            product = productRepo.findById(line.getProductId()).orElse(null);
+        }
+        // OPERA-imported spaces often have no local product yet; keep a zero rent line (same as room nights).
+        if (product == null) {
+            line.setQty(deriveBookingLineQty("HOUR", line.getStartsAt(), line.getEndsAt()));
+            line.setUom("HOUR");
+            line.setUnitPrice(BigDecimal.ZERO.setScale(2));
+            line.setGrossAmount(BigDecimal.ZERO.setScale(2));
+            return;
+        }
         String uom = BookingUom.normalize(product.getDefaultUom());
         List<PriceListEntry> priceEntries = priceListEntryResolver.findEffectiveForProductUomOnDate(
                 product.getId(),
@@ -297,18 +426,19 @@ public class ReservationService {
                 line.getStartsAt().toLocalDate(),
                 ReservationRequest.Type.INTERNAL
         );
-        if (priceEntries.isEmpty()) {
-            throw new IllegalArgumentException("No rent price for " + product.getName() + " (" + uom + ") on "
-                    + line.getStartsAt().toLocalDate());
+        int qty = deriveBookingLineQty(uom, line.getStartsAt(), line.getEndsAt());
+        BigDecimal unitPrice = BigDecimal.ZERO;
+        if (!priceEntries.isEmpty()) {
+            PriceListEntry selectedPrice = selectPriceEntry(priceEntries, line.getStartsAt(), line.getEndsAt());
+            if (selectedPrice.getPrice() != null) {
+                unitPrice = selectedPrice.getPrice();
+            }
         }
-        PriceListEntry selectedPrice = selectPriceEntry(priceEntries, line.getStartsAt(), line.getEndsAt());
-        int qty = deriveEventLineQty(uom, line.getStartsAt(), line.getEndsAt());
-        BigDecimal unitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
         line.setProductId(product.getId());
         line.setUom(uom);
         line.setQty(qty);
-        line.setUnitPrice(unitPrice);
-        line.setGrossAmount(money(unitPrice.multiply(BigDecimal.valueOf(qty))));
+        line.setUnitPrice(money(unitPrice));
+        line.setGrossAmount(money(unitPrice.multiply(BigDecimal.valueOf((long) qty * unitsOf(line)))));
     }
 
     private void applyPackageIncludedRent(Reservation line, Resource resource) {
@@ -322,12 +452,12 @@ public class ReservationService {
         String uom = BookingUom.normalize(product.getDefaultUom());
         line.setProductId(product.getId());
         line.setUom(uom);
-        line.setQty(deriveEventLineQty(uom, line.getStartsAt(), line.getEndsAt()));
+        line.setQty(deriveBookingLineQty(uom, line.getStartsAt(), line.getEndsAt()));
         line.setUnitPrice(BigDecimal.ZERO.setScale(2));
         line.setGrossAmount(BigDecimal.ZERO.setScale(2));
     }
 
-    static int deriveEventLineQty(String uom, LocalDateTime startsAt, LocalDateTime endsAt) {
+    static int deriveBookingLineQty(String uom, LocalDateTime startsAt, LocalDateTime endsAt) {
         long minutes = java.time.Duration.between(startsAt, endsAt).toMinutes();
         if ("MINUTE".equalsIgnoreCase(uom)) {
             return (int) minutes;
@@ -342,8 +472,9 @@ public class ReservationService {
         return 1;
     }
 
-    public record EventLineCommand(Long tenantId,
-                                   Long eventFunctionId,
+    public record BookingLineCommand(Long tenantId,
+                                   ReservationRequest request,
+                                   Long bookingFunctionId,
                                    Long resourceId,
                                    LocalDateTime startsAt,
                                    LocalDateTime endsAt,
@@ -352,7 +483,23 @@ public class ReservationService {
                                    String customerEmail,
                                    String customerPhone,
                                    OffsetDateTime expiresAt,
-                                   boolean includedInPackage) {
+                                   boolean includedInPackage,
+                                   boolean localInventory) {
+    }
+
+    public record RoomNightCommand(Long tenantId,
+                                   ReservationRequest request,
+                                   Long roomBlockId,
+                                   Long resourceId,
+                                   LocalDateTime startsAt,
+                                   LocalDateTime endsAt,
+                                   int units,
+                                   String currency,
+                                   String customerName,
+                                   String customerEmail,
+                                   String customerPhone,
+                                   OffsetDateTime expiresAt,
+                                   boolean localInventory) {
     }
 
     @Transactional
@@ -451,7 +598,11 @@ public class ReservationService {
         PriceListEntry selectedPrice = priceEntries.get(0);
         int resolvedQty = qty != null ? qty : 1;
         BigDecimal unitPrice = selectedPrice.getPrice() != null ? selectedPrice.getPrice() : BigDecimal.ZERO;
-        BigDecimal grossAmount = unitPrice.multiply(BigDecimal.valueOf(resolvedQty));
+        int units = request.getUnits() != null ? request.getUnits() : 1;
+        if (units <= 0) {
+            throw new IllegalArgumentException("units must be greater than 0");
+        }
+        BigDecimal grossAmount = unitPrice.multiply(BigDecimal.valueOf((long) resolvedQty * units));
 
         Reservation reservation = Reservation.builder()
                 .tenantId(tenantId)
@@ -475,6 +626,7 @@ public class ReservationService {
                 .currency(request.getCurrency())
                 .uom(uom)
                 .qty(resolvedQty)
+                .units(units)
                 .unitPrice(unitPrice)
                 .grossAmount(grossAmount)
                 .build();
@@ -489,14 +641,16 @@ public class ReservationService {
             if (isComposition) {
                 throw new IllegalStateException("Composition resource has no members");
             }
-            ensureAvailability(requested, period.start(), period.end());
-            allocations.add(buildAllocation(saved, requested, requested, product, uom, qty, false, null));
+            ensureAvailability(requested, period.start(), period.end(), unitsOf(saved));
+            Allocation allocation = buildAllocation(saved, requested, requested, product, uom, qty, false, null);
+            allocation.setUnits(unitsOf(saved));
+            allocations.add(allocation);
         } else {
             for (ResourceComposition member : members) {
                 Resource memberResource = member.getMemberResource();
                 int memberQty = member.getQty() != null ? member.getQty() : 1;
                 for (int i = 0; i < memberQty; i++) {
-                    ensureAvailability(memberResource, period.start(), period.end());
+                    ensureAvailability(memberResource, period.start(), period.end(), 1);
                     allocations.add(buildAllocation(saved, requested, memberResource, product, uom, qty, true, requested.getId()));
                 }
             }
@@ -557,6 +711,9 @@ public class ReservationService {
     public void deleteReservationDraftOnly(Long reservationId) {
         Reservation reservation = repo.findById(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation not found"));
+        if (reservation.getRequest() != null) {
+            ReservationRequestService.requireNotBookingManaged(reservation.getRequest());
+        }
         if (isExpired(reservation.getExpiresAt())) {
             throw new IllegalStateException("Reservation expired");
         }
@@ -578,6 +735,7 @@ public class ReservationService {
     public void finalizeRequest(Long requestId) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        ReservationRequestService.requireNotBookingManaged(request);
         if (isExpired(request.getExpiresAt())) {
             throw new IllegalStateException("Reservation request expired");
         }
@@ -627,6 +785,7 @@ public class ReservationService {
     public ReservationRequest extendRequestTtl(Long requestId, Integer minutes) {
         ReservationRequest request = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("Request not found"));
+        ReservationRequestService.requireNotBookingManaged(request);
         if (request.getStatus() != ReservationRequest.Status.DRAFT) {
             throw new IllegalStateException("Only DRAFT requests can be extended");
         }
@@ -743,7 +902,7 @@ public class ReservationService {
         reservation.setUom(uom);
         reservation.setQty(qty);
         reservation.setUnitPrice(calculatedUnitPrice);
-        reservation.setGrossAmount(money(calculatedUnitPrice.multiply(BigDecimal.valueOf(qty))));
+        reservation.setGrossAmount(money(calculatedUnitPrice.multiply(BigDecimal.valueOf((long) qty * unitsOf(reservation)))));
     }
 
     private void prepareReservationForHold(Reservation reservation, boolean assignExpiryIfMissing) {
@@ -911,19 +1070,18 @@ public class ReservationService {
         return resource.getProduct();
     }
 
-    private void ensureAvailability(Resource resource, LocalDateTime starts, LocalDateTime ends) {
-        long overlapping = allocationRepo.countActiveByAllocatedResourceIdAndStartsAtLessThanAndEndsAtGreaterThan(
-                resource.getId(), ends, starts);
+    private void ensureAvailability(Resource resource, LocalDateTime starts, LocalDateTime ends, int units) {
+        capacityService.ensure(resource, starts, ends, units, Set.of());
+    }
 
-        int capacity = resource.getUnitCount() != null ? resource.getUnitCount() : 1;
-        if ("POOL".equalsIgnoreCase(resource.getKind())) {
-            if (resource.getPoolTotalUnits() == null) throw new IllegalStateException("Pool resource missing poolTotalUnits");
-            capacity = resource.getPoolTotalUnits();
+    private static int unitsOf(Reservation reservation) {
+        if (reservation.getUnits() == null) {
+            reservation.setUnits(1);
         }
-
-        if (overlapping >= capacity) {
-            throw new IllegalStateException("No availability for the requested resource in the given time range");
+        if (reservation.getUnits() <= 0) {
+            throw new IllegalArgumentException("units must be greater than 0");
         }
+        return reservation.getUnits();
     }
 
     private OffsetDateTime expiresAtForTenant(Long tenantId) {
@@ -948,6 +1106,7 @@ public class ReservationService {
     private ReservationRequest resolveRequestForHold(Long requestId, Long tenantId) {
         ReservationRequest existing = requestRepo.findById(requestId)
                 .orElseThrow(() -> new IllegalArgumentException("requestId not found"));
+        ReservationRequestService.requireNotBookingManaged(existing);
         if (!tenantId.equals(existing.getTenantId())) {
             throw new IllegalArgumentException("requestId does not match tenant");
         }

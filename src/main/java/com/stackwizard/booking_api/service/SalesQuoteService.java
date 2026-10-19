@@ -7,19 +7,26 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.CrmAccount;
 import com.stackwizard.booking_api.model.CrmAlert;
-import com.stackwizard.booking_api.model.Event;
-import com.stackwizard.booking_api.model.EventFunction;
-import com.stackwizard.booking_api.model.EventFunctionItem;
+import com.stackwizard.booking_api.model.Booking;
+import com.stackwizard.booking_api.model.BookingFunction;
+import com.stackwizard.booking_api.model.BookingFunctionItem;
+import com.stackwizard.booking_api.model.BookingRoomBlock;
+import com.stackwizard.booking_api.model.BookingRoomBlockNight;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.Reservation;
+import com.stackwizard.booking_api.model.Resource;
 import com.stackwizard.booking_api.model.SalesQuote;
 import com.stackwizard.booking_api.model.SalesQuoteApproval;
 import com.stackwizard.booking_api.model.SalesQuoteLine;
 import com.stackwizard.booking_api.model.SalesQuoteVersion;
 import com.stackwizard.booking_api.repository.CrmAccountRepository;
-import com.stackwizard.booking_api.repository.EventFunctionItemRepository;
-import com.stackwizard.booking_api.repository.EventFunctionRepository;
+import com.stackwizard.booking_api.repository.BookingFunctionItemRepository;
+import com.stackwizard.booking_api.repository.BookingFunctionRepository;
+import com.stackwizard.booking_api.repository.BookingRoomBlockNightRepository;
+import com.stackwizard.booking_api.repository.BookingRoomBlockRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
+import com.stackwizard.booking_api.repository.ReservationRepository;
+import com.stackwizard.booking_api.repository.ResourceRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteApprovalRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteLineRepository;
 import com.stackwizard.booking_api.repository.SalesQuoteRepository;
@@ -46,32 +53,38 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Quote generated from an event's functions and items. Lines are a commercial copy that sales can discount;
+ * Quote generated from an booking's functions and items. Lines are a commercial copy that sales can discount;
  * a discount above the threshold needs a manager's approval before the quote can be sent.
  */
 @Service
 public class SalesQuoteService {
     private static final Logger log = LoggerFactory.getLogger(SalesQuoteService.class);
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
-    private static final Set<EventFunction.FunctionType> CATERING = EnumSet.of(
-            EventFunction.FunctionType.COFFEE_BREAK, EventFunction.FunctionType.LUNCH,
-            EventFunction.FunctionType.DINNER, EventFunction.FunctionType.RECEPTION);
+    private static final Set<BookingFunction.FunctionType> CATERING = EnumSet.of(
+            BookingFunction.FunctionType.COFFEE_BREAK, BookingFunction.FunctionType.LUNCH,
+            BookingFunction.FunctionType.DINNER, BookingFunction.FunctionType.RECEPTION);
 
     private final SalesQuoteRepository quoteRepo;
     private final SalesQuoteLineRepository lineRepo;
     private final SalesQuoteVersionRepository versionRepo;
     private final SalesQuoteApprovalRepository approvalRepo;
-    private final EventService eventService;
-    private final EventFunctionRepository functionRepo;
-    private final EventFunctionItemRepository itemRepo;
-    private final EventReservationSync reservationSync;
+    private final BookingService bookingService;
+    private final BookingFunctionRepository functionRepo;
+    private final BookingFunctionItemRepository itemRepo;
+    private final BookingRoomBlockRepository roomBlockRepo;
+    private final BookingRoomBlockNightRepository roomNightRepo;
+    private final ReservationRepository reservationRepo;
+    private final ResourceRepository resourceRepo;
+    private final BookingReservationSync reservationSync;
     private final ProductRepository productRepo;
     private final CrmAccountRepository accountRepo;
     private final PortalTokenService portalTokenService;
@@ -86,10 +99,14 @@ public class SalesQuoteService {
                              SalesQuoteLineRepository lineRepo,
                              SalesQuoteVersionRepository versionRepo,
                              SalesQuoteApprovalRepository approvalRepo,
-                             EventService eventService,
-                             EventFunctionRepository functionRepo,
-                             EventFunctionItemRepository itemRepo,
-                             EventReservationSync reservationSync,
+                             BookingService bookingService,
+                             BookingFunctionRepository functionRepo,
+                             BookingFunctionItemRepository itemRepo,
+                             BookingRoomBlockRepository roomBlockRepo,
+                             BookingRoomBlockNightRepository roomNightRepo,
+                             ReservationRepository reservationRepo,
+                             ResourceRepository resourceRepo,
+                             BookingReservationSync reservationSync,
                              ProductRepository productRepo,
                              CrmAccountRepository accountRepo,
                              PortalTokenService portalTokenService,
@@ -102,9 +119,13 @@ public class SalesQuoteService {
         this.lineRepo = lineRepo;
         this.versionRepo = versionRepo;
         this.approvalRepo = approvalRepo;
-        this.eventService = eventService;
+        this.bookingService = bookingService;
         this.functionRepo = functionRepo;
         this.itemRepo = itemRepo;
+        this.roomBlockRepo = roomBlockRepo;
+        this.roomNightRepo = roomNightRepo;
+        this.reservationRepo = reservationRepo;
+        this.resourceRepo = resourceRepo;
         this.reservationSync = reservationSync;
         this.productRepo = productRepo;
         this.accountRepo = accountRepo;
@@ -117,9 +138,9 @@ public class SalesQuoteService {
     }
 
     @Transactional(readOnly = true)
-    public List<SalesQuote> forEvent(Long eventId) {
-        Event event = eventService.requireEvent(eventId);
-        return quoteRepo.findByTenantIdAndEventIdOrderByIdDesc(event.getTenantId(), event.getId());
+    public List<SalesQuote> forBooking(Long bookingId) {
+        Booking booking = bookingService.requireBooking(bookingId);
+        return quoteRepo.findByTenantIdAndBookingIdOrderByIdDesc(booking.getTenantId(), booking.getId());
     }
 
     @Transactional(readOnly = true)
@@ -131,8 +152,8 @@ public class SalesQuoteService {
     @Transactional(readOnly = true)
     public SalesDtos.QuoteView view(Long quoteId) {
         SalesQuote quote = requireQuote(quoteId);
-        Event event = eventService.requireEvent(quote.getEventId());
-        return view(quote, portalTokenService.activeToken(event).map(portalTokenService::portalUrl).orElse(null));
+        Booking booking = bookingService.requireBooking(quote.getBookingId());
+        return view(quote, portalTokenService.activeToken(booking).map(portalTokenService::portalUrl).orElse(null));
     }
 
     SalesDtos.QuoteView view(SalesQuote quote, String portalUrl) {
@@ -144,40 +165,37 @@ public class SalesQuoteService {
                 needsApproval(quote), portalUrl);
     }
 
-    /** New DRAFT from the event; other open quotes of the event become SUPERSEDED. */
+    /** New DRAFT from the booking; other open quotes of the booking become SUPERSEDED. */
     @Transactional
-    public SalesQuote create(Long eventId) {
-        Event event = eventService.requireEditable(eventId);
-        if (event.getStatus() == Event.Status.ACTUAL) {
-            throw new IllegalStateException("Quotes cannot be created for an ACTUAL event");
+    public SalesQuote create(Long bookingId) {
+        Booking booking = bookingService.requireContentEditable(bookingId);
+        Long tenantId = booking.getTenantId();
+        if (quoteRepo.existsByTenantIdAndBookingIdAndStatus(tenantId, booking.getId(), SalesQuote.Status.ACCEPTED)) {
+            throw new IllegalStateException("Booking already has an accepted quote");
         }
-        Long tenantId = event.getTenantId();
-        if (quoteRepo.existsByTenantIdAndEventIdAndStatus(tenantId, event.getId(), SalesQuote.Status.ACCEPTED)) {
-            throw new IllegalStateException("Event already has an accepted quote");
-        }
-        List<SalesQuote> open = quoteRepo.findByTenantIdAndEventIdAndStatusIn(tenantId, event.getId(), SalesQuote.Status.OPEN);
+        List<SalesQuote> open = quoteRepo.findByTenantIdAndBookingIdAndStatusIn(tenantId, booking.getId(), SalesQuote.Status.OPEN);
         for (SalesQuote previous : open) {
             previous.setStatus(SalesQuote.Status.SUPERSEDED);
             closePendingApproval(previous, "Superseded by a new quote");
         }
         quoteRepo.saveAll(open);
 
-        List<SalesQuoteLine> lines = linesFromEvent(event);
+        List<SalesQuoteLine> lines = linesFromBooking(booking);
         if (lines.isEmpty()) {
-            throw new IllegalStateException("Event has nothing to quote; add functions with spaces or items first");
+            throw new IllegalStateException("Booking has nothing to quote; add functions with spaces or items first");
         }
         int year = LocalDate.now().getYear();
         String prefix = "Q" + year + "-";
         long seq = quoteRepo.countByNumberPrefix(tenantId, prefix + "%") + 1;
         SalesQuote quote = SalesQuote.builder()
                 .tenantId(tenantId)
-                .eventId(event.getId())
-                .opportunityId(event.getOpportunityId())
-                .accountId(event.getAccountId())
+                .bookingId(booking.getId())
+                .opportunityId(booking.getOpportunityId())
+                .accountId(booking.getAccountId())
                 .quoteNumber(prefix + String.format("%04d", seq))
                 .status(SalesQuote.Status.DRAFT)
-                .currency(event.getCurrency())
-                .validUntil(defaultValidUntil(event))
+                .currency(booking.getCurrency())
+                .validUntil(defaultValidUntil(booking))
                 .version(0)
                 .build();
         recalculate(quote, lines);
@@ -288,7 +306,7 @@ public class SalesQuoteService {
     @Transactional
     public SalesDtos.QuoteView send(Long quoteId) {
         SalesQuote quote = requireQuoteForWrite(quoteId);
-        Event event = eventService.requireEditable(quote.getEventId());
+        Booking booking = bookingService.requireEditable(quote.getBookingId());
         if (quote.getStatus() == SalesQuote.Status.DRAFT && needsApproval(quote)) {
             throw new IllegalStateException("Discount " + percent(quote.getDiscountPercent()) + "% exceeds "
                     + percent(approvalThreshold) + "%; request approval first");
@@ -309,7 +327,7 @@ public class SalesQuoteService {
                 .tenantId(quote.getTenantId())
                 .quoteId(quote.getId())
                 .version(version)
-                .snapshot(snapshot(quote, event, account, lines, version))
+                .snapshot(snapshot(quote, booking, account, lines, version))
                 .totalOffered(quote.getTotalOffered())
                 .sentBy(accessContext.currentUserId())
                 .build());
@@ -317,7 +335,7 @@ public class SalesQuoteService {
         quote.setStatus(SalesQuote.Status.SENT);
         quote.setSentAt(OffsetDateTime.now());
         SalesQuote saved = quoteRepo.save(quote);
-        String url = portalTokenService.portalUrl(portalTokenService.ensureToken(event, accessContext.currentUserId()));
+        String url = portalTokenService.portalUrl(portalTokenService.ensureToken(booking, accessContext.currentUserId()));
         return view(saved, url);
     }
 
@@ -329,7 +347,7 @@ public class SalesQuoteService {
             throw new IllegalStateException("Only a SENT or EXPIRED quote can be revised, not " + quote.getStatus());
         }
         if (quote.getStatus() == SalesQuote.Status.EXPIRED) {
-            quote.setValidUntil(defaultValidUntil(eventService.requireEvent(quote.getEventId())));
+            quote.setValidUntil(defaultValidUntil(bookingService.requireBooking(quote.getBookingId())));
         }
         quote.setStatus(SalesQuote.Status.DRAFT);
         return quoteRepo.save(quote);
@@ -339,7 +357,7 @@ public class SalesQuoteService {
     @Transactional
     public SalesQuote decide(Long quoteId, boolean accept, SalesDtos.DecisionRequest request) {
         SalesQuote quote = requireQuoteForWrite(quoteId);
-        eventService.requireEditable(quote.getEventId());
+        bookingService.requireEditable(quote.getBookingId());
         return applyDecision(quote, accept, request != null ? request.name() : null, request != null ? request.note() : null, false);
     }
 
@@ -356,15 +374,15 @@ public class SalesQuoteService {
         quote.setDecisionNote(blankToNull(note));
         SalesQuote saved = quoteRepo.save(quote);
         if (byClient) {
-            Event event = eventService.findForSystem(saved.getTenantId(), saved.getEventId()).orElse(null);
+            Booking booking = bookingService.findForSystem(saved.getTenantId(), saved.getBookingId()).orElse(null);
             alertService.raise(CrmAlert.builder()
                     .tenantId(saved.getTenantId())
                     .kind(CrmAlert.Kind.QUOTE_DECIDED)
-                    .eventId(saved.getEventId())
+                    .bookingId(saved.getBookingId())
                     .quoteId(saved.getId())
-                    .assignedTo(event != null ? event.getOwnerUserId() : null)
+                    .assignedTo(booking != null ? booking.getOwnerUserId() : null)
                     .message("Client " + (accept ? "accepted" : "rejected") + " quote " + saved.getQuoteNumber()
-                            + (event != null ? " for " + event.getName() : ""))
+                            + (booking != null ? " for " + booking.getName() : ""))
                     .dueDate(LocalDate.now())
                     .dedupeKey("QUOTE_DECIDED:" + saved.getId() + ":" + saved.getVersion())
                     .build());
@@ -384,15 +402,15 @@ public class SalesQuoteService {
                     }
                     quote.setStatus(SalesQuote.Status.EXPIRED);
                     quoteRepo.save(quote);
-                    Event event = eventService.findForSystem(quote.getTenantId(), quote.getEventId()).orElse(null);
+                    Booking booking = bookingService.findForSystem(quote.getTenantId(), quote.getBookingId()).orElse(null);
                     alertService.raise(CrmAlert.builder()
                             .tenantId(quote.getTenantId())
                             .kind(CrmAlert.Kind.QUOTE_EXPIRED)
-                            .eventId(quote.getEventId())
+                            .bookingId(quote.getBookingId())
                             .quoteId(quote.getId())
-                            .assignedTo(event != null ? event.getOwnerUserId() : null)
+                            .assignedTo(booking != null ? booking.getOwnerUserId() : null)
                             .message("Quote " + quote.getQuoteNumber() + " expired on " + quote.getValidUntil()
-                                    + (event != null ? " (" + event.getName() + ")" : ""))
+                                    + (booking != null ? " (" + booking.getName() + ")" : ""))
                             .dueDate(quote.getValidUntil())
                             .dedupeKey("QUOTE_EXPIRED:" + quote.getId() + ":" + quote.getVersion())
                             .build());
@@ -403,15 +421,15 @@ public class SalesQuoteService {
         }
     }
 
-    public boolean hasAcceptedQuote(Event event) {
-        return quoteRepo.existsByTenantIdAndEventIdAndStatus(event.getTenantId(), event.getId(), SalesQuote.Status.ACCEPTED);
+    public boolean hasAcceptedQuote(Booking booking) {
+        return quoteRepo.existsByTenantIdAndBookingIdAndStatus(booking.getTenantId(), booking.getId(), SalesQuote.Status.ACCEPTED);
     }
 
     public SalesQuote requireQuote(Long quoteId) {
         accessContext.require(CrmPermission.EVENT_READ);
         SalesQuote quote = quoteRepo.findByIdAndTenantId(quoteId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Quote not found"));
-        eventService.requireEvent(quote.getEventId());
+        bookingService.requireBooking(quote.getBookingId());
         return quote;
     }
 
@@ -419,40 +437,128 @@ public class SalesQuoteService {
         return quote.getDiscountPercent() != null && quote.getDiscountPercent().compareTo(approvalThreshold) > 0;
     }
 
-    List<SalesQuoteLine> linesFromEvent(Event event) {
-        List<EventFunction> functions = functionRepo.findForEvent(
-                event.getTenantId(), event.getId());
-        List<Long> functionIds = functions.stream().map(EventFunction::getId).toList();
+    List<SalesQuoteLine> linesFromBooking(Booking booking) {
+        List<BookingFunction> functions = functionRepo.findForBooking(
+                booking.getTenantId(), booking.getId());
+        List<Long> functionIds = functions.stream().map(BookingFunction::getId).toList();
         Map<Long, Reservation> rentByFunction = reservationSync.activeLines(functions).stream()
-                .collect(Collectors.toMap(Reservation::getEventFunctionId, Function.identity(), (a, b) -> a));
-        Map<Long, List<EventFunctionItem>> itemsByFunction = functionIds.isEmpty() ? Map.of()
-                : itemRepo.findForFunctions(event.getTenantId(), functionIds).stream()
-                .collect(Collectors.groupingBy(EventFunctionItem::getEventFunctionId));
+                .collect(Collectors.toMap(Reservation::getBookingFunctionId, Function.identity(), (a, b) -> a));
+        Map<Long, List<BookingFunctionItem>> itemsByFunction = functionIds.isEmpty() ? Map.of()
+                : itemRepo.findForFunctions(booking.getTenantId(), functionIds).stream()
+                .collect(Collectors.groupingBy(BookingFunctionItem::getBookingFunctionId));
         List<Long> productIds = new ArrayList<>();
         rentByFunction.values().forEach(r -> productIds.add(r.getProductId()));
         itemsByFunction.values().forEach(list -> list.forEach(i -> productIds.add(i.getProductId())));
         Map<Long, Product> products = productRepo.findAllById(productIds.stream().filter(id -> id != null).distinct().toList())
                 .stream().collect(Collectors.toMap(Product::getId, Function.identity()));
-        return buildLines(event.getTenantId(), functions, rentByFunction, itemsByFunction, products);
+        List<SalesQuoteLine> lines = new ArrayList<>(buildLines(
+                booking.getTenantId(), functions, rentByFunction, itemsByFunction, products));
+        lines.addAll(roomLines(booking, products));
+        return lines;
+    }
+
+    /**
+     * One ROOMS line per room block: qty = room-nights, rate = weighted average from hold lines (often 0 until a rate is agreed).
+     */
+    private List<SalesQuoteLine> roomLines(Booking booking, Map<Long, Product> products) {
+        List<BookingRoomBlock> blocks = roomBlockRepo.findByTenantIdAndBookingIdOrderByDateFromAscIdAsc(
+                booking.getTenantId(), booking.getId());
+        if (blocks.isEmpty()) {
+            return List.of();
+        }
+        List<Long> blockIds = blocks.stream().map(BookingRoomBlock::getId).toList();
+        Map<Long, List<BookingRoomBlockNight>> nightsByBlock = roomNightRepo
+                .findByTenantIdAndBlockIdInOrderByNightAsc(booking.getTenantId(), blockIds).stream()
+                .collect(Collectors.groupingBy(BookingRoomBlockNight::getBlockId));
+        Map<Long, Resource> resources = resourceRepo.findAllById(blocks.stream()
+                        .map(BookingRoomBlock::getRoomResourceId).filter(Objects::nonNull).distinct().toList())
+                .stream().collect(Collectors.toMap(Resource::getId, Function.identity()));
+        List<Long> moreProducts = new ArrayList<>();
+        Map<Long, List<Reservation>> holdsByBlock = new HashMap<>();
+        for (BookingRoomBlock block : blocks) {
+            if (block.getPropertyTenantId() == null) {
+                continue;
+            }
+            List<Reservation> holds = reservationRepo
+                    .findByTenantIdAndBookingRoomBlockIdOrderByStartsAtAsc(block.getPropertyTenantId(), block.getId())
+                    .stream()
+                    .filter(r -> !"CANCELLED".equalsIgnoreCase(r.getStatus()))
+                    .toList();
+            holdsByBlock.put(block.getId(), holds);
+            holds.forEach(r -> moreProducts.add(r.getProductId()));
+        }
+        if (!moreProducts.isEmpty()) {
+            productRepo.findAllById(moreProducts.stream().filter(Objects::nonNull).distinct().toList())
+                    .forEach(p -> products.putIfAbsent(p.getId(), p));
+        }
+        List<SalesQuoteLine> lines = new ArrayList<>();
+        for (BookingRoomBlock block : blocks) {
+            int roomNights = nightsByBlock.getOrDefault(block.getId(), List.of()).stream()
+                    .mapToInt(n -> n.getQty() != null ? n.getQty() : 0)
+                    .sum();
+            if (roomNights <= 0) {
+                continue;
+            }
+            BigDecimal rate = roomNightRate(holdsByBlock.getOrDefault(block.getId(), List.of()));
+            Product product = holdsByBlock.getOrDefault(block.getId(), List.of()).stream()
+                    .map(Reservation::getProductId)
+                    .filter(Objects::nonNull)
+                    .map(products::get)
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+            Resource resource = block.getRoomResourceId() != null ? resources.get(block.getRoomResourceId()) : null;
+            String name = StringUtils.hasText(block.getRoomTypeLabel()) ? block.getRoomTypeLabel().trim()
+                    : resource != null && StringUtils.hasText(resource.getName()) ? resource.getName()
+                    : "Rooms";
+            String description = name + " · " + block.getDateFrom() + " – " + block.getDateTo();
+            lines.add(line(booking.getTenantId(), SalesQuoteLine.Group.ROOMS, product, null,
+                    description, block.getDateFrom(), "ROOM", roomNights, rate, rate));
+        }
+        return lines;
+    }
+
+    private static BigDecimal roomNightRate(List<Reservation> holds) {
+        BigDecimal weighted = BigDecimal.ZERO;
+        int weight = 0;
+        for (Reservation hold : holds) {
+            if (hold.getUnitPrice() == null) {
+                continue;
+            }
+            int units = hold.getUnits() != null && hold.getUnits() > 0 ? hold.getUnits() : 1;
+            weighted = weighted.add(hold.getUnitPrice().multiply(BigDecimal.valueOf(units)));
+            weight += units;
+        }
+        if (weight <= 0) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+        }
+        return money(weighted.divide(BigDecimal.valueOf(weight), 8, RoundingMode.HALF_UP));
     }
 
     static List<SalesQuoteLine> buildLines(Long tenantId,
-                                           List<EventFunction> functions,
+                                           List<BookingFunction> functions,
                                            Map<Long, Reservation> rentByFunction,
-                                           Map<Long, List<EventFunctionItem>> itemsByFunction,
+                                           Map<Long, List<BookingFunctionItem>> itemsByFunction,
                                            Map<Long, Product> products) {
         List<SalesQuoteLine> lines = new ArrayList<>();
-        for (EventFunction function : functions) {
+        for (BookingFunction function : functions) {
             LocalDate day = function.getStartsAt().toLocalDate();
             Reservation rent = rentByFunction.get(function.getId());
-            if (rent != null && rent.getQty() != null && rent.getQty() > 0
-                    && rent.getUnitPrice() != null && rent.getUnitPrice().signum() > 0) {
+            // Space rent is always quoted when a hold exists (rate may be 0) or the function is placed.
+            if (rent != null && rent.getQty() != null && rent.getQty() > 0) {
                 Product product = products.get(rent.getProductId());
-                BigDecimal rate = money(rent.getUnitPrice());
+                BigDecimal rate = rent.getUnitPrice() != null ? money(rent.getUnitPrice())
+                        : BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP);
+                String uom = StringUtils.hasText(rent.getUom()) ? rent.getUom() : "DAY";
                 lines.add(line(tenantId, SalesQuoteLine.Group.MEETING, product, function.getId(),
-                        functionLabel(function), day, rent.getUom(), rent.getQty(), rate, rate));
+                        functionLabel(function), day, uom, rent.getQty(), rate, rate));
+            } else if (function.getResourceId() != null) {
+                lines.add(line(tenantId, SalesQuoteLine.Group.MEETING, null, function.getId(),
+                        functionLabel(function), day, "DAY", 1,
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP),
+                        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)));
             }
-            for (EventFunctionItem item : itemsByFunction.getOrDefault(function.getId(), List.of())) {
+            for (BookingFunctionItem item : itemsByFunction.getOrDefault(function.getId(), List.of())) {
                 if (item.getQty() == null || item.getQty() <= 0 || item.getUnitPrice() == null) {
                     continue;
                 }
@@ -470,7 +576,7 @@ public class SalesQuoteService {
         return lines;
     }
 
-    static SalesQuoteLine.Group groupFor(Product product, EventFunction function) {
+    static SalesQuoteLine.Group groupFor(Product product, BookingFunction function) {
         if (product != null && product.getSalesGroup() != null && product.getSalesGroup() != SalesQuoteLine.Group.DISCOUNT) {
             return product.getSalesGroup();
         }
@@ -603,6 +709,7 @@ public class SalesQuoteService {
 
     private SalesQuote requireEditableQuote(Long quoteId) {
         SalesQuote quote = requireQuoteForWrite(quoteId);
+        bookingService.requireContentEditable(quote.getBookingId());
         if (!quote.getStatus().isEditable()) {
             throw new IllegalStateException("Quote is " + quote.getStatus() + "; "
                     + (quote.getStatus() == SalesQuote.Status.SENT ? "revise it to make changes" : "it can no longer be changed"));
@@ -610,24 +717,24 @@ public class SalesQuoteService {
         return quote;
     }
 
-    private LocalDate defaultValidUntil(Event event) {
+    private LocalDate defaultValidUntil(Booking booking) {
         LocalDate validUntil = LocalDate.now().plusDays(validityDays);
-        if (event.getDecisionDate() != null && event.getDecisionDate().isBefore(validUntil)
-                && !event.getDecisionDate().isBefore(LocalDate.now())) {
-            validUntil = event.getDecisionDate();
+        if (booking.getDecisionDate() != null && booking.getDecisionDate().isBefore(validUntil)
+                && !booking.getDecisionDate().isBefore(LocalDate.now())) {
+            validUntil = booking.getDecisionDate();
         }
         return validUntil;
     }
 
-    private JsonNode snapshot(SalesQuote quote, Event event, CrmAccount account, List<SalesQuoteLine> lines, int version) {
+    private JsonNode snapshot(SalesQuote quote, Booking booking, CrmAccount account, List<SalesQuoteLine> lines, int version) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("quoteNumber", quote.getQuoteNumber());
         root.put("version", version);
         root.put("currency", quote.getCurrency());
         root.put("validUntil", quote.getValidUntil() != null ? quote.getValidUntil().toString() : null);
-        root.put("eventName", event.getName());
-        root.put("dateFrom", event.getDateFrom().toString());
-        root.put("dateTo", event.getDateTo().toString());
+        root.put("bookingName", booking.getName());
+        root.put("dateFrom", booking.getDateFrom().toString());
+        root.put("dateTo", booking.getDateTo().toString());
         root.put("account", account != null ? firstNonBlank(account.getLegalName(), account.getName()) : null);
         root.put("totalBase", quote.getTotalBase());
         root.put("totalOffered", quote.getTotalOffered());
@@ -658,7 +765,7 @@ public class SalesQuoteService {
                 .tenantId(tenantId)
                 .lineGroup(group)
                 .productId(product != null ? product.getId() : null)
-                .eventFunctionId(functionId)
+                .bookingFunctionId(functionId)
                 .description(description)
                 .serviceDate(day)
                 .uom(uom)
@@ -673,7 +780,7 @@ public class SalesQuoteService {
                 .build();
     }
 
-    private static String functionLabel(EventFunction function) {
+    private static String functionLabel(BookingFunction function) {
         return StringUtils.hasText(function.getName()) ? function.getName() : function.getFunctionType().name();
     }
 

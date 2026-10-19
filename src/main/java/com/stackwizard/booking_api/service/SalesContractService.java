@@ -5,7 +5,7 @@ import com.stackwizard.booking_api.dto.InvoiceCreateRequest;
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.CrmAccount;
 import com.stackwizard.booking_api.model.CrmContact;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.Invoice;
 import com.stackwizard.booking_api.model.InvoiceType;
 import com.stackwizard.booking_api.model.Product;
@@ -60,7 +60,7 @@ public class SalesContractService {
     private final SalesPaymentMilestoneRepository milestoneRepo;
     private final SalesQuoteRepository quoteRepo;
     private final SalesQuoteLineRepository quoteLineRepo;
-    private final EventService eventService;
+    private final BookingService bookingService;
     private final CrmAccountRepository accountRepo;
     private final CrmContactRepository contactRepo;
     private final ProductRepository productRepo;
@@ -68,6 +68,7 @@ public class SalesContractService {
     private final InvoiceRepository invoiceRepo;
     private final MediaStorageService mediaStorageService;
     private final CrmAccessContext accessContext;
+    private final TenantHierarchy hierarchy;
     private final BigDecimal depositPercent;
 
     public SalesContractService(SalesContractRepository contractRepo,
@@ -75,7 +76,7 @@ public class SalesContractService {
                                 SalesPaymentMilestoneRepository milestoneRepo,
                                 SalesQuoteRepository quoteRepo,
                                 SalesQuoteLineRepository quoteLineRepo,
-                                EventService eventService,
+                                BookingService bookingService,
                                 CrmAccountRepository accountRepo,
                                 CrmContactRepository contactRepo,
                                 ProductRepository productRepo,
@@ -83,13 +84,14 @@ public class SalesContractService {
                                 InvoiceRepository invoiceRepo,
                                 MediaStorageService mediaStorageService,
                                 CrmAccessContext accessContext,
+                                TenantHierarchy hierarchy,
                                 @Value("${crm.contracts.deposit-percent:30}") BigDecimal depositPercent) {
         this.contractRepo = contractRepo;
         this.documentRepo = documentRepo;
         this.milestoneRepo = milestoneRepo;
         this.quoteRepo = quoteRepo;
         this.quoteLineRepo = quoteLineRepo;
-        this.eventService = eventService;
+        this.bookingService = bookingService;
         this.accountRepo = accountRepo;
         this.contactRepo = contactRepo;
         this.productRepo = productRepo;
@@ -97,13 +99,14 @@ public class SalesContractService {
         this.invoiceRepo = invoiceRepo;
         this.mediaStorageService = mediaStorageService;
         this.accessContext = accessContext;
+        this.hierarchy = hierarchy;
         this.depositPercent = depositPercent;
     }
 
     @Transactional(readOnly = true)
-    public List<SalesDtos.ContractView> forEvent(Long eventId) {
-        Event event = eventService.requireEvent(eventId);
-        return contractRepo.findByTenantIdAndEventIdOrderByIdDesc(event.getTenantId(), event.getId()).stream()
+    public List<SalesDtos.ContractView> forBooking(Long bookingId) {
+        Booking booking = bookingService.requireBooking(bookingId);
+        return contractRepo.findByTenantIdAndBookingIdOrderByIdDesc(booking.getTenantId(), booking.getId()).stream()
                 .map(this::view).toList();
     }
 
@@ -117,7 +120,7 @@ public class SalesContractService {
                 contract.getTenantId(), contract.getId());
         Map<Long, Invoice> invoices = invoiceRepo.findAllById(milestones.stream()
                         .map(SalesPaymentMilestone::getInvoiceId).filter(id -> id != null).toList()).stream()
-                .filter(i -> contract.getTenantId().equals(i.getTenantId()))
+                .filter(i -> contract.getTenantId().equals(hierarchy.orgIdOf(i.getTenantId())))
                 .collect(Collectors.toMap(Invoice::getId, Function.identity()));
         String quoteNumber = quoteRepo.findByIdAndTenantId(contract.getQuoteId(), contract.getTenantId())
                 .map(SalesQuote::getQuoteNumber).orElse(null);
@@ -128,20 +131,20 @@ public class SalesContractService {
 
     /** DRAFT contract on the accepted quote with a default deposit + final payment plan. */
     @Transactional
-    public SalesDtos.ContractView create(Long eventId, SalesDtos.ContractRequest request) {
-        Event event = eventService.requireEditable(eventId);
-        Long tenantId = event.getTenantId();
-        SalesQuote quote = quoteRepo.findFirstByTenantIdAndEventIdAndStatusOrderByIdDesc(tenantId, event.getId(), SalesQuote.Status.ACCEPTED)
-                .orElseThrow(() -> new IllegalStateException("The event needs an accepted quote before a contract"));
-        if (contractRepo.findFirstByTenantIdAndEventIdAndStatusNot(tenantId, event.getId(), SalesContract.Status.CANCELLED).isPresent()) {
-            throw new IllegalStateException("The event already has a contract");
+    public SalesDtos.ContractView create(Long bookingId, SalesDtos.ContractRequest request) {
+        Booking booking = bookingService.requireEditable(bookingId);
+        Long tenantId = booking.getTenantId();
+        SalesQuote quote = quoteRepo.findFirstByTenantIdAndBookingIdAndStatusOrderByIdDesc(tenantId, booking.getId(), SalesQuote.Status.ACCEPTED)
+                .orElseThrow(() -> new IllegalStateException("The booking needs an accepted quote before a contract"));
+        if (contractRepo.findFirstByTenantIdAndBookingIdAndStatusNot(tenantId, booking.getId(), SalesContract.Status.CANCELLED).isPresent()) {
+            throw new IllegalStateException("The booking already has a contract");
         }
         int year = LocalDate.now().getYear();
         String prefix = "C" + year + "-";
         long seq = contractRepo.countByNumberPrefix(tenantId, prefix + "%") + 1;
         SalesContract contract = contractRepo.save(SalesContract.builder()
                 .tenantId(tenantId)
-                .eventId(event.getId())
+                .bookingId(booking.getId())
                 .quoteId(quote.getId())
                 .contractNumber(prefix + String.format("%04d", seq))
                 .status(SalesContract.Status.DRAFT)
@@ -149,7 +152,7 @@ public class SalesContractService {
                 .totalAmount(quote.getTotalOffered())
                 .terms(request != null && StringUtils.hasText(request.terms()) ? request.terms().trim() : quote.getTerms())
                 .build());
-        milestoneRepo.saveAll(defaultMilestones(contract, event, depositPercent, LocalDate.now()));
+        milestoneRepo.saveAll(defaultMilestones(contract, booking, depositPercent, LocalDate.now()));
         return view(contract);
     }
 
@@ -279,8 +282,8 @@ public class SalesContractService {
         if (milestone.getStatus() != SalesPaymentMilestone.Status.PLANNED) {
             throw new IllegalStateException("Milestone is already " + milestone.getStatus());
         }
-        Event event = eventService.requireEvent(contract.getEventId());
-        InvoiceCreateRequest request = customer(contract, event);
+        Booking booking = bookingService.requireBooking(contract.getBookingId());
+        InvoiceCreateRequest request = customer(contract, booking);
         if (milestone.getKind() == SalesPaymentMilestone.Kind.FINAL) {
             List<SalesQuoteLine> lines = quoteLineRepo.findByTenantIdAndQuoteIdOrderByDisplayOrderAscIdAsc(
                     contract.getTenantId(), contract.getQuoteId());
@@ -292,7 +295,7 @@ public class SalesContractService {
                     .orElseThrow(() -> new IllegalStateException("Create a product of type DEPOSIT to invoice advances"));
             InvoiceCreateItemRequest item = new InvoiceCreateItemRequest();
             item.setProductId(deposit.getId());
-            item.setDescription(milestoneLabel(milestone) + " - " + contract.getContractNumber() + " " + event.getName());
+            item.setDescription(milestoneLabel(milestone) + " - " + contract.getContractNumber() + " " + booking.getName());
             item.setQuantity(1);
             item.setUnitPriceGross(milestone.getAmount());
             request.setInvoiceType(InvoiceType.DEPOSIT);
@@ -308,15 +311,15 @@ public class SalesContractService {
         return view(contract);
     }
 
-    static List<SalesPaymentMilestone> defaultMilestones(SalesContract contract, Event event, BigDecimal depositPercent, LocalDate today) {
+    static List<SalesPaymentMilestone> defaultMilestones(SalesContract contract, Booking booking, BigDecimal depositPercent, LocalDate today) {
         BigDecimal total = contract.getTotalAmount();
         BigDecimal deposit = money(total.multiply(depositPercent).divide(HUNDRED, 8, RoundingMode.HALF_UP));
         LocalDate depositDue = today.plusDays(7);
-        LocalDate beforeEvent = event.getDateFrom().minusDays(1);
-        if (beforeEvent.isBefore(depositDue)) {
-            depositDue = beforeEvent.isBefore(today) ? today : beforeEvent;
+        LocalDate beforeBooking = booking.getDateFrom().minusDays(1);
+        if (beforeBooking.isBefore(depositDue)) {
+            depositDue = beforeBooking.isBefore(today) ? today : beforeBooking;
         }
-        LocalDate finalDue = event.getDateTo().isBefore(today) ? today : event.getDateTo();
+        LocalDate finalDue = booking.getDateTo().isBefore(today) ? today : booking.getDateTo();
         List<SalesPaymentMilestone> rows = new ArrayList<>();
         if (deposit.signum() > 0 && depositPercent.compareTo(HUNDRED) < 0) {
             rows.add(milestone(contract, SalesPaymentMilestone.Kind.DEPOSIT, "Deposit", depositDue, depositPercent, deposit, 0));
@@ -421,24 +424,36 @@ public class SalesContractService {
         return items;
     }
 
-    private InvoiceCreateRequest customer(SalesContract contract, Event event) {
-        CrmAccount account = accountRepo.findByIdAndTenantId(event.getAccountId(), event.getTenantId()).orElse(null);
-        CrmContact contact = event.getPrimaryContactId() == null ? null
-                : contactRepo.findByIdAndTenantId(event.getPrimaryContactId(), event.getTenantId()).orElse(null);
+    private InvoiceCreateRequest customer(SalesContract contract, Booking booking) {
+        CrmAccount account = accountRepo.findByIdAndTenantId(booking.getAccountId(), booking.getTenantId()).orElse(null);
+        CrmContact contact = booking.getPrimaryContactId() == null ? null
+                : contactRepo.findByIdAndTenantId(booking.getPrimaryContactId(), booking.getTenantId()).orElse(null);
         InvoiceCreateRequest request = new InvoiceCreateRequest();
-        request.setTenantId(contract.getTenantId());
+        request.setTenantId(invoicingHotel(booking));
         request.setCurrency(contract.getCurrency());
-        request.setCustomerName(account != null ? firstNonBlank(account.getLegalName(), account.getName()) : event.getName());
+        request.setCustomerName(account != null ? firstNonBlank(account.getLegalName(), account.getName()) : booking.getName());
         request.setCustomerEmail(contact != null && contact.getEmail() != null ? contact.getEmail() : account != null ? account.getEmail() : null);
         request.setCustomerPhone(contact != null && contact.getPhone() != null ? contact.getPhone() : account != null ? account.getPhone() : null);
         return request;
+    }
+
+    /** Invoices are fiscal documents of a hotel: the one selected in the request, which must be the booking's hotel when it has one. */
+    static Long invoicingHotel(Booking booking) {
+        Long selected = TenantResolver.selectedHotelId();
+        if (selected == null) {
+            throw new IllegalArgumentException("Select the hotel that issues the invoice");
+        }
+        if (booking.getPropertyTenantId() != null && !booking.getPropertyTenantId().equals(selected)) {
+            throw new IllegalArgumentException("Switch to the booking's hotel to invoice it");
+        }
+        return selected;
     }
 
     SalesContract requireContract(Long contractId) {
         accessContext.require(CrmPermission.EVENT_READ);
         SalesContract contract = contractRepo.findByIdAndTenantId(contractId, TenantResolver.requireOrgTenantId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Contract not found"));
-        eventService.requireEvent(contract.getEventId());
+        bookingService.requireBooking(contract.getBookingId());
         return contract;
     }
 

@@ -3,7 +3,7 @@ package com.stackwizard.booking_api.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.stackwizard.booking_api.dto.SalesDtos;
 import com.stackwizard.booking_api.model.CrmAccount;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.model.SalesContract;
 import com.stackwizard.booking_api.model.SalesPaymentMilestone;
 import com.stackwizard.booking_api.model.SalesQuote;
@@ -21,7 +21,7 @@ import java.math.RoundingMode;
 import java.util.List;
 import java.util.Optional;
 
-import static com.stackwizard.booking_api.service.EventDocumentService.esc;
+import static com.stackwizard.booking_api.service.BookingDocumentService.esc;
 
 /**
  * Quote and contract PDFs. A sent quote prints its latest version snapshot (what the client received);
@@ -34,7 +34,7 @@ public class SalesDocumentService {
     private final SalesQuoteRepository quoteRepo;
     private final SalesQuoteLineRepository lineRepo;
     private final SalesQuoteVersionRepository versionRepo;
-    private final EventService eventService;
+    private final BookingService bookingService;
     private final CrmAccountRepository accountRepo;
 
     public SalesDocumentService(SalesQuoteService quoteService,
@@ -42,28 +42,28 @@ public class SalesDocumentService {
                                 SalesQuoteRepository quoteRepo,
                                 SalesQuoteLineRepository lineRepo,
                                 SalesQuoteVersionRepository versionRepo,
-                                EventService eventService,
+                                BookingService bookingService,
                                 CrmAccountRepository accountRepo) {
         this.quoteService = quoteService;
         this.contractService = contractService;
         this.quoteRepo = quoteRepo;
         this.lineRepo = lineRepo;
         this.versionRepo = versionRepo;
-        this.eventService = eventService;
+        this.bookingService = bookingService;
         this.accountRepo = accountRepo;
     }
 
     @Transactional(readOnly = true)
-    public EventDocumentService.PdfDocument quotePdf(Long quoteId) {
+    public BookingDocumentService.PdfDocument quotePdf(Long quoteId) {
         return renderQuote(quoteService.requireQuote(quoteId));
     }
 
     @Transactional(readOnly = true)
-    public EventDocumentService.PdfDocument contractPdf(Long contractId) {
+    public BookingDocumentService.PdfDocument contractPdf(Long contractId) {
         return renderContract(contractService.view(contractService.requireContract(contractId)));
     }
 
-    EventDocumentService.PdfDocument renderQuote(SalesQuote quote) {
+    BookingDocumentService.PdfDocument renderQuote(SalesQuote quote) {
         Optional<SalesQuoteVersion> sent = quote.getVersion() > 0
                 ? versionRepo.findByTenantIdAndQuoteIdAndVersion(quote.getTenantId(), quote.getId(), quote.getVersion())
                 : Optional.empty();
@@ -71,20 +71,20 @@ public class SalesDocumentService {
         if (sent.isPresent() && quote.getStatus() != SalesQuote.Status.DRAFT && quote.getStatus() != SalesQuote.Status.APPROVED) {
             html = quoteHtmlFromSnapshot(sent.get().getSnapshot(), quote.getStatus().name());
         } else {
-            Event event = eventService.findForSystem(quote.getTenantId(), quote.getEventId()).orElseThrow();
+            Booking booking = bookingService.findForSystem(quote.getTenantId(), quote.getBookingId()).orElseThrow();
             CrmAccount account = accountRepo.findByIdAndTenantId(quote.getAccountId(), quote.getTenantId()).orElse(null);
-            html = quoteHtml(quote, event, account,
+            html = quoteHtml(quote, booking, account,
                     lineRepo.findByTenantIdAndQuoteIdOrderByDisplayOrderAscIdAsc(quote.getTenantId(), quote.getId()));
         }
         String name = quote.getQuoteNumber() + (quote.getVersion() > 0 ? "-v" + quote.getVersion() : "") + ".pdf";
-        return new EventDocumentService.PdfDocument(name, EventDocumentService.renderPdf(html));
+        return new BookingDocumentService.PdfDocument(name, BookingDocumentService.renderPdf(html));
     }
 
-    EventDocumentService.PdfDocument renderContract(SalesDtos.ContractView view) {
+    BookingDocumentService.PdfDocument renderContract(SalesDtos.ContractView view) {
         SalesContract contract = view.contract();
         SalesQuote quote = quoteRepo.findByIdAndTenantId(contract.getQuoteId(), contract.getTenantId()).orElseThrow();
-        Event event = eventService.findForSystem(contract.getTenantId(), contract.getEventId()).orElseThrow();
-        CrmAccount account = accountRepo.findByIdAndTenantId(event.getAccountId(), event.getTenantId()).orElse(null);
+        Booking booking = bookingService.findForSystem(contract.getTenantId(), contract.getBookingId()).orElseThrow();
+        CrmAccount account = accountRepo.findByIdAndTenantId(booking.getAccountId(), booking.getTenantId()).orElse(null);
         List<SalesQuoteLine> lines = lineRepo.findByTenantIdAndQuoteIdOrderByDisplayOrderAscIdAsc(quote.getTenantId(), quote.getId());
         StringBuilder body = new StringBuilder();
         body.append("<h1>Contract ").append(esc(contract.getContractNumber())).append("</h1>");
@@ -92,8 +92,8 @@ public class SalesDocumentService {
                 .append(" | Quote ").append(esc(quote.getQuoteNumber())).append("</p>");
         body.append("<table class=\"kv\">")
                 .append(kv("Client", account != null ? firstNonBlank(account.getLegalName(), account.getName()) : ""))
-                .append(kv("Event", event.getName()))
-                .append(kv("Dates", event.getDateFrom() + " - " + event.getDateTo()))
+                .append(kv("Booking", booking.getName()))
+                .append(kv("Dates", booking.getDateFrom() + " - " + booking.getDateTo()))
                 .append(kv("Total", money(contract.getTotalAmount()) + " " + contract.getCurrency()))
                 .append("</table>");
         body.append("<h2>Services</h2>").append(linesTable(lines.stream().map(LineRow::of).toList(), contract.getCurrency()));
@@ -115,16 +115,16 @@ public class SalesDocumentService {
                 .append("<tr><td class=\"line\"></td><td class=\"line\">")
                 .append(contract.getSignedByName() != null ? esc(contract.getSignedByName()) + ", " + contract.getSignedAt().toLocalDate() : "")
                 .append("</td></tr></table>");
-        return new EventDocumentService.PdfDocument(contract.getContractNumber() + ".pdf",
-                EventDocumentService.renderPdf(page("Contract " + contract.getContractNumber(), body.toString())));
+        return new BookingDocumentService.PdfDocument(contract.getContractNumber() + ".pdf",
+                BookingDocumentService.renderPdf(page("Contract " + contract.getContractNumber(), body.toString())));
     }
 
-    static String quoteHtml(SalesQuote quote, Event event, CrmAccount account, List<SalesQuoteLine> lines) {
+    static String quoteHtml(SalesQuote quote, Booking booking, CrmAccount account, List<SalesQuoteLine> lines) {
         StringBuilder body = new StringBuilder();
         body.append("<h1>Quote ").append(esc(quote.getQuoteNumber())).append("</h1>");
         body.append("<p class=\"muted\">DRAFT - not sent to the client</p>");
         body.append(header(account != null ? firstNonBlank(account.getLegalName(), account.getName()) : "",
-                event.getName(), event.getDateFrom() + " - " + event.getDateTo(),
+                booking.getName(), booking.getDateFrom() + " - " + booking.getDateTo(),
                 quote.getValidUntil() != null ? quote.getValidUntil().toString() : null));
         body.append(linesTable(lines.stream().map(LineRow::of).toList(), quote.getCurrency()));
         body.append(totals(quote.getTotalBase(), quote.getTotalOffered(), quote.getTotalTax(), quote.getCurrency()));
@@ -137,7 +137,7 @@ public class SalesDocumentService {
         StringBuilder body = new StringBuilder();
         body.append("<h1>Quote ").append(esc(s.path("quoteNumber").asText())).append("</h1>");
         body.append("<p class=\"muted\">Version ").append(s.path("version").asInt()).append(" | ").append(esc(status)).append("</p>");
-        body.append(header(s.path("account").asText(""), s.path("eventName").asText(),
+        body.append(header(s.path("account").asText(""), s.path("bookingName").asText(s.path("eventName").asText()),
                 s.path("dateFrom").asText() + " - " + s.path("dateTo").asText(),
                 s.hasNonNull("validUntil") ? s.path("validUntil").asText() : null));
         List<LineRow> rows = new java.util.ArrayList<>();
@@ -167,8 +167,8 @@ public class SalesDocumentService {
         }
     }
 
-    private static String header(String client, String event, String dates, String validUntil) {
-        return "<table class=\"kv\">" + kv("Client", client) + kv("Event", event) + kv("Dates", dates)
+    private static String header(String client, String booking, String dates, String validUntil) {
+        return "<table class=\"kv\">" + kv("Client", client) + kv("Booking", booking) + kv("Dates", dates)
                 + (validUntil != null ? kv("Valid until", validUntil) : "") + "</table>";
     }
 

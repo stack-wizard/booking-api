@@ -7,14 +7,14 @@ import com.stackwizard.booking_api.model.CrmLead;
 import com.stackwizard.booking_api.model.CrmOpportunity;
 import com.stackwizard.booking_api.model.CrmReassignment;
 import com.stackwizard.booking_api.model.CrmTeamMember;
-import com.stackwizard.booking_api.model.Event;
+import com.stackwizard.booking_api.model.Booking;
 import com.stackwizard.booking_api.repository.CrmAccountRepository;
 import com.stackwizard.booking_api.repository.CrmLeadRepository;
 import com.stackwizard.booking_api.repository.CrmOpportunityRepository;
 import com.stackwizard.booking_api.repository.CrmReassignmentRepository;
 import com.stackwizard.booking_api.repository.CrmTeamMemberRepository;
 import com.stackwizard.booking_api.repository.CrmTeamRepository;
-import com.stackwizard.booking_api.repository.EventRepository;
+import com.stackwizard.booking_api.repository.BookingRepository;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmPermission;
 import com.stackwizard.booking_api.security.CrmScope;
@@ -34,12 +34,12 @@ import java.util.List;
  */
 @Service
 public class CrmReassignmentService {
-    static final List<Event.Status> OPEN_EVENT_STATUSES = List.of(Event.Status.INQUIRY, Event.Status.TENTATIVE, Event.Status.DEFINITE);
+    static final List<Booking.Status> OPEN_EVENT_STATUSES = List.of(Booking.Status.INQUIRY, Booking.Status.TENTATIVE, Booking.Status.DEFINITE);
 
     private final CrmLeadRepository leadRepo;
     private final CrmOpportunityRepository opportunityRepo;
     private final CrmAccountRepository accountRepo;
-    private final EventRepository eventRepo;
+    private final BookingRepository bookingRepo;
     private final CrmTeamMemberRepository memberRepo;
     private final CrmTeamRepository teamRepo;
     private final CrmReassignmentRepository reassignmentRepo;
@@ -50,7 +50,7 @@ public class CrmReassignmentService {
     public CrmReassignmentService(CrmLeadRepository leadRepo,
                                   CrmOpportunityRepository opportunityRepo,
                                   CrmAccountRepository accountRepo,
-                                  EventRepository eventRepo,
+                                  BookingRepository bookingRepo,
                                   CrmTeamMemberRepository memberRepo,
                                   CrmTeamRepository teamRepo,
                                   CrmReassignmentRepository reassignmentRepo,
@@ -59,7 +59,7 @@ public class CrmReassignmentService {
         this.leadRepo = leadRepo;
         this.opportunityRepo = opportunityRepo;
         this.accountRepo = accountRepo;
-        this.eventRepo = eventRepo;
+        this.bookingRepo = bookingRepo;
         this.memberRepo = memberRepo;
         this.teamRepo = teamRepo;
         this.reassignmentRepo = reassignmentRepo;
@@ -76,7 +76,7 @@ public class CrmReassignmentService {
                 openLeads(tenantId, fromUserId).size(),
                 openOpportunities(tenantId, fromUserId).size(),
                 activeAccounts(tenantId, fromUserId).size(),
-                openEvents(tenantId, fromUserId).size());
+                openBookings(tenantId, fromUserId).size());
     }
 
     public List<CrmReassignment> history() {
@@ -96,12 +96,12 @@ public class CrmReassignmentService {
         boolean leads = !Boolean.FALSE.equals(request.includeLeads());
         boolean opportunities = !Boolean.FALSE.equals(request.includeOpportunities());
         boolean accounts = !Boolean.FALSE.equals(request.includeAccounts());
-        boolean events = !Boolean.FALSE.equals(request.includeEvents());
+        boolean bookings = !Boolean.FALSE.equals(request.includeBookings());
         if (to == null && request.toTeamId() == null) {
             throw new IllegalArgumentException("toUserId or toTeamId is required");
         }
-        if (to == null && (opportunities || accounts || events)) {
-            throw new IllegalArgumentException("Only leads can go to a team queue; pick a rep for opportunities, accounts and events");
+        if (to == null && (opportunities || accounts || bookings)) {
+            throw new IllegalArgumentException("Only leads can go to a team queue; pick a rep for opportunities, accounts and bookings");
         }
         if (from.equals(to)) {
             throw new IllegalArgumentException("fromUserId and toUserId must differ");
@@ -120,7 +120,7 @@ public class CrmReassignmentService {
         int leadCount = 0;
         int opportunityCount = 0;
         int accountCount = 0;
-        int eventCount = 0;
+        int bookingCount = 0;
         if (leads) {
             for (CrmLead lead : openLeads(tenantId, from)) {
                 lead.setOwnerUserId(to);
@@ -147,13 +147,13 @@ public class CrmReassignmentService {
                 accountCount++;
             }
         }
-        if (events) {
-            for (Event event : openEvents(tenantId, from)) {
-                teamDirectory.requireCovers(tenantId, team, event.getPropertyTenantId());
-                event.setOwnerUserId(to);
-                event.setTeamId(team != null ? team : event.getTeamId());
-                eventRepo.save(event);
-                eventCount++;
+        if (bookings) {
+            for (Booking booking : openBookings(tenantId, from)) {
+                teamDirectory.requireCovers(tenantId, team, booking.getPropertyTenantId());
+                booking.setOwnerUserId(to);
+                booking.setTeamId(team != null ? team : booking.getTeamId());
+                bookingRepo.save(booking);
+                bookingCount++;
             }
         }
         int endedMemberships = 0;
@@ -166,7 +166,7 @@ public class CrmReassignmentService {
         counts.put("leads", leadCount);
         counts.put("opportunities", opportunityCount);
         counts.put("accounts", accountCount);
-        counts.put("events", eventCount);
+        counts.put("bookings", bookingCount);
         counts.put("endedMemberships", endedMemberships);
         return reassignmentRepo.save(CrmReassignment.builder()
                 .tenantId(tenantId)
@@ -216,7 +216,7 @@ public class CrmReassignmentService {
         return accountRepo.findByTenantIdAndOwnerUserIdAndActiveTrue(tenantId, userId);
     }
 
-    private List<Event> openEvents(Long tenantId, Long userId) {
-        return eventRepo.findByTenantIdAndOwnerUserIdAndStatusInAndDateToGreaterThanEqual(tenantId, userId, OPEN_EVENT_STATUSES, LocalDate.now());
+    private List<Booking> openBookings(Long tenantId, Long userId) {
+        return bookingRepo.findByTenantIdAndOwnerUserIdAndStatusInAndDateToGreaterThanEqual(tenantId, userId, OPEN_EVENT_STATUSES, LocalDate.now());
     }
 }

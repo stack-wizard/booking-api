@@ -34,8 +34,8 @@ public class CrmAlert {
     @Column(nullable = false)
     private Kind kind;
 
-    @Column(name = "event_id")
-    private Long eventId;
+    @Column(name = "booking_id")
+    private Long bookingId;
 
     @Column(name = "quote_id")
     private Long quoteId;

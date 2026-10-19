@@ -10,9 +10,9 @@ on conflict do nothing;
 insert into wipe_tenants (tenant_id) values (__PROPERTY_TENANT_ID__)
 on conflict do nothing;
 
-create temporary table wipe_events (id bigint primary key) on commit drop;
-insert into wipe_events (id)
-select e.id from event e
+create temporary table wipe_bookings (id bigint primary key) on commit drop;
+insert into wipe_bookings (id)
+select e.id from booking e
 join wipe_tenants t on t.tenant_id = e.tenant_id
 where e.attrs->>'seed' = 'DH_SALES_FLOW';
 
@@ -25,13 +25,13 @@ where o.attrs->>'seed' = 'DH_SALES_FLOW';
 create temporary table wipe_quotes (id bigint primary key) on commit drop;
 insert into wipe_quotes (id)
 select q.id from sales_quote q
-where q.event_id in (select id from wipe_events)
+where q.booking_id in (select id from wipe_bookings)
    or (q.quote_number = 'Q-DH-SEED-001' and q.tenant_id in (select tenant_id from wipe_tenants));
 
 create temporary table wipe_contracts (id bigint primary key) on commit drop;
 insert into wipe_contracts (id)
 select c.id from sales_contract c
-where c.event_id in (select id from wipe_events)
+where c.booking_id in (select id from wipe_bookings)
    or c.quote_id in (select id from wipe_quotes)
    or (c.contract_number = 'C-DH-SEED-001' and c.tenant_id in (select tenant_id from wipe_tenants));
 
@@ -41,10 +41,10 @@ select m.id from sales_payment_milestone m where m.contract_id in (select id fro
 
 -- Alerts before milestones (FK), contracts before quotes (restrict).
 delete from crm_alert
- where event_id in (select id from wipe_events)
+ where booking_id in (select id from wipe_bookings)
     or quote_id in (select id from wipe_quotes)
     or milestone_id in (select id from wipe_milestones);
-delete from portal_access_token where event_id in (select id from wipe_events);
+delete from portal_access_token where booking_id in (select id from wipe_bookings);
 
 delete from sales_payment_milestone where id in (select id from wipe_milestones);
 delete from sales_contract_document where contract_id in (select id from wipe_contracts);
@@ -55,16 +55,19 @@ delete from sales_quote_line where quote_id in (select id from wipe_quotes);
 delete from sales_quote_version where quote_id in (select id from wipe_quotes);
 delete from sales_quote where id in (select id from wipe_quotes);
 
-delete from event_order where event_id in (select id from wipe_events);
-delete from event_status_history where event_id in (select id from wipe_events);
-delete from event_function_item
- where event_function_id in (select id from event_function where event_id in (select id from wipe_events));
--- reservation.event_function_id is ON DELETE RESTRICT; allocation follows the reservation.
+delete from booking_opera_block where booking_id in (select id from wipe_bookings);
+delete from booking_order where booking_id in (select id from wipe_bookings);
+delete from booking_status_history where booking_id in (select id from wipe_bookings);
+delete from booking_function_item
+ where booking_function_id in (select id from booking_function where booking_id in (select id from wipe_bookings));
+-- reservation.booking_function_id is ON DELETE RESTRICT; allocation follows the reservation.
 delete from reservation
- where event_function_id in (select id from event_function where event_id in (select id from wipe_events));
-update event_function set resource_id = null where event_id in (select id from wipe_events);
-delete from event_function where event_id in (select id from wipe_events);
-delete from event where id in (select id from wipe_events);
+ where booking_function_id in (select id from booking_function where booking_id in (select id from wipe_bookings));
+delete from reservation
+ where booking_room_block_id in (select id from booking_room_block where booking_id in (select id from wipe_bookings));
+update booking_function set resource_id = null where booking_id in (select id from wipe_bookings);
+delete from booking_function where booking_id in (select id from wipe_bookings);
+delete from booking where id in (select id from wipe_bookings);
 
 delete from crm_activity
  where opportunity_id in (select id from wipe_opportunities)
@@ -90,16 +93,41 @@ delete from crm_contact
 delete from crm_account
  where tenant_id in (select tenant_id from wipe_tenants) and attrs->>'seed' = 'DH_SALES_FLOW';
 
--- Demo spaces (safe: seed never creates allocations on them). Also clear leftover EVT-* on the org
--- tenant if an older seed put spaces there before hierarchy.
-delete from resource_setup_capacity
- where resource_id in (
-   select id from resource
-   where tenant_id in (select tenant_id from wipe_tenants) and code like 'EVT-%'
- );
+-- Demo spaces: legacy EVT-* plus OPERA-aligned SALA1/GALIJA/… (and optional room pools if reseeded).
+create temporary table wipe_spaces (id bigint primary key) on commit drop;
+insert into wipe_spaces (id)
+select id from resource
+where tenant_id in (select tenant_id from wipe_tenants)
+  and (code like 'EVT-%'
+    or code in ('SALA1', 'SAL2', 'GALIJA', 'RES', 'REST', 'GR', 'DBL', 'SAE', 'TWC'));
+
+create temporary table wipe_space_requests (id bigint primary key) on commit drop;
+insert into wipe_space_requests (id)
+select distinct r.request_id from reservation r
+ where r.requested_resource_id in (select id from wipe_spaces)
+    or r.id in (select a.reservation_id from allocation a
+                 where a.allocated_resource_id in (select id from wipe_spaces)
+                    or a.requested_resource_id in (select id from wipe_spaces));
+delete from reservation
+ where requested_resource_id in (select id from wipe_spaces)
+    or id in (select a.reservation_id from allocation a
+               where a.allocated_resource_id in (select id from wipe_spaces)
+                  or a.requested_resource_id in (select id from wipe_spaces));
+delete from reservation_request q
+ where q.id in (select id from wipe_space_requests)
+   and q.booking_id is not null
+   and not exists (select 1 from reservation r where r.request_id = q.id);
+update booking_function set resource_id = null where resource_id in (select id from wipe_spaces);
+update booking_room_block set room_resource_id = null where room_resource_id in (select id from wipe_spaces);
+update product set resource_id = null where resource_id in (select id from wipe_spaces);
+update resource set parent_pool_id = null where parent_pool_id in (select id from wipe_spaces);
+
+delete from resource_setup_capacity where resource_id in (select id from wipe_spaces);
 delete from resource_composition
+ where parent_resource_id in (select id from wipe_spaces)
+    or member_resource_id in (select id from wipe_spaces);
+delete from opera_code_map
  where tenant_id in (select tenant_id from wipe_tenants)
-   and (parent_resource_id in (select id from resource where tenant_id in (select tenant_id from wipe_tenants) and code like 'EVT-%')
-     or member_resource_id in (select id from resource where tenant_id in (select tenant_id from wipe_tenants) and code like 'EVT-%'));
-delete from resource
- where tenant_id in (select tenant_id from wipe_tenants) and code like 'EVT-%';
+   and kind = 'FUNCTION_SPACE'
+   and local_ref in (select id::text from wipe_spaces);
+delete from resource where id in (select id from wipe_spaces);

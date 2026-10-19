@@ -1,8 +1,8 @@
 package com.stackwizard.booking_api.config;
 
-import com.stackwizard.booking_api.model.Event;
-import com.stackwizard.booking_api.repository.EventFunctionRepository;
-import com.stackwizard.booking_api.repository.EventRepository;
+import com.stackwizard.booking_api.model.Booking;
+import com.stackwizard.booking_api.repository.BookingFunctionRepository;
+import com.stackwizard.booking_api.repository.BookingRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -30,8 +30,9 @@ import java.util.UUID;
  * (same path as {@code X-Tenant-Id}). Catalog and CRM go to the chain, spaces and functions to the hotel.
  * <p>
  * After parent/child tenancy, an older seed on the hotel alone is wiped and re-seeded onto the organization
- * with {@code property_tenant_id} set. A correct seed is left alone. Reservations for functions that have
- * a room are created afterwards, one function at a time; a failure there keeps the event. Gated by
+ * with {@code property_tenant_id} set. A correct seed is a {@code TENTATIVE} demo booking (ready for the
+ * tester to confirm and post to OPERA; the seed itself never calls OPERA). An older DEFINITE demo is wiped.
+ * Reservations for functions that have a room are created afterwards as local holds only. Gated by
  * {@code booking.dev.dh-sales-flow-seed} (default true). Missing mapping → log and skip. Failures never
  * block startup.
  */
@@ -46,8 +47,8 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final BookingDevProperties properties;
-    private final EventRepository eventRepo;
-    private final EventFunctionRepository functionRepo;
+    private final BookingRepository bookingRepo;
+    private final BookingFunctionRepository functionRepo;
     private final DhSalesFlowSeedReservations reservations;
 
     public DhSalesFlowSeedRunner(
@@ -55,15 +56,15 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
             JdbcTemplate jdbc,
             PlatformTransactionManager transactionManager,
             BookingDevProperties properties,
-            EventRepository eventRepo,
-            EventFunctionRepository functionRepo,
+            BookingRepository bookingRepo,
+            BookingFunctionRepository functionRepo,
             DhSalesFlowSeedReservations reservations
     ) {
         this.dataSource = dataSource;
         this.jdbc = jdbc;
         this.tx = new TransactionTemplate(transactionManager);
         this.properties = properties;
-        this.eventRepo = eventRepo;
+        this.bookingRepo = bookingRepo;
         this.functionRepo = functionRepo;
         this.reservations = reservations;
     }
@@ -88,9 +89,9 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
 
     private void holdReservations(Scope scope) {
         try {
-            Long eventId = jdbc.query(
+            Long bookingId = jdbc.query(
                     """
-                    select id from event
+                    select id from booking
                     where tenant_id = ?
                       and attrs->>'seed' = 'DH_SALES_FLOW'
                       and property_tenant_id is not distinct from ?
@@ -101,20 +102,20 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
                     scope.orgTenantId(),
                     scope.propertyTenantId()
             );
-            if (eventId == null) {
+            if (bookingId == null) {
                 return;
             }
-            Event event = eventRepo.findById(eventId).orElse(null);
-            if (event == null) {
+            Booking booking = bookingRepo.findById(bookingId).orElse(null);
+            if (booking == null) {
                 return;
             }
-            reservations.holdMissing(event, functionRepo.findForEvent(scope.orgTenantId(), event.getId()));
+            reservations.holdMissing(booking, functionRepo.findForBooking(scope.orgTenantId(), booking.getId()));
         } catch (RuntimeException ex) {
             log.warn("Demo sales-flow reservations were not created; the seed stays: {}", ex.getMessage(), ex);
         }
     }
 
-    /** @return the chain and hotel when the demo event is in place; null when this start should do nothing */
+    /** @return the chain and hotel when the demo booking is in place; null when this start should do nothing */
     private Scope seed() {
         Boolean locked = jdbc.queryForObject("select pg_try_advisory_xact_lock(?)", Boolean.class, ADVISORY_LOCK_KEY);
         if (!Boolean.TRUE.equals(locked)) {
@@ -186,14 +187,18 @@ public class DhSalesFlowSeedRunner implements ApplicationRunner {
         );
     }
 
-    /** True when the demo event sits on the organization and points at the hotel. */
+    /**
+     * True when the demo booking sits on the organization, points at the hotel, and is still TENTATIVE
+     * (the OPERA post test starting point). A leftover DEFINITE demo is treated as stale and reseeded.
+     */
     private boolean isCorrectSeedPresent(long orgTenantId, long propertyTenantId) {
         Integer count = jdbc.queryForObject(
                 """
-                select count(*)::int from event
+                select count(*)::int from booking
                 where tenant_id = ?
                   and attrs->>'seed' = 'DH_SALES_FLOW'
                   and property_tenant_id is not distinct from ?
+                  and status = 'TENTATIVE'
                 """,
                 Integer.class,
                 orgTenantId,

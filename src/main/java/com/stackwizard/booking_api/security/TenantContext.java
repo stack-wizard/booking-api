@@ -3,7 +3,7 @@ package com.stackwizard.booking_api.security;
 /**
  * Per-request tenant scope. Two levels:
  * <ul>
- *   <li><b>org</b> — hotel chain (Platform parent tenant); owner of shared catalog / CRM / events</li>
+ *   <li><b>org</b> — hotel chain (Platform parent tenant); owner of shared catalog / CRM / bookings</li>
  *   <li><b>property</b> — hotel (Platform child tenant); owner of capacity and operations</li>
  * </ul>
  * {@link #getTenantId()} is the effective (property) tenant and is what legacy code reads.

@@ -41,8 +41,8 @@ public class SalesQuoteLine {
     @Column(name = "product_id")
     private Long productId;
 
-    @Column(name = "event_function_id")
-    private Long eventFunctionId;
+    @Column(name = "booking_function_id")
+    private Long bookingFunctionId;
 
     @Column(nullable = false, columnDefinition = "text")
     private String description;
@@ -80,6 +80,6 @@ public class SalesQuoteLine {
     private OffsetDateTime createdAt;
 
     public enum Group {
-        MEETING, F_AND_B, AV, EXTRAS, DISCOUNT
+        MEETING, ROOMS, F_AND_B, AV, EXTRAS, DISCOUNT
     }
 }

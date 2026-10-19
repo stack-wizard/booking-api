@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
@@ -14,9 +15,13 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class DefaultOperaPostingClient implements OperaPostingClient {
@@ -28,12 +33,30 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
     private static final String CHECK_IN_PATH = "/fof/v1/hotels/{hotelCode}/reservations/{reservationId}/checkIns";
     private static final String PAYMENT_PATH = "/csh/v1/hotels/{hotelCode}/reservations/{reservationId}/payments";
     private static final String OAUTH_SCOPE = "urn:opc:hgbu:ws:__myscopes__";
+    /** Renew this long before OPERA says the token expires. */
+    private static final Duration TOKEN_RENEW_MARGIN = Duration.ofSeconds(60);
+    private static final Duration TOKEN_DEFAULT_LIFETIME = Duration.ofMinutes(5);
+
+    /** Everything the OAuth login depends on; a changed secret or chain gets its own token. */
+    private record TokenKey(String baseUrl, String oauthPath, String appKey, String clientId, String clientSecret,
+                            String enterpriseId, String chainCode) {
+    }
+
+    private record CachedToken(String value, Instant renewAt) {
+    }
 
     private final RestClient restClient;
+    private final Clock clock;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final Map<TokenKey, CachedToken> tokens = new ConcurrentHashMap<>();
 
     public DefaultOperaPostingClient() {
-        this.restClient = RestClient.builder().build();
+        this(RestClient.builder(), Clock.systemUTC());
+    }
+
+    DefaultOperaPostingClient(RestClient.Builder restClientBuilder, Clock clock) {
+        this.restClient = restClientBuilder.build();
+        this.clock = clock;
     }
 
     @Override
@@ -110,9 +133,96 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         String requestUrl = appendQueryParams(
                 normalizeUrl(config.baseUrl(), RESERVATIONS_PATH.replace("{hotelCode}", hotelCode)),
                 queryParams);
+        return getJson("Opera reservation lookup", config, chainCode, hotelCode, requestUrl);
+    }
+
+    @Override
+    public JsonNode get(OperaTenantConfigResolver.OperaResolvedConfig config,
+                        String chainCode,
+                        String hotelCode,
+                        String path,
+                        Map<String, List<String>> queryParams) {
+        String requestUrl = appendQueryParams(normalizeUrl(config.baseUrl(), path), queryParams);
+        return getJson("Opera request " + path, config, chainCode, hotelCode, requestUrl);
+    }
+
+    @Override
+    public WriteResult post(OperaTenantConfigResolver.OperaResolvedConfig config,
+                            String chainCode,
+                            String hotelCode,
+                            String path,
+                            JsonNode body) {
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = body == null ? "{}" : body.toString();
+        try {
+            var response = restClient.post()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("x-app-key", config.appKey())
+                    .header("x-hotelid", hotelCode)
+                    .header("Authorization", authorization)
+                    .body(requestBody)
+                    .retrieve()
+                    .toEntity(String.class);
+            return new WriteResult(parseJson(response.getBody()), firstHeader(response.getHeaders(), "Location"));
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+                evictToken(config, chainCode);
+            }
+            log.error("Opera POST failed. operation={}, hotelCode={}, url={}, status={}, requestBody={}, responseBody={}",
+                    path, hotelCode, requestUrl, ex.getStatusCode().value(), safe(requestBody),
+                    sanitize(ex.getResponseBodyAsString()), ex);
+            throw new IllegalStateException("Opera posting request failed: " + ex.getStatusCode().value()
+                    + " " + sanitize(ex.getResponseBodyAsString()), ex);
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Opera posting request failed", ex);
+        }
+    }
+
+    @Override
+    public JsonNode put(OperaTenantConfigResolver.OperaResolvedConfig config,
+                        String chainCode,
+                        String hotelCode,
+                        String path,
+                        JsonNode body) {
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
+        String authorization = resolveAuthorization(config, chainCode);
+        String requestBody = body == null ? "{}" : body.toString();
+        try {
+            String raw = restClient.put()
+                    .uri(requestUrl)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .header("x-app-key", config.appKey())
+                    .header("x-hotelid", hotelCode)
+                    .header("Authorization", authorization)
+                    .body(requestBody)
+                    .retrieve()
+                    .body(String.class);
+            return parseJson(raw);
+        } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+                evictToken(config, chainCode);
+            }
+            log.error("Opera PUT failed. operation={}, hotelCode={}, url={}, status={}, requestBody={}, responseBody={}",
+                    path, hotelCode, requestUrl, ex.getStatusCode().value(), safe(requestBody),
+                    sanitize(ex.getResponseBodyAsString()), ex);
+            throw new IllegalStateException("Opera posting request failed: " + ex.getStatusCode().value()
+                    + " " + sanitize(ex.getResponseBodyAsString()), ex);
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Opera posting request failed", ex);
+        }
+    }
+
+    @Override
+    public JsonNode delete(OperaTenantConfigResolver.OperaResolvedConfig config,
+                           String chainCode,
+                           String hotelCode,
+                           String path) {
+        String requestUrl = normalizeUrl(config.baseUrl(), path);
         String authorization = resolveAuthorization(config, chainCode);
         try {
-            String raw = restClient.get()
+            String raw = restClient.delete()
                     .uri(requestUrl)
                     .header("x-app-key", config.appKey())
                     .header("x-hotelid", hotelCode)
@@ -121,10 +231,52 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
                     .body(String.class);
             return parseJson(raw);
         } catch (RestClientResponseException ex) {
-            throw new IllegalStateException("Opera reservation lookup failed: " + ex.getStatusCode().value()
+            if (ex.getStatusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+                evictToken(config, chainCode);
+            }
+            log.error("Opera DELETE failed. operation={}, hotelCode={}, url={}, status={}, responseBody={}",
+                    path, hotelCode, requestUrl, ex.getStatusCode().value(), sanitize(ex.getResponseBodyAsString()), ex);
+            throw new IllegalStateException("Opera posting request failed: " + ex.getStatusCode().value()
                     + " " + sanitize(ex.getResponseBodyAsString()), ex);
         } catch (RestClientException ex) {
-            throw new IllegalStateException("Opera reservation lookup failed", ex);
+            throw new IllegalStateException("Opera posting request failed", ex);
+        }
+    }
+
+    private static String firstHeader(org.springframework.http.HttpHeaders headers, String name) {
+        if (headers == null) {
+            return null;
+        }
+        String value = headers.getFirst(name);
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
+    /** A GET refused with 401 is retried once with a fresh token (the cached one may have been revoked). */
+    private JsonNode getJson(String operation,
+                             OperaTenantConfigResolver.OperaResolvedConfig config,
+                             String chainCode,
+                             String hotelCode,
+                             String requestUrl) {
+        for (int attempt = 1; ; attempt++) {
+            String authorization = resolveAuthorization(config, chainCode);
+            try {
+                String raw = restClient.get()
+                        .uri(requestUrl)
+                        .header("x-app-key", config.appKey())
+                        .header("x-hotelid", hotelCode)
+                        .header("Authorization", authorization)
+                        .retrieve()
+                        .body(String.class);
+                return parseJson(raw);
+            } catch (RestClientResponseException ex) {
+                if (ex.getStatusCode().value() == HttpStatus.UNAUTHORIZED.value() && evictToken(config, chainCode) && attempt == 1) {
+                    continue;
+                }
+                throw new IllegalStateException(operation + " failed: " + ex.getStatusCode().value()
+                        + " " + sanitize(ex.getResponseBodyAsString()), ex);
+            } catch (RestClientException ex) {
+                throw new IllegalStateException(operation + " failed", ex);
+            }
         }
     }
 
@@ -147,6 +299,9 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
                     .body(String.class);
             return parseJson(raw);
         } catch (RestClientResponseException ex) {
+            if (ex.getStatusCode().value() == HttpStatus.UNAUTHORIZED.value()) {
+                evictToken(config, chainCode);
+            }
             log.error("Opera POST failed. operation={}, hotelCode={}, chainCode={}, url={}, status={}, requestBody={}, responseBody={}",
                     operation,
                     hotelCode,
@@ -174,10 +329,25 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
         if (StringUtils.hasText(config.accessToken())) {
             return normalizeAuthorization(config.accessToken());
         }
-        return "Bearer " + fetchAccessToken(config, chainCode);
+        CachedToken token = tokens.compute(tokenKey(config, chainCode), (key, cached) ->
+                cached != null && clock.instant().isBefore(cached.renewAt()) ? cached : fetchAccessToken(config, chainCode));
+        return "Bearer " + token.value();
     }
 
-    private String fetchAccessToken(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
+    /** Returns whether a cached token was dropped (false for a configured static token). */
+    private boolean evictToken(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
+        if (StringUtils.hasText(config.accessToken())) {
+            return false;
+        }
+        return tokens.remove(tokenKey(config, chainCode)) != null;
+    }
+
+    private static TokenKey tokenKey(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
+        return new TokenKey(config.baseUrl(), config.oauthPath(), config.appKey(), config.clientId(), config.clientSecret(),
+                config.enterpriseId(), StringUtils.hasText(chainCode) ? chainCode.trim() : null);
+    }
+
+    private CachedToken fetchAccessToken(OperaTenantConfigResolver.OperaResolvedConfig config, String chainCode) {
         try {
             MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
             body.add("grant_type", "client_credentials");
@@ -199,7 +369,12 @@ public class DefaultOperaPostingClient implements OperaPostingClient {
             if (!StringUtils.hasText(accessToken)) {
                 throw new IllegalStateException("Opera OAuth response missing access_token");
             }
-            return accessToken.trim();
+            long expiresIn = json.path("expires_in").asLong(0);
+            Duration lifetime = expiresIn > 0 ? Duration.ofSeconds(expiresIn) : TOKEN_DEFAULT_LIFETIME;
+            Duration renewAfter = lifetime.compareTo(TOKEN_RENEW_MARGIN.multipliedBy(2)) > 0
+                    ? lifetime.minus(TOKEN_RENEW_MARGIN)
+                    : lifetime.dividedBy(2);
+            return new CachedToken(accessToken.trim(), clock.instant().plus(renewAfter));
         } catch (RestClientResponseException ex) {
             throw new IllegalStateException("Opera OAuth login failed: " + ex.getStatusCode().value()
                     + " " + sanitize(ex.getResponseBodyAsString()), ex);

@@ -32,6 +32,10 @@ public class Allocation {
     @Column
     private Integer qty;
 
+    @Builder.Default
+    @Column(name = "units", nullable = false)
+    private Integer units = 1;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reservation_id", nullable = false)
     private Reservation reservation;
