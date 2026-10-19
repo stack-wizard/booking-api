@@ -52,6 +52,9 @@ public class OperaPostingConfigurationService {
         if (hotel.getSpaceInventory() == null) {
             hotel.setSpaceInventory(existing != null ? existing.getSpaceInventory() : OperaHotel.Mode.LOCAL);
         }
+        if (hotel.getRoomInventory() == null) {
+            hotel.setRoomInventory(existing != null ? existing.getRoomInventory() : OperaHotel.Mode.LOCAL);
+        }
         if (hotel.getBilling() == null) {
             hotel.setBilling(existing != null ? existing.getBilling() : OperaHotel.Mode.LOCAL);
         }
