@@ -12,6 +12,8 @@ import java.util.Optional;
 public interface CrmLeadRepository extends JpaRepository<CrmLead, Long> {
     Optional<CrmLead> findByIdAndTenantId(Long id, Long tenantId);
 
+    Optional<CrmLead> findByTenantIdAndSourceAndExternalRef(Long tenantId, String source, String externalRef);
+
     @Query("""
             select l from CrmLead l
             where l.tenantId = :tenantId

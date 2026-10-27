@@ -86,6 +86,34 @@ public class CrmLeadService {
     public CrmLead create(CrmLead lead) {
         accessContext.require(CrmPermission.OPPORTUNITY_WRITE);
         Long tenantId = TenantResolver.requireOrgTenantId();
+        prepareNew(lead, tenantId);
+        if (lead.getOwnerUserId() == null && lead.getTeamId() == null) {
+            assignmentService.assign(lead, accessContext.currentUserId());
+        } else {
+            lead.setTeamId(teamDirectory.resolveTeam(tenantId, lead.getOwnerUserId(), lead.getTeamId(), null));
+            teamDirectory.requireAssignable(tenantId, lead.getOwnerUserId(), lead.getTeamId());
+            lead.setAssignedAt(OffsetDateTime.now());
+        }
+        return leadRepo.save(lead);
+    }
+
+    /**
+     * System create for leads submitted by a channel (e.g. the website through the CMS m2m token): there is no
+     * logged-in user, so no CRM permission check and no creator fallback. Owner and team always come from the
+     * assignment rules; when nothing matches the lead stays unassigned for sales to pick up.
+     * The caller is responsible for authorizing the channel.
+     */
+    @Transactional
+    public CrmLead createFromChannel(CrmLead lead) {
+        Long tenantId = TenantResolver.requireOrgTenantId();
+        prepareNew(lead, tenantId);
+        lead.setOwnerUserId(null);
+        lead.setTeamId(null);
+        assignmentService.assign(lead, null);
+        return leadRepo.save(lead);
+    }
+
+    private void prepareNew(CrmLead lead, Long tenantId) {
         lead.setId(null);
         lead.setTenantId(tenantId);
         if (lead.getStatus() == null) {
@@ -97,14 +125,6 @@ public class CrmLeadService {
         lead.setSegment(segmentService.normalize(tenantId, lead.getSegment()));
         lead.setCountry(normalizeCountry(lead.getCountry()));
         lead.setAssignmentRuleId(null);
-        if (lead.getOwnerUserId() == null && lead.getTeamId() == null) {
-            assignmentService.assign(lead, accessContext.currentUserId());
-        } else {
-            lead.setTeamId(teamDirectory.resolveTeam(tenantId, lead.getOwnerUserId(), lead.getTeamId(), null));
-            teamDirectory.requireAssignable(tenantId, lead.getOwnerUserId(), lead.getTeamId());
-            lead.setAssignedAt(OffsetDateTime.now());
-        }
-        return leadRepo.save(lead);
     }
 
     @Transactional

@@ -47,6 +47,10 @@ public class CrmLead extends CrmAuditableEntity {
     private String phone;
     private String source;
 
+    /** Id of the record in the submitting channel ({@code source}); unique per tenant and source. */
+    @Column(name = "external_ref")
+    private String externalRef;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Status status;

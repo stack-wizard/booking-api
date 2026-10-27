@@ -21,6 +21,9 @@ public class SecurityConfig {
     private static final String MONRI_WEBHOOK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/webhook/**";
     private static final String MONRI_CALLBACK_PATH = "/api/payments/providers/monri/callback/**";
     private static final String MONRI_CALLBACK_PATH_PREFIXED = "/booking-api/api/payments/providers/monri/callback/**";
+    /** Website inquiries come only from the CMS m2m client (ROLE_API from PlatformAuthFilter). */
+    private static final String CATALOG_INQUIRIES_PATH = "/api/catalog/inquiries";
+    private static final String CATALOG_INQUIRIES_PATH_PREFIXED = "/booking-api/api/catalog/inquiries";
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -56,6 +59,7 @@ public class SecurityConfig {
                     "/swagger-ui.html",
                     "/booking-api/swagger-ui.html"
                 ).permitAll()
+                .requestMatchers(CATALOG_INQUIRIES_PATH, CATALOG_INQUIRIES_PATH_PREFIXED).hasRole("API")
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2
