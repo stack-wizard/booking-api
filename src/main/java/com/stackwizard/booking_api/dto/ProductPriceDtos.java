@@ -1,5 +1,6 @@
 package com.stackwizard.booking_api.dto;
 
+import com.stackwizard.booking_api.model.PriceProfileDate;
 import com.stackwizard.booking_api.model.ReservationRequest;
 
 import java.math.BigDecimal;
@@ -19,7 +20,9 @@ public final class ProductPriceDtos {
                          ReservationRequest.Type requestType,
                          LocalDate dateFrom,
                          LocalDate dateTo,
-                         String description) {
+                         String description,
+                         Long seasonId,
+                         PriceProfileDate.PeriodKind periodKind) {
     }
 
     public record PriceRow(Long id,
@@ -27,10 +30,16 @@ public final class ProductPriceDtos {
                            String uom,
                            BigDecimal price,
                            LocalTime startTime,
-                           LocalTime endTime) {
+                           LocalTime endTime,
+                           List<String> daysOfWeek) {
     }
 
-    public record PriceInput(Long id, Long priceProfileDateId, String uom, BigDecimal price, LocalTime startTime, LocalTime endTime) {
+    /** {@code daysOfWeek}: MON..SUN; null or empty = every day. */
+    public record PriceInput(Long id, Long priceProfileDateId, String uom, BigDecimal price, LocalTime startTime, LocalTime endTime,
+                             List<String> daysOfWeek) {
+        public PriceInput(Long id, Long priceProfileDateId, String uom, BigDecimal price, LocalTime startTime, LocalTime endTime) {
+            this(id, priceProfileDateId, uom, price, startTime, endTime, null);
+        }
     }
 
     public record SaveRequest(List<PriceInput> upserts, List<Long> deleteIds) {

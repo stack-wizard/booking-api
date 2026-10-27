@@ -5,7 +5,6 @@ import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ProductComponent;
 import com.stackwizard.booking_api.model.ProductPackageListing;
 import com.stackwizard.booking_api.repository.ProductComponentRepository;
-import com.stackwizard.booking_api.repository.ProductPackageListingRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantContext;
 import org.junit.jupiter.api.AfterEach;
@@ -37,7 +36,7 @@ class PackageCatalogServiceTest {
 
     @Mock ProductRepository productRepo;
     @Mock ProductComponentRepository componentRepo;
-    @Mock ProductPackageListingRepository listingRepo;
+    @Mock PackageListingStore listingRepo;
     @Mock PackageService packageService;
     @Mock ResourceSetupCapacityService spaceService;
     @Mock ProductVisibilityService visibility;

@@ -188,7 +188,7 @@ public class AvailabilityService {
             if (!gridMinutesByLocation.containsKey(locId)) {
                 gridMinutesByLocation.put(
                         locId,
-                        calendarService.calendarFor(tenantId, locId).getGridMinutes()
+                        calendarService.rulesFor(calendarService.calendarFor(tenantId, locId), date).gridMinutes()
                 );
             }
 

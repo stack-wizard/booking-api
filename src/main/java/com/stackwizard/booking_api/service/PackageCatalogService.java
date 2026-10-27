@@ -6,7 +6,6 @@ import com.stackwizard.booking_api.model.ProductComponent;
 import com.stackwizard.booking_api.model.ProductImage;
 import com.stackwizard.booking_api.model.ProductPackageListing;
 import com.stackwizard.booking_api.repository.ProductComponentRepository;
-import com.stackwizard.booking_api.repository.ProductPackageListingRepository;
 import com.stackwizard.booking_api.repository.ProductRepository;
 import com.stackwizard.booking_api.security.TenantContext;
 import com.stackwizard.booking_api.security.TenantResolver;
@@ -35,7 +34,7 @@ public class PackageCatalogService {
 
     private final ProductRepository productRepo;
     private final ProductComponentRepository componentRepo;
-    private final ProductPackageListingRepository listingRepo;
+    private final PackageListingStore listingRepo;
     private final PackageService packageService;
     private final ResourceSetupCapacityService spaceService;
     private final ProductVisibilityService visibility;
@@ -43,7 +42,7 @@ public class PackageCatalogService {
 
     public PackageCatalogService(ProductRepository productRepo,
                                  ProductComponentRepository componentRepo,
-                                 ProductPackageListingRepository listingRepo,
+                                 PackageListingStore listingRepo,
                                  PackageService packageService,
                                  ResourceSetupCapacityService spaceService,
                                  ProductVisibilityService visibility,
@@ -199,19 +198,25 @@ public class PackageCatalogService {
                 && (listing.getValidTo() == null || !date.isAfter(listing.getValidTo()));
     }
 
-    private CatalogPackage toCatalog(Long tenantId, Long priceTenantId, Product product, ProductPackageListing listing, LocalDate date, String currency) {
+    /** Components of a package as the web shows them. */
+    @Transactional(readOnly = true)
+    public List<CatalogComponent> catalogComponents(Long tenantId, Long productId) {
         List<ProductComponent> components = componentRepo.findByTenantIdAndPackageProductIdOrderByDisplayOrderAscIdAsc(
-                tenantId, product.getId());
+                tenantId, productId);
         Map<Long, Product> products = productRepo.findAllById(
                         components.stream().map(ProductComponent::getComponentProductId).distinct().toList()).stream()
                 .collect(Collectors.toMap(Product::getId, Function.identity()));
-        List<CatalogComponent> parts = components.stream()
+        return components.stream()
                 .map(c -> new CatalogComponent(
                         products.containsKey(c.getComponentProductId()) ? products.get(c.getComponentProductId()).getName() : null,
                         c.getQty(), c.getQtyBasis(), c.getIncluded(),
                         c.getFunctionType() != null ? c.getFunctionType().name() : null,
                         c.getStartOffsetMinutes(), c.getDurationMinutes()))
                 .toList();
+    }
+
+    private CatalogPackage toCatalog(Long tenantId, Long priceTenantId, Product product, ProductPackageListing listing, LocalDate date, String currency) {
+        List<CatalogComponent> parts = catalogComponents(tenantId, product.getId());
         BigDecimal pricePerPerson = null;
         try {
             int pax = listing.getMinPax() != null ? listing.getMinPax() : 1;

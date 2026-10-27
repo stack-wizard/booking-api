@@ -31,7 +31,8 @@ public enum TenantLevel {
             "crm_assignment_rule", "crm_attachment", "crm_contact", "crm_cost_item",
             "crm_custom_field_definition", "crm_lead", "crm_lookup", "crm_opportunity", "crm_outcome_reason",
             "crm_pipeline", "crm_pipeline_stage", "crm_reassignment", "crm_segment", "crm_stage_requirement",
-            "crm_stage_transition", "crm_team", "crm_team_member", "crm_team_property");
+            "crm_stage_transition", "crm_team", "crm_team_member", "crm_team_property",
+            "season_calendar", "season", "season_operating", "sales_catalog", "catalog_item");
 
     public static final Set<String> PROPERTY_TABLES = Set.of(
             "allocation", "api_token", "booking_calendar", "cancellation_policy", "cancellation_request",

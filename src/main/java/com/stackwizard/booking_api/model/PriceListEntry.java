@@ -44,6 +44,10 @@ public class PriceListEntry {
     @Column(name = "end_time")
     private LocalTime endTime;
 
+    /** Weekday bitmask (Mon=1 ... Sun=64); null = every day. */
+    @Column(name = "days_of_week")
+    private Short daysOfWeek;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "price_profile_id")
     private PriceProfile priceProfile;

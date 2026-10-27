@@ -2,6 +2,8 @@ package com.stackwizard.booking_api.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -41,6 +43,20 @@ public class PriceProfileDate {
     @Column
     private String description;
 
+    /** Season the period belongs to (null = not linked; legacy periods). */
+    @Column(name = "season_id")
+    private Long seasonId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "period_kind", nullable = false)
+    @Builder.Default
+    private PeriodKind periodKind = PeriodKind.SEASON;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    /** Precedence inside the same level and channel: DATES before SUB_PERIOD before SEASON. */
+    public enum PeriodKind {
+        SEASON, SUB_PERIOD, DATES
+    }
 }

@@ -24,6 +24,11 @@ public class SecurityConfig {
     /** Website inquiries come only from the CMS m2m client (ROLE_API from PlatformAuthFilter). */
     private static final String CATALOG_INQUIRIES_PATH = "/api/catalog/inquiries";
     private static final String CATALOG_INQUIRIES_PATH_PREFIXED = "/booking-api/api/catalog/inquiries";
+    /** Sales catalogs for the website: m2m only (user JWT 403, anonymous 401). */
+    private static final String CATALOGS_PATH = "/api/catalogs/**";
+    private static final String CATALOGS_ROOT = "/api/catalogs";
+    private static final String CATALOGS_PATH_PREFIXED = "/booking-api/api/catalogs/**";
+    private static final String CATALOGS_ROOT_PREFIXED = "/booking-api/api/catalogs";
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http,
@@ -60,6 +65,7 @@ public class SecurityConfig {
                     "/booking-api/swagger-ui.html"
                 ).permitAll()
                 .requestMatchers(CATALOG_INQUIRIES_PATH, CATALOG_INQUIRIES_PATH_PREFIXED).hasRole("API")
+                .requestMatchers(CATALOGS_ROOT, CATALOGS_PATH, CATALOGS_ROOT_PREFIXED, CATALOGS_PATH_PREFIXED).hasRole("API")
                 .anyRequest().authenticated()
             )
             .oauth2ResourceServer(oauth2 -> oauth2

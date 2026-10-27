@@ -17,6 +17,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     Optional<Product> findByIdAndTenantId(Long id, Long tenantId);
 
+    Optional<Product> findFirstByResource_IdOrderByIdAsc(Long resourceId);
+
     Page<Product> findByTenantIdOrderByDisplayOrderAscNameAscIdAsc(Long tenantId, Pageable pageable);
 
     Page<Product> findByTenantIdAndNameContainingIgnoreCaseOrderByDisplayOrderAscNameAscIdAsc(Long tenantId, String name, Pageable pageable);

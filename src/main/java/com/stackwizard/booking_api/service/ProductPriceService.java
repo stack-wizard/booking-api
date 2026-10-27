@@ -13,6 +13,7 @@ import com.stackwizard.booking_api.security.AuthUserAccessor;
 import com.stackwizard.booking_api.security.CrmAccessContext;
 import com.stackwizard.booking_api.security.CrmRole;
 import com.stackwizard.booking_api.security.TenantResolver;
+import com.stackwizard.booking_api.support.DaysOfWeek;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,7 +39,6 @@ import java.util.Set;
 public class ProductPriceService {
     private static final BigDecimal MIN_PERCENT = new BigDecimal("-90");
     private static final BigDecimal MAX_PERCENT = new BigDecimal("500");
-    private static final Set<CrmRole> SALES_ROLES = Set.of(CrmRole.SALES_REP, CrmRole.SALES_MANAGER, CrmRole.EVENT_COORDINATOR);
 
     private final PriceListEntryRepository priceRepo;
     private final PriceProfileDateRepository periodRepo;
@@ -185,6 +185,7 @@ public class ProductPriceService {
                     .price(round(e.getPrice().multiply(factor), request.roundTo()))
                     .startTime(e.getStartTime())
                     .endTime(e.getEndTime())
+                    .daysOfWeek(e.getDaysOfWeek())
                     .priceProfile(target.getPriceProfile())
                     .priceProfileDate(target)
                     .build());
@@ -221,6 +222,7 @@ public class ProductPriceService {
         entry.setPrice(input.price().setScale(2, RoundingMode.HALF_UP));
         entry.setStartTime(start);
         entry.setEndTime(end);
+        entry.setDaysOfWeek(DaysOfWeek.toMask(input.daysOfWeek()));
         entry.setPriceProfileDate(period);
         entry.setPriceProfile(period.getPriceProfile());
     }
@@ -228,16 +230,19 @@ public class ProductPriceService {
     private static void requireUnique(List<PriceListEntry> entries) {
         Set<String> seen = new HashSet<>();
         for (PriceListEntry e : entries) {
-            String key = e.getPriceProfileDate().getId() + "|" + e.getUom() + "|" + e.getStartTime() + "|" + e.getEndTime();
+            String key = e.getPriceProfileDate().getId() + "|" + e.getUom() + "|" + e.getStartTime() + "|" + e.getEndTime()
+                    + "|" + e.getDaysOfWeek();
             if (!seen.add(key)) {
-                throw new IllegalArgumentException("Duplicate price for " + e.getUom() + " in "
-                        + e.getPriceProfileDate().getDateFrom() + " – " + e.getPriceProfileDate().getDateTo());
+                String days = DaysOfWeek.label(e.getDaysOfWeek());
+                throw new IllegalArgumentException("Duplicate price for " + e.getUom() + (days != null ? " on " + days : "")
+                        + " in " + e.getPriceProfileDate().getDateFrom() + " – " + e.getPriceProfileDate().getDateTo());
             }
         }
     }
 
     private static boolean sameSlot(PriceListEntry a, PriceListEntry b) {
         return a.getUom().equalsIgnoreCase(b.getUom())
+                && Objects.equals(a.getDaysOfWeek(), b.getDaysOfWeek())
                 && Objects.equals(a.getStartTime(), b.getStartTime())
                 && Objects.equals(a.getEndTime(), b.getEndTime());
     }
@@ -278,11 +283,7 @@ public class ProductPriceService {
     /** Admins and revenue managers; plain staff unless they only work in sales. */
     private void requireWrite() {
         AppUser user = authUserAccessor.requireAppUser();
-        Set<CrmRole> crmRoles = accessContext.crmRoles();
-        boolean admin = user.getRole() == AppUser.Role.SUPER_ADMIN || user.getRole() == AppUser.Role.ADMIN;
-        boolean revenue = crmRoles.contains(CrmRole.REVENUE_MANAGER);
-        boolean backOffice = user.getRole() == AppUser.Role.STAFF && crmRoles.stream().noneMatch(SALES_ROLES::contains);
-        if (!admin && !revenue && !backOffice) {
+        if (!PricingAccess.canWrite(user, accessContext.crmRoles())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins and revenue managers can change prices");
         }
     }
@@ -290,11 +291,12 @@ public class ProductPriceService {
     private static ProductPriceDtos.Period toPeriod(PriceProfileDate d) {
         var profile = d.getPriceProfile();
         return new ProductPriceDtos.Period(d.getId(), profile.getId(), profile.getName(), profile.getCurrency(),
-                profile.getReservationRequestType(), d.getDateFrom(), d.getDateTo(), d.getDescription());
+                profile.getReservationRequestType(), d.getDateFrom(), d.getDateTo(), d.getDescription(),
+                d.getSeasonId(), d.getPeriodKind());
     }
 
     private static ProductPriceDtos.PriceRow toRow(PriceListEntry e) {
         return new ProductPriceDtos.PriceRow(e.getId(), toPeriod(e.getPriceProfileDate()), e.getUom(), e.getPrice(),
-                e.getStartTime(), e.getEndTime());
+                e.getStartTime(), e.getEndTime(), DaysOfWeek.toList(e.getDaysOfWeek()));
     }
 }

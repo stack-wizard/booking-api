@@ -67,6 +67,18 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.BAD_REQUEST, message, request.getRequestURI());
     }
 
+    @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+    public ResponseEntity<ApiError> handleMissingParam(org.springframework.web.bind.MissingServletRequestParameterException ex,
+                                                       HttpServletRequest request) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getParameterName() + " is required", request.getRequestURI());
+    }
+
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> handleTypeMismatch(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException ex,
+                                                       HttpServletRequest request) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getName() + ": invalid value '" + ex.getValue() + "'", request.getRequestURI());
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> handleNotReadable(HttpMessageNotReadableException ex, HttpServletRequest request) {
         return buildError(HttpStatus.BAD_REQUEST, "Malformed request body", request.getRequestURI());

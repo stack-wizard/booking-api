@@ -30,6 +30,7 @@ public class BookingTranslationService {
 
         BookingCalendar calendar = calendarService.calendarFor(tenantId, locationNodeId);
         ServiceCalendarService.ServiceWindow window = calendarService.windowFor(calendar, serviceDate);
+        ServiceCalendarService.DayRules rules = calendarService.rulesFor(calendar, serviceDate);
 
         LocalDateTime start;
         LocalDateTime end;
@@ -45,7 +46,7 @@ public class BookingTranslationService {
             if (startTime == null) {
                 throw new IllegalArgumentException("startTime is required for HOUR bookings");
             }
-            validateGrid(startTime, calendar.getGridMinutes());
+            validateGrid(startTime, rules.gridMinutes());
             start = LocalDateTime.of(serviceDate, startTime);
             end = start.plusHours(qty);
             if (start.isBefore(window.open())) {
@@ -62,7 +63,7 @@ public class BookingTranslationService {
             throw new IllegalArgumentException("Booking cannot cross service date");
         }
 
-        validateDuration(start, end, calendar);
+        validateDuration(start, end, rules);
 
         return new TranslatedPeriod(start, end);
     }
@@ -81,6 +82,7 @@ public class BookingTranslationService {
 
         BookingCalendar calendar = calendarService.calendarFor(tenantId, locationNodeId);
         ServiceCalendarService.ServiceWindow window = calendarService.windowFor(calendar, serviceDate);
+        ServiceCalendarService.DayRules rules = calendarService.rulesFor(calendar, serviceDate);
 
         LocalDateTime start = LocalDateTime.of(serviceDate, windowStart);
         LocalDateTime end = LocalDateTime.of(serviceDate, windowEnd);
@@ -91,7 +93,7 @@ public class BookingTranslationService {
         if (end.isAfter(window.close())) {
             throw new IllegalArgumentException("uom window ends after service window");
         }
-        validateDuration(start, end, calendar);
+        validateDuration(start, end, rules);
         return new TranslatedPeriod(start, end);
     }
 
@@ -108,14 +110,14 @@ public class BookingTranslationService {
         }
     }
 
-    private void validateDuration(LocalDateTime start, LocalDateTime end, BookingCalendar calendar) {
+    private void validateDuration(LocalDateTime start, LocalDateTime end, ServiceCalendarService.DayRules rules) {
         long durationMinutes = Duration.between(start, end).toMinutes();
-        if (calendar.getMinDurationMinutes() != null && calendar.getMinDurationMinutes() > 0
-                && durationMinutes < calendar.getMinDurationMinutes()) {
+        if (rules.minDurationMinutes() != null && rules.minDurationMinutes() > 0
+                && durationMinutes < rules.minDurationMinutes()) {
             throw new IllegalArgumentException("Duration below minimum");
         }
-        if (calendar.getMaxDurationMinutes() != null && calendar.getMaxDurationMinutes() > 0
-                && durationMinutes > calendar.getMaxDurationMinutes()) {
+        if (rules.maxDurationMinutes() != null && rules.maxDurationMinutes() > 0
+                && durationMinutes > rules.maxDurationMinutes()) {
             throw new IllegalArgumentException("Duration above maximum");
         }
     }

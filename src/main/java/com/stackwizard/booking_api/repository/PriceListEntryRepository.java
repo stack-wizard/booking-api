@@ -117,4 +117,7 @@ public interface PriceListEntryRepository extends JpaRepository<PriceListEntry, 
             order by prof.name, pd.dateFrom, p.uom, p.startTime
             """)
     List<PriceListEntry> findForProduct(@Param("productId") Long productId, @Param("tenantId") Long tenantId);
+
+    @Query("select p from PriceListEntry p where p.priceProfileDate.id in :periodIds order by p.id")
+    List<PriceListEntry> findByPeriodIds(@Param("periodIds") java.util.Collection<Long> periodIds);
 }
