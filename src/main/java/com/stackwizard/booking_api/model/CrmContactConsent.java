@@ -15,12 +15,12 @@ import lombok.NoArgsConstructor;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "loyalty_consent")
+@Table(name = "crm_contact_consent")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class LoyaltyConsent {
+public class CrmContactConsent {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,8 +28,8 @@ public class LoyaltyConsent {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "member_id", nullable = false)
-    private Long memberId;
+    @Column(name = "contact_id", nullable = false)
+    private Long contactId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "channel", nullable = false)

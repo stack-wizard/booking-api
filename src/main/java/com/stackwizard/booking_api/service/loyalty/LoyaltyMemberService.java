@@ -4,22 +4,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.model.CrmContact;
-import com.stackwizard.booking_api.model.LoyaltyConsent;
+import com.stackwizard.booking_api.model.CrmContactConsent;
+import com.stackwizard.booking_api.model.CrmContactIdentifier;
+import com.stackwizard.booking_api.model.CrmContactMembership;
 import com.stackwizard.booking_api.model.LoyaltyLedgerEntry;
 import com.stackwizard.booking_api.model.LoyaltyMember;
-import com.stackwizard.booking_api.model.LoyaltyMemberIdentifier;
 import com.stackwizard.booking_api.model.LoyaltyProgram;
 import com.stackwizard.booking_api.model.LoyaltyRuleSet;
 import com.stackwizard.booking_api.model.LoyaltyTier;
 import com.stackwizard.booking_api.model.LoyaltyTierHistory;
+import com.stackwizard.booking_api.repository.CrmContactIdentifierRepository;
 import com.stackwizard.booking_api.repository.CrmContactRepository;
-import com.stackwizard.booking_api.repository.LoyaltyConsentRepository;
 import com.stackwizard.booking_api.repository.LoyaltyLedgerRepository;
-import com.stackwizard.booking_api.repository.LoyaltyMemberIdentifierRepository;
 import com.stackwizard.booking_api.repository.LoyaltyMemberRepository;
 import com.stackwizard.booking_api.repository.LoyaltyProgramRepository;
 import com.stackwizard.booking_api.repository.LoyaltyTierHistoryRepository;
 import com.stackwizard.booking_api.repository.LoyaltyTierRepository;
+import com.stackwizard.booking_api.service.crm.CrmContactIdentityService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,17 +33,17 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
-/** Member lifecycle: enrolment, profile, identifiers, consents, wallet flag, deactivation, anonymisation. */
+/** Member lifecycle: enrolment, profile, wallet flag, deactivation, anonymisation. Identity lives on the contact. */
 @Service
 public class LoyaltyMemberService {
     private final LoyaltyMemberRepository memberRepo;
     private final LoyaltyProgramRepository programRepo;
-    private final LoyaltyMemberIdentifierRepository identifierRepo;
-    private final LoyaltyConsentRepository consentRepo;
+    private final CrmContactIdentifierRepository identifierRepo;
     private final LoyaltyTierRepository tierRepo;
     private final LoyaltyTierHistoryRepository historyRepo;
     private final LoyaltyLedgerRepository ledgerRepo;
     private final CrmContactRepository contactRepo;
+    private final CrmContactIdentityService identity;
     private final LoyaltyProgramService programService;
     private final LoyaltyLedgerService ledgerService;
     private final LoyaltyTierEngine tierEngine;
@@ -52,12 +53,12 @@ public class LoyaltyMemberService {
 
     public LoyaltyMemberService(LoyaltyMemberRepository memberRepo,
                                 LoyaltyProgramRepository programRepo,
-                                LoyaltyMemberIdentifierRepository identifierRepo,
-                                LoyaltyConsentRepository consentRepo,
+                                CrmContactIdentifierRepository identifierRepo,
                                 LoyaltyTierRepository tierRepo,
                                 LoyaltyTierHistoryRepository historyRepo,
                                 LoyaltyLedgerRepository ledgerRepo,
                                 CrmContactRepository contactRepo,
+                                CrmContactIdentityService identity,
                                 LoyaltyProgramService programService,
                                 LoyaltyLedgerService ledgerService,
                                 LoyaltyTierEngine tierEngine,
@@ -66,11 +67,11 @@ public class LoyaltyMemberService {
         this.memberRepo = memberRepo;
         this.programRepo = programRepo;
         this.identifierRepo = identifierRepo;
-        this.consentRepo = consentRepo;
         this.tierRepo = tierRepo;
         this.historyRepo = historyRepo;
         this.ledgerRepo = ledgerRepo;
         this.contactRepo = contactRepo;
+        this.identity = identity;
         this.programService = programService;
         this.ledgerService = ledgerService;
         this.tierEngine = tierEngine;
@@ -87,13 +88,33 @@ public class LoyaltyMemberService {
                            Integer nightsToNext, int tierNights) {
     }
 
-    public record MemberView(LoyaltyMember member, CrmContact contact, LoyaltyTier tier, Progress progress,
-                             List<LoyaltyMemberIdentifier> identifiers, List<LoyaltyConsent> consents) {
+    /** One row of the member list: what the back office needs without opening the member. */
+    public record MemberRow(Long id, Long contactId, String memberNumber, String firstName, String lastName, String email, String tierCode,
+                            String tierName, Integer nightsTotal, Integer nightsCurrentYear, LocalDate tierValidUntil,
+                            boolean walletAdded, boolean walletException, LoyaltyMember.Status status) {
     }
 
-    public Page<LoyaltyMember> search(Long tenantId, Long programId, String q, String email, String number, Long tierId, Pageable pageable) {
+    public record MemberView(LoyaltyMember member, CrmContact contact, LoyaltyTier tier, Progress progress,
+                             List<CrmContactIdentifier> identifiers, List<CrmContactMembership> memberships,
+                             List<CrmContactConsent> consents) {
+    }
+
+    public Page<MemberRow> search(Long tenantId, Long programId, String q, String email, String number, Long tierId, Pageable pageable) {
         programService.require(tenantId, programId);
-        return memberRepo.search(tenantId, programId, blankToNull(q), blankToNull(email), blankToNull(number), tierId, pageable);
+        Page<LoyaltyMember> page = memberRepo.search(tenantId, programId, blankToNull(q), blankToNull(email), blankToNull(number), tierId, pageable);
+        Map<Long, CrmContact> contacts = new java.util.HashMap<>();
+        contactRepo.findAllById(page.getContent().stream().map(LoyaltyMember::getContactId).toList()).forEach(c -> contacts.put(c.getId(), c));
+        Map<Long, LoyaltyTier> tiers = new java.util.HashMap<>();
+        tierRepo.findAllById(page.getContent().stream().map(LoyaltyMember::getAssignedTierId).filter(java.util.Objects::nonNull).distinct().toList())
+                .forEach(t -> tiers.put(t.getId(), t));
+        return page.map(m -> {
+            CrmContact c = contacts.get(m.getContactId());
+            LoyaltyTier t = m.getAssignedTierId() == null ? null : tiers.get(m.getAssignedTierId());
+            return new MemberRow(m.getId(), m.getContactId(), m.getMemberNumber(), c == null ? null : c.getFirstName(), c == null ? null : c.getLastName(),
+                    c == null ? null : c.getEmail(), t == null ? null : t.getCode(), t == null ? null : t.getName(), m.getNightsTotal(),
+                    m.getNightsCurrentYear(), m.getTierValidUntil(), m.getWalletAddedAt() != null, m.getWalletExceptionReason() != null,
+                    m.getStatus());
+        });
     }
 
     public LoyaltyMember require(Long tenantId, Long memberId) {
@@ -113,8 +134,8 @@ public class LoyaltyMemberService {
                 tier == null ? null : tier.getCode(), tier == null ? null : tier.getName(),
                 next == null ? null : next.getCode(), next == null ? null : next.getThreshold(),
                 next == null ? null : Math.max(0, next.getThreshold() - tierNights), tierNights);
-        return new MemberView(m, contact, tier, progress, identifierRepo.findByMemberIdOrderByIdAsc(m.getId()),
-                consentRepo.findByMemberIdOrderByChannelAsc(m.getId()));
+        return new MemberView(m, contact, tier, progress, identity.identifiers(m.getContactId()), identity.memberships(m.getContactId()),
+                identity.consents(m.getContactId()));
     }
 
     public List<LoyaltyLedgerEntry> ledger(Long tenantId, Long memberId) {
@@ -127,7 +148,7 @@ public class LoyaltyMemberService {
         return historyRepo.findByMemberIdOrderByIdDesc(memberId);
     }
 
-    /** Admin "Add member" / web sign-up: one person (crm_contact on the ORG) per e-mail, one membership per program. */
+    /** Admin "Add member" / web sign-up: one person per e-mail, one membership per programme. */
     @Transactional
     public LoyaltyMember enrol(Long tenantId, Long programId, MemberInput in, LoyaltyMember.Source source) {
         LoyaltyProgram program = programService.require(tenantId, programId);
@@ -135,10 +156,9 @@ public class LoyaltyMemberService {
         if (!StringUtils.hasText(in.firstName()) || !StringUtils.hasText(in.lastName()) || email == null) {
             throw new IllegalArgumentException("firstName, lastName and a valid email are required");
         }
-        if (identifierRepo.findByTenantIdAndTypeAndValueNorm(tenantId, LoyaltyMemberIdentifier.Type.EMAIL, email).isPresent()) {
-            throw new IllegalStateException("A member with this e-mail already exists");
-        }
-        CrmContact contact = upsertContact(tenantId, in, email);
+        CrmContact.Source contactSource = source == LoyaltyMember.Source.WEB || source == LoyaltyMember.Source.BOOKING
+                ? CrmContact.Source.WEB : CrmContact.Source.MANUAL;
+        CrmContact contact = identity.findOrCreateGuest(tenantId, guestInput(in), contactSource);
         if (memberRepo.findByProgramIdAndContactId(programId, contact.getId()).isPresent()) {
             throw new IllegalStateException("This person is already a member");
         }
@@ -161,87 +181,90 @@ public class LoyaltyMemberService {
                 .nights24m(0)
                 .referrerMemberId(referrer == null ? null : referrer.getId())
                 .source(source == null ? LoyaltyMember.Source.ADMIN : source)
-                .attrs(profileAttrs(in))
+                .attrs(memberAttrs(in))
                 .updatedAt(now)
                 .build());
-        addIdentifier(member, LoyaltyMemberIdentifier.Type.EMAIL, email, true);
-        addIdentifier(member, LoyaltyMemberIdentifier.Type.CARD, member.getMemberNumber(), true);
-        String phone = LoyaltyNormalizer.phone(in.phone());
-        if (phone != null) {
-            addIdentifier(member, LoyaltyMemberIdentifier.Type.PHONE, phone, true);
-        }
-        applyConsents(member, in.consents(), "ENROLMENT");
+        registerCard(contact, program, member);
+        identity.applyConsents(contact, in.consents(), "ENROLMENT");
         tierEngine.recompute(member, new LoyaltyTierEngine.Context(LoyaltyTierHistory.Reason.RECOMPUTE, null, "enrolment", true));
         events.publish(LoyaltyEvents.MEMBER_REGISTERED, member, events.data().put("source", member.getSource().name()));
         return member;
+    }
+
+    /** The membership number is an identity key (CARD) and a membership row on the person. */
+    void registerCard(CrmContact contact, LoyaltyProgram program, LoyaltyMember member) {
+        if (!identity.claimIdentifier(contact, CrmContactIdentifier.Type.CARD, member.getMemberNumber(), true, "LOYALTY")) {
+            throw new IllegalStateException("Card number " + member.getMemberNumber() + " is already linked to another person");
+        }
+        identity.upsertMembership(contact, program.getCode(), member.getMemberNumber(), null, true, null, CrmContactMembership.Source.LOYALTY);
     }
 
     @Transactional
     public MemberView update(Long tenantId, Long memberId, MemberInput in) {
         LoyaltyMember member = require(tenantId, memberId);
         CrmContact contact = contactRepo.findById(member.getContactId()).orElseThrow();
-        if (StringUtils.hasText(in.firstName())) {
-            contact.setFirstName(in.firstName().trim());
-        }
-        if (StringUtils.hasText(in.lastName())) {
-            contact.setLastName(in.lastName().trim());
-        }
+        if (StringUtils.hasText(in.firstName())) contact.setFirstName(in.firstName().trim());
+        if (StringUtils.hasText(in.lastName())) contact.setLastName(in.lastName().trim());
         if (in.phone() != null) {
             contact.setPhone(LoyaltyNormalizer.text(in.phone()));
+            String phone = LoyaltyNormalizer.phone(in.phone());
+            if (phone != null) identity.claimIdentifier(contact, CrmContactIdentifier.Type.PHONE, phone, true, "PROFILE");
         }
+        if (in.country() != null) contact.setCountry(LoyaltyNormalizer.code(in.country()));
+        if (in.city() != null) contact.setCity(LoyaltyNormalizer.text(in.city()));
+        if (in.postalCode() != null) contact.setPostalCode(LoyaltyNormalizer.text(in.postalCode()));
+        if (in.address() != null) contact.setAddressLine(LoyaltyNormalizer.text(in.address()));
+        if (in.dateOfBirth() != null) contact.setDateOfBirth(in.dateOfBirth());
+        if (in.gender() != null) contact.setGender(LoyaltyNormalizer.code(in.gender()));
+        if (in.language() != null) contact.setLanguage(LoyaltyNormalizer.text(in.language()));
         String email = LoyaltyNormalizer.email(in.email());
         if (email != null && !email.equalsIgnoreCase(contact.getEmail())) {
-            identifierRepo.findByTenantIdAndTypeAndValueNorm(tenantId, LoyaltyMemberIdentifier.Type.EMAIL, email)
-                    .filter(i -> !i.getMemberId().equals(memberId))
-                    .ifPresent(i -> {
-                        throw new IllegalStateException("E-mail belongs to another member");
+            identity.ownerOf(tenantId, CrmContactIdentifier.Type.EMAIL, email)
+                    .filter(c -> !c.getId().equals(contact.getId()))
+                    .ifPresent(c -> {
+                        throw new IllegalStateException("E-mail belongs to another person");
                     });
+            // the old address stays as a secondary key so earlier reservations still match
             contact.setEmail(email);
-            // the old address stays as a secondary identifier so earlier reservations still match
-            identifierRepo.findByMemberIdOrderByIdAsc(memberId).stream()
-                    .filter(i -> i.getType() == LoyaltyMemberIdentifier.Type.EMAIL && Boolean.TRUE.equals(i.getIsPrimary()))
-                    .forEach(i -> {
-                        i.setIsPrimary(false);
-                        identifierRepo.save(i);
-                    });
-            if (identifierRepo.findByTenantIdAndTypeAndValueNorm(tenantId, LoyaltyMemberIdentifier.Type.EMAIL, email).isEmpty()) {
-                addIdentifier(member, LoyaltyMemberIdentifier.Type.EMAIL, email, true);
-            }
+            identity.claimIdentifier(contact, CrmContactIdentifier.Type.EMAIL, email, true, "PROFILE");
         }
         contactRepo.save(contact);
-        ObjectNode attrs = member.getAttrs() == null ? objectMapper.createObjectNode() : (ObjectNode) member.getAttrs();
-        attrs.setAll(profileAttrs(in));
-        member.setAttrs(attrs);
+        if (in.interests() != null) {
+            ObjectNode attrs = member.getAttrs() == null ? objectMapper.createObjectNode() : (ObjectNode) member.getAttrs();
+            attrs.set("interests", objectMapper.valueToTree(in.interests().stream().filter(StringUtils::hasText).map(String::trim).toList()));
+            member.setAttrs(attrs);
+        }
         member.setUpdatedAt(OffsetDateTime.now(clock));
         memberRepo.save(member);
         if (in.consents() != null) {
-            applyConsents(member, in.consents(), "PROFILE");
+            identity.applyConsents(contact, in.consents(), "PROFILE");
         }
         events.publish(LoyaltyEvents.MEMBER_UPDATED, member, null);
         return view(tenantId, memberId);
     }
 
     @Transactional
-    public LoyaltyMemberIdentifier addSecondaryEmail(Long tenantId, Long memberId, String rawEmail) {
+    public CrmContactIdentifier addSecondaryEmail(Long tenantId, Long memberId, String rawEmail) {
         LoyaltyMember member = require(tenantId, memberId);
+        CrmContact contact = contactRepo.findById(member.getContactId()).orElseThrow();
         String email = LoyaltyNormalizer.email(rawEmail);
         if (email == null) {
             throw new IllegalArgumentException("A valid email is required");
         }
-        if (identifierRepo.findByTenantIdAndTypeAndValueNorm(tenantId, LoyaltyMemberIdentifier.Type.EMAIL, email).isPresent()) {
-            throw new IllegalStateException("E-mail is already linked to a member");
+        if (!identity.claimIdentifier(contact, CrmContactIdentifier.Type.EMAIL, email, false, "ADMIN")) {
+            throw new IllegalStateException("E-mail is already linked to another person");
         }
-        return addIdentifier(member, LoyaltyMemberIdentifier.Type.EMAIL, email, false);
+        return identifierRepo.findByTenantIdAndTypeAndValueNorm(tenantId, CrmContactIdentifier.Type.EMAIL, email).orElseThrow();
     }
 
     @Transactional
     public void removeIdentifier(Long tenantId, Long memberId, Long identifierId) {
-        require(tenantId, memberId);
-        LoyaltyMemberIdentifier id = identifierRepo.findById(identifierId)
-                .filter(i -> i.getMemberId().equals(memberId))
+        LoyaltyMember member = require(tenantId, memberId);
+        CrmContactIdentifier id = identifierRepo.findById(identifierId)
+                .filter(i -> i.getContactId().equals(member.getContactId()))
                 .orElseThrow(() -> new IllegalArgumentException("Identifier not found"));
-        if (Boolean.TRUE.equals(id.getIsPrimary())) {
-            throw new IllegalStateException("The primary identifier cannot be removed");
+        if (Boolean.TRUE.equals(id.getIsPrimary()) || id.getType() == CrmContactIdentifier.Type.CARD || id.getType() == CrmContactIdentifier.Type.OPERA_PROFILE) {
+            throw new IllegalStateException("Primary, card and PMS identifiers cannot be removed");
         }
         identifierRepo.delete(id);
     }
@@ -291,34 +314,22 @@ public class LoyaltyMemberService {
     public LoyaltyMember deactivate(Long tenantId, Long memberId, String reason) {
         LoyaltyMember member = require(tenantId, memberId);
         member.setStatus(LoyaltyMember.Status.DEACTIVATED);
-        ObjectNode attrs = (ObjectNode) member.getAttrs();
+        ObjectNode attrs = member.getAttrs() == null ? objectMapper.createObjectNode() : (ObjectNode) member.getAttrs();
         attrs.put("deactivatedReason", reason);
         attrs.put("deactivatedAt", OffsetDateTime.now(clock).toString());
+        member.setAttrs(attrs);
         member.setUpdatedAt(OffsetDateTime.now(clock));
         memberRepo.save(member);
         events.publish(LoyaltyEvents.MEMBER_DEACTIVATED, member, events.data().put("reason", reason));
         return member;
     }
 
-    /**
-     * GDPR erasure (FR-01.9): personal data on the contact, identifiers and profile go; the member row, ledger and
-     * history stay as anonymous aggregates. No event: there is nobody left to contact.
-     */
+    /** GDPR erasure (FR-01.9): personal data goes, the member row, ledger and history stay as anonymous aggregates. */
     @Transactional
     public LoyaltyMember anonymize(Long tenantId, Long memberId) {
         LoyaltyMember member = require(tenantId, memberId);
         CrmContact contact = contactRepo.findById(member.getContactId()).orElseThrow();
-        contact.setFirstName("Anonymized");
-        contact.setLastName("Member " + member.getId());
-        contact.setEmail(null);
-        contact.setPhone(null);
-        contact.setPlatformUserId(null);
-        contact.setActive(false);
-        contact.setAttrs(objectMapper.createObjectNode());
-        contactRepo.save(contact);
-        identifierRepo.findByMemberIdOrderByIdAsc(memberId).stream()
-                .filter(i -> i.getType() != LoyaltyMemberIdentifier.Type.CARD)
-                .forEach(identifierRepo::delete);
+        identity.anonymize(contact);
         member.setStatus(LoyaltyMember.Status.ANONYMIZED);
         member.setAttrs(objectMapper.createObjectNode().put("anonymizedAt", OffsetDateTime.now(clock).toString()));
         member.setUpdatedAt(OffsetDateTime.now(clock));
@@ -327,58 +338,17 @@ public class LoyaltyMemberService {
 
     // --- shared with importers ------------------------------------------------------------------------------
 
-    CrmContact upsertContact(Long tenantId, MemberInput in, String email) {
-        CrmContact contact = contactRepo.findFirstByTenantIdAndEmailIgnoreCaseOrderByIdAsc(tenantId, email).orElse(null);
-        if (contact == null) {
-            contact = CrmContact.builder()
-                    .tenantId(tenantId)
-                    .firstName(in.firstName().trim())
-                    .lastName(in.lastName().trim())
-                    .email(email)
-                    .phone(LoyaltyNormalizer.text(in.phone()))
-                    .active(true)
-                    .attrs(objectMapper.createObjectNode())
-                    .build();
-        } else if (contact.getPhone() == null && in.phone() != null) {
-            contact.setPhone(LoyaltyNormalizer.text(in.phone()));
-        }
-        return contactRepo.save(contact);
+    static CrmContactIdentityService.GuestInput guestInput(MemberInput in) {
+        return new CrmContactIdentityService.GuestInput(in.firstName(), in.lastName(), in.email(), in.phone(), in.country(), in.city(),
+                in.postalCode(), in.address(), in.dateOfBirth(), in.gender(), in.language(), null, null);
     }
 
-    LoyaltyMemberIdentifier addIdentifier(LoyaltyMember member, LoyaltyMemberIdentifier.Type type, String value, boolean primary) {
-        return identifierRepo.save(LoyaltyMemberIdentifier.builder()
-                .tenantId(member.getTenantId())
-                .memberId(member.getId())
-                .type(type)
-                .valueNorm(value)
-                .isPrimary(primary)
-                .build());
-    }
-
-    void applyConsents(LoyaltyMember member, Map<String, Boolean> consents, String source) {
-        if (consents == null) {
-            return;
+    JsonNode memberAttrs(MemberInput in) {
+        ObjectNode a = objectMapper.createObjectNode();
+        if (in.interests() != null) {
+            a.set("interests", objectMapper.valueToTree(in.interests().stream().filter(StringUtils::hasText).map(String::trim).toList()));
         }
-        for (Map.Entry<String, Boolean> e : consents.entrySet()) {
-            if (e.getValue() == null) {
-                continue;
-            }
-            LoyaltyConsent.Channel channel;
-            try {
-                channel = LoyaltyConsent.Channel.valueOf(e.getKey().trim().toUpperCase());
-            } catch (IllegalArgumentException ex) {
-                throw new IllegalArgumentException("Unknown consent channel " + e.getKey());
-            }
-            LoyaltyConsent c = consentRepo.findByMemberIdAndChannel(member.getId(), channel)
-                    .orElse(LoyaltyConsent.builder().tenantId(member.getTenantId()).memberId(member.getId()).channel(channel).build());
-            if (c.getId() != null && e.getValue().equals(c.getGranted())) {
-                continue;
-            }
-            c.setGranted(e.getValue());
-            c.setChangedAt(OffsetDateTime.now(clock));
-            c.setSource(source);
-            consentRepo.save(c);
-        }
+        return a;
     }
 
     /** Prefix + running number under a program row lock; skips numbers taken by imported members. */
@@ -394,30 +364,6 @@ public class LoyaltyMemberService {
         program.setMemberNumberNext(next + 1);
         programRepo.save(program);
         return number;
-    }
-
-    ObjectNode profileAttrs(MemberInput in) {
-        ObjectNode a = objectMapper.createObjectNode();
-        putIfText(a, "country", in.country() == null ? null : in.country().trim().toUpperCase());
-        putIfText(a, "city", in.city());
-        putIfText(a, "postalCode", in.postalCode());
-        putIfText(a, "address", in.address());
-        putIfText(a, "gender", in.gender());
-        putIfText(a, "language", in.language());
-        if (in.dateOfBirth() != null) {
-            a.put("dateOfBirth", in.dateOfBirth().toString());
-        }
-        if (in.interests() != null) {
-            JsonNode arr = objectMapper.valueToTree(in.interests().stream().filter(StringUtils::hasText).map(String::trim).toList());
-            a.set("interests", arr);
-        }
-        return a;
-    }
-
-    private static void putIfText(ObjectNode node, String key, String value) {
-        if (StringUtils.hasText(value)) {
-            node.put(key, value.trim());
-        }
     }
 
     private static String blankToNull(String s) {

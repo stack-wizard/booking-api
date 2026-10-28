@@ -1,11 +1,11 @@
--- CSV imports (members, PMS reservations). The file goes straight to S3 (presigned PUT); a worker on any
+-- CSV imports: loyalty members (migration), PMS reservations / stays and PMS guest profiles. The file goes straight to S3 (presigned PUT); a worker on any
 -- instance claims the batch with a lease, streams the file into staging rows, validates, then applies in chunks.
 
 create table loyalty_import_batch (
   id                 bigserial primary key,
   tenant_id          bigint not null,
-  program_id         bigint not null references loyalty_program(id) on delete restrict,
-  import_type        text not null check (import_type in ('MEMBERS','RESERVATIONS')),
+  program_id         bigint null references loyalty_program(id) on delete restrict,
+  import_type        text not null check (import_type in ('MEMBERS','STAYS','PROFILES')),
   property_tenant_id bigint null,
   s3_key             text not null,
   file_name          text not null,
@@ -25,7 +25,8 @@ create table loyalty_import_batch (
   created_by         bigint null references app_user(id) on delete set null,
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now(),
-  check (import_type <> 'RESERVATIONS' or property_tenant_id is not null)
+  check (import_type <> 'STAYS' or property_tenant_id is not null),
+  check (import_type <> 'MEMBERS' or program_id is not null)
 );
 create index idx_loyalty_import_batch_tenant on loyalty_import_batch (tenant_id, created_at desc);
 create index idx_loyalty_import_batch_program on loyalty_import_batch (program_id);

@@ -77,7 +77,7 @@ create table loyalty_channel_map (
   tenant_id          bigint not null,
   program_id         bigint not null references loyalty_program(id) on delete cascade,
   property_tenant_id bigint null,
-  code_type          text not null check (code_type in ('SOURCE','MARKET','CHANNEL')),
+  code_type          text not null check (code_type in ('SOURCE','MARKET','ORIGIN','CHANNEL')),
   code               text not null,
   qualifying         boolean not null,
   created_at         timestamptz not null default now()

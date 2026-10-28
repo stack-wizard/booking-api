@@ -119,6 +119,13 @@ public class CrmAccessContext {
         for (CrmRole role : crmRoles) {
             names.add(role.name());
         }
+        // loyalty add-on roles, without the BOOKING_ prefix like the CRM ones (booking-admin route guards)
+        for (String raw : mikosRolesFromJwt()) {
+            String r = raw.trim().toUpperCase(java.util.Locale.ROOT);
+            if (LoyaltyAccess.ROLE_LOYALTY_OWNER.equals(r) || LoyaltyAccess.ROLE_LOYALTY_SUPPORT.equals(r)) {
+                names.add(r.substring("BOOKING_".length()));
+            }
+        }
         return names.stream().sorted().toList();
     }
 

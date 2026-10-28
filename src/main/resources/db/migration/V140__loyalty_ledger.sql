@@ -11,7 +11,7 @@ create table loyalty_ledger (
   as_of              date not null,
   source             text not null check (source in ('STAY','OPENING_BALANCE','WALLET','REFERRAL','ADJUSTMENT','CLAIM','REVERSAL')),
   active             boolean not null default true,
-  reservation_id     bigint null references loyalty_reservation(id) on delete restrict,
+  reservation_id     bigint null references pms_reservation(id) on delete restrict,
   property_tenant_id bigint null,
   rule_set_id        bigint null references loyalty_rule_set(id) on delete restrict,
   reversal_of_id     bigint null references loyalty_ledger(id) on delete restrict,

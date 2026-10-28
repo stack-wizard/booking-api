@@ -14,6 +14,8 @@ import java.util.Optional;
 public interface CrmAccountRepository extends JpaRepository<CrmAccount, Long> {
     Optional<CrmAccount> findByIdAndTenantId(Long id, Long tenantId);
 
+    Optional<CrmAccount> findByTenantIdAndOperaProfileId(Long tenantId, String operaProfileId);
+
     @Query("""
             select a from CrmAccount a
             where a.tenantId = :tenantId

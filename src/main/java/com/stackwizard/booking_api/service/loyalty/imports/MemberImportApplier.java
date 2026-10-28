@@ -1,14 +1,14 @@
 package com.stackwizard.booking_api.service.loyalty.imports;
 
 import com.stackwizard.booking_api.model.LoyaltyImportBatch;
-import com.stackwizard.booking_api.model.LoyaltyMemberIdentifier;
+import com.stackwizard.booking_api.model.CrmContactIdentifier;
 import com.stackwizard.booking_api.model.LoyaltyProgram;
 import com.stackwizard.booking_api.model.LoyaltyRuleSet;
 import com.stackwizard.booking_api.model.LoyaltyTier;
-import com.stackwizard.booking_api.repository.LoyaltyMemberIdentifierRepository;
 import com.stackwizard.booking_api.repository.LoyaltyMemberRepository;
 import com.stackwizard.booking_api.repository.LoyaltyProgramRepository;
 import com.stackwizard.booking_api.repository.LoyaltyTierRepository;
+import com.stackwizard.booking_api.service.crm.CrmContactIdentityService;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyMemberImportSupport;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyNormalizer;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyProgramService;
@@ -34,7 +34,7 @@ public class MemberImportApplier implements ImportApplier, RequiredFields {
     private final LoyaltyProgramService programService;
     private final LoyaltyProgramRepository programRepo;
     private final LoyaltyMemberRepository memberRepo;
-    private final LoyaltyMemberIdentifierRepository identifierRepo;
+    private final CrmContactIdentityService identity;
     private final LoyaltyTierRepository tierRepo;
     private final LoyaltyMemberImportSupport support;
     private final Clock clock;
@@ -42,14 +42,14 @@ public class MemberImportApplier implements ImportApplier, RequiredFields {
     public MemberImportApplier(LoyaltyProgramService programService,
                                LoyaltyProgramRepository programRepo,
                                LoyaltyMemberRepository memberRepo,
-                               LoyaltyMemberIdentifierRepository identifierRepo,
+                               CrmContactIdentityService identity,
                                LoyaltyTierRepository tierRepo,
                                LoyaltyMemberImportSupport support,
                                Clock loyaltyClock) {
         this.programService = programService;
         this.programRepo = programRepo;
         this.memberRepo = memberRepo;
-        this.identifierRepo = identifierRepo;
+        this.identity = identity;
         this.tierRepo = tierRepo;
         this.support = support;
         this.clock = loyaltyClock;
@@ -93,6 +93,7 @@ public class MemberImportApplier implements ImportApplier, RequiredFields {
         f.put("consent_push", List.of("push_consent"));
         f.put("interests", List.of("interest", "interesi"));
         f.put("member_status", List.of("account_status", "active"));
+        f.put("pms_profile_id", List.of("name_id", "opera_profile_id", "guest_name_id", "profile_id"));
         return f;
     }
 
@@ -155,8 +156,8 @@ public class MemberImportApplier implements ImportApplier, RequiredFields {
             return "email " + email + " appears more than once in the file";
         }
         // an e-mail already used by a different member number is a conflict to resolve by hand (FR-01.7)
-        identifierRepo.findByTenantIdAndTypeAndValueNorm(batch.getTenantId(), LoyaltyMemberIdentifier.Type.EMAIL, email)
-                .flatMap(i -> memberRepo.findById(i.getMemberId()))
+        identity.ownerOf(batch.getTenantId(), CrmContactIdentifier.Type.EMAIL, email)
+                .flatMap(c -> memberRepo.findByProgramIdAndContactId(batch.getProgramId(), c.getId()))
                 .filter(m -> !m.getMemberNumber().equals(number))
                 .ifPresent(m -> row.error("email already belongs to member " + m.getMemberNumber()));
         return null;
@@ -196,7 +197,8 @@ public class MemberImportApplier implements ImportApplier, RequiredFields {
                 row.date("last_checkout"),
                 status != null && (status.equalsIgnoreCase("inactive") || status.equalsIgnoreCase("deactivated") || status.equalsIgnoreCase("false") || status.equals("0")),
                 asOf,
-                batch.getId());
+                batch.getId(),
+                row.text("pms_profile_id"));
         if (!row.errors().isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", row.errors()));
         }

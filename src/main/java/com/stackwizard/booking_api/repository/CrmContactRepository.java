@@ -13,4 +13,6 @@ public interface CrmContactRepository extends JpaRepository<CrmContact, Long> {
     List<CrmContact> findByTenantIdAndPlatformUserId(Long tenantId, java.util.UUID platformUserId);
 
     Optional<CrmContact> findFirstByTenantIdAndEmailIgnoreCaseOrderByIdAsc(Long tenantId, String email);
+
+    Optional<CrmContact> findByTenantIdAndOperaProfileId(Long tenantId, String operaProfileId);
 }

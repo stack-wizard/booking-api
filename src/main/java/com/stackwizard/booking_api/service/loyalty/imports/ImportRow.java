@@ -45,6 +45,10 @@ public final class ImportRow {
         this.preferredDate = dateFormat == null || dateFormat.isBlank() ? null : DateTimeFormatter.ofPattern(dateFormat);
     }
 
+    public JsonNode raw() {
+        return raw;
+    }
+
     public List<String> errors() {
         return errors;
     }

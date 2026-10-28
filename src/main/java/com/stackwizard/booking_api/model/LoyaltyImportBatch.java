@@ -96,7 +96,7 @@ public class LoyaltyImportBatch {
     private OffsetDateTime updatedAt;
 
     public enum ImportType {
-        MEMBERS, RESERVATIONS
+        MEMBERS, STAYS, PROFILES
     }
 
     public enum Status {

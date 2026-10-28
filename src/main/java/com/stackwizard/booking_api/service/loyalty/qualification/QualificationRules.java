@@ -3,7 +3,7 @@ package com.stackwizard.booking_api.service.loyalty.qualification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.stackwizard.booking_api.model.LoyaltyChannelMap;
 import com.stackwizard.booking_api.model.LoyaltyQualificationStep.RuleCode;
-import com.stackwizard.booking_api.model.LoyaltyReservation;
+import com.stackwizard.booking_api.model.PmsReservation;
 import com.stackwizard.booking_api.repository.LoyaltyLedgerRepository;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyNormalizer;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyParams;
@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -20,11 +21,18 @@ import java.util.Objects;
 @Configuration
 public class QualificationRules {
 
+    /** The matched person must hold a membership in this programme. */
     @Bean
     QualificationRule memberMatchRule() {
-        return rule(RuleCode.MEMBER_MATCH, (ctx, p) -> ctx.member() != null
-                ? QualificationRule.Outcome.pass("matched by " + ctx.reservation().getMatchMethod())
-                : QualificationRule.Outcome.fail("no member matches the reservation holder"));
+        return rule(RuleCode.MEMBER_MATCH, (ctx, p) -> {
+            if (ctx.contact() == null) {
+                return QualificationRule.Outcome.fail("no person matches the reservation holder");
+            }
+            if (ctx.member() == null) {
+                return QualificationRule.Outcome.fail("holder is known but not a member");
+            }
+            return QualificationRule.Outcome.pass("matched by " + ctx.reservation().getMatchMethod());
+        });
     }
 
     /**
@@ -34,12 +42,13 @@ public class QualificationRules {
     @Bean
     QualificationRule channelRule() {
         return rule(RuleCode.CHANNEL, (ctx, p) -> {
-            LoyaltyReservation r = ctx.reservation();
+            PmsReservation r = ctx.reservation();
             boolean anyQualifying = false;
             for (LoyaltyChannelMap.CodeType type : LoyaltyChannelMap.CodeType.values()) {
                 String code = switch (type) {
                     case SOURCE -> LoyaltyNormalizer.code(r.getSourceCode());
                     case MARKET -> LoyaltyNormalizer.code(r.getMarketCode());
+                    case ORIGIN -> LoyaltyNormalizer.code(r.getOriginCode());
                     case CHANNEL -> LoyaltyNormalizer.code(r.getChannelCode());
                 };
                 if (code == null) {
@@ -63,18 +72,23 @@ public class QualificationRules {
     }
 
     /**
-     * The member must be the holder. Matching already used the holder's card number / e-mail; with
-     * {@code require_last_name_match} the holder's surname must also equal the member's.
+     * The member must be the holder (FR-04.4). The match already used the holder's profile / card / e-mail; this
+     * guards against a reservation that names another PMS profile, and optionally checks the surname.
      */
     @Bean
     QualificationRule holderRule() {
         return rule(RuleCode.HOLDER, (ctx, p) -> {
-            if (ctx.member() == null) {
-                return QualificationRule.Outcome.fail("no member");
+            if (ctx.contact() == null) {
+                return QualificationRule.Outcome.fail("no person");
+            }
+            String holderProfile = LoyaltyNormalizer.text(ctx.reservation().getHolderPmsProfileId());
+            String contactProfile = LoyaltyNormalizer.text(ctx.contact().getOperaProfileId());
+            if (holderProfile != null && contactProfile != null && !holderProfile.equals(contactProfile)) {
+                return QualificationRule.Outcome.fail("reservation holder is PMS profile " + holderProfile + ", member is " + contactProfile);
             }
             if (p != null && p.path("require_last_name_match").asBoolean(false)) {
                 String holder = fold(ctx.reservation().getHolderLastName());
-                String member = fold(ctx.memberLastName());
+                String member = fold(ctx.contact().getLastName());
                 if (holder == null || !holder.equals(member)) {
                     return QualificationRule.Outcome.fail("holder surname differs from member");
                 }
@@ -87,6 +101,9 @@ public class QualificationRules {
     @Bean
     QualificationRule activationRule() {
         return rule(RuleCode.ACTIVATION, (ctx, p) -> {
+            if (ctx.nights().isEmpty()) {
+                return QualificationRule.Outcome.pass("no nights to check (day use)");
+            }
             LocalDate activated = ctx.member().getActivatedAt().atZoneSameInstant(ZoneId.of("Europe/Zagreb")).toLocalDate();
             List<LocalDate> kept = ctx.nights().stream().filter(d -> !d.isBefore(activated)).toList();
             if (kept.isEmpty()) {
@@ -112,19 +129,51 @@ public class QualificationRules {
         });
     }
 
+    /**
+     * A real, finished stay: checked out, not a day use (0 nights), and not complimentary / house use unless the
+     * rule's params say {@code allow_complimentary}. Pseudo (posting-master) rooms never count.
+     */
     @Bean
     QualificationRule stayCompletedRule() {
-        return rule(RuleCode.STAY_COMPLETED, (ctx, p) -> ctx.reservation().getStatus() == LoyaltyReservation.Status.CHECKED_OUT
-                ? QualificationRule.Outcome.pass()
-                : QualificationRule.Outcome.fail("status " + ctx.reservation().getStatus()));
+        return rule(RuleCode.STAY_COMPLETED, (ctx, p) -> {
+            PmsReservation r = ctx.reservation();
+            if (r.getStatus() != PmsReservation.Status.CHECKED_OUT) {
+                return QualificationRule.Outcome.fail("status " + r.getStatus());
+            }
+            if (Boolean.TRUE.equals(r.getIsDayUse()) || ctx.nights().isEmpty()) {
+                return QualificationRule.Outcome.fail("day use (no nights)");
+            }
+            if (Boolean.TRUE.equals(r.getIsPseudoRoom())) {
+                return QualificationRule.Outcome.fail("posting-master / pseudo room");
+            }
+            boolean allowComp = p != null && p.path("allow_complimentary").asBoolean(false);
+            if (!allowComp && (Boolean.TRUE.equals(r.getIsComplimentary()) || Boolean.TRUE.equals(r.getIsHouseUse()))) {
+                return QualificationRule.Outcome.fail(Boolean.TRUE.equals(r.getIsHouseUse()) ? "house use" : "complimentary stay");
+            }
+            return QualificationRule.Outcome.pass();
+        });
     }
 
-    /** Nights credited to another programme (Radisson Rewards) never count twice (FR-13.5). */
+    /**
+     * Nights credited to another programme never count twice (FR-13.5). The PMS reports which membership the
+     * reservation is attached to; anything that is not this programme (or a code in {@code own_program_codes}) rejects.
+     */
     @Bean
     QualificationRule exclusivityRule() {
-        return rule(RuleCode.EXCLUSIVITY_FLAG, (ctx, p) -> Boolean.TRUE.equals(ctx.reservation().getExclusivityFlag())
-                ? QualificationRule.Outcome.fail("credited to another loyalty programme")
-                : QualificationRule.Outcome.pass());
+        return rule(RuleCode.EXCLUSIVITY_FLAG, (ctx, p) -> {
+            String type = LoyaltyNormalizer.code(ctx.reservation().getMembershipType());
+            if (type == null) {
+                return QualificationRule.Outcome.pass();
+            }
+            List<String> own = new ArrayList<>();
+            own.add(LoyaltyNormalizer.code(ctx.program().getCode()));
+            if (p != null && p.has("own_program_codes")) {
+                p.get("own_program_codes").forEach(n -> own.add(LoyaltyNormalizer.code(n.asText())));
+            }
+            return own.contains(type)
+                    ? QualificationRule.Outcome.pass()
+                    : QualificationRule.Outcome.fail("credited to programme " + type);
+        });
     }
 
     @Bean

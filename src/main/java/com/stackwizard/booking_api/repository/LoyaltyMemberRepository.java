@@ -19,6 +19,8 @@ public interface LoyaltyMemberRepository extends JpaRepository<LoyaltyMember, Lo
 
     Optional<LoyaltyMember> findByProgramIdAndContactId(Long programId, Long contactId);
 
+    List<LoyaltyMember> findByContactIdOrderByIdAsc(Long contactId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select m from LoyaltyMember m where m.id = :id")
     Optional<LoyaltyMember> lockById(Long id);

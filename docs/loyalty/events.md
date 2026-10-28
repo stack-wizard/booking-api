@@ -54,11 +54,13 @@ Privole šaljemo uvijek; **filtriranje po privolama radi konzument**.
 | `loyalty.tier.expiring` | 90 i 30 dana prije isteka | `daysLeft, expiresOn` |
 | `loyalty.tier.near_next` | do idućeg tiera ≤ N noćenja (jednom po tieru) | `nextTier, nightsMissing` |
 | `loyalty.adjustment.created` | ručna korekcija | `adjustmentType, qty, reason, exception` |
+| `pms.reservation.created` | nova PMS rezervacija (export/konektor) | `reservationId, propertyTenantId, pmsSystem, pmsReservationId, confirmationNo, status, arrival, departure, nights, roomType, rateCode, sourceCode, marketCode, channelCode, contactId, membershipNo, company/agentPmsProfileId, revenue{room,fb,other,tax,total,currency,final}, holder{firstName,lastName,email,pmsProfileId}` |
+| `pms.reservation.changed` / `checked_in` / `checked_out` / `cancelled` / `no_show` | promjena snimke; tip po novom statusu | isto |
 | `reservation.confirmed` | booking-api rezervacija finalizirana | `reservationRequestId, propertyTenantId, hotelCode, hotelName, status, channel, confirmationCode, confirmedAt, guest {name, email, phone, country}` |
 | `reservation.amended` | izmjena | isto |
 | `reservation.cancelled` | otkaz | isto + `cancellationRequestId` |
 
-Kodovi odbijanja (`rejectCode`) dolaze iz konfiguracije pravila; Arena: `NO_MATCH, OTA_CHANNEL, NOT_HOLDER,
+Kodovi odbijanja (`rejectCode`) dolaze iz konfiguracije pravila; Arena: `NO_MATCH, NOT_MEMBER, OTA_CHANNEL, NOT_HOLDER,
 PRE_ACTIVATION, NO_WALLET, NOT_STAYED, RADISSON, DUPLICATE`.
 
 ## E-mail iz booking-apija

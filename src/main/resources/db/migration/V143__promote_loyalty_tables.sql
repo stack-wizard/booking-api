@@ -1,4 +1,4 @@
--- Loyalty and the integration outbox belong to the chain: move them with the rest when a standalone hotel is
+-- Contact identity, PMS reservations, loyalty and the integration outbox belong to the chain: move them with the rest when a standalone hotel is
 -- promoted under an organization. The append-only ledger guard lets this one tenant_id move through via a
 -- transaction-local setting.
 
@@ -19,9 +19,11 @@ declare
     'crm_pipeline', 'crm_pipeline_stage', 'crm_reassignment', 'crm_segment', 'crm_stage_requirement',
     'crm_stage_transition', 'crm_team', 'crm_team_member', 'crm_team_property',
     'season_calendar', 'season', 'season_operating', 'sales_catalog', 'catalog_item',
+    'crm_contact_identifier', 'crm_contact_membership', 'crm_contact_consent', 'crm_contact_merge_log', 'crm_account_production',
+    'pms_reservation', 'pms_reservation_guest',
     'loyalty_program', 'loyalty_rule_set', 'loyalty_tier', 'loyalty_qualification_step', 'loyalty_channel_map',
-    'loyalty_member', 'loyalty_member_identifier', 'loyalty_consent', 'loyalty_tier_history', 'loyalty_reservation',
-    'loyalty_reservation_evaluation', 'loyalty_ledger', 'loyalty_import_batch', 'loyalty_import_row',
+    'loyalty_member', 'loyalty_tier_history', 'loyalty_reservation_evaluation', 'loyalty_ledger',
+    'loyalty_import_batch', 'loyalty_import_row',
     'integration_event', 'event_subscription', 'event_delivery'
   ];
 begin

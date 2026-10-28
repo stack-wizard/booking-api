@@ -72,11 +72,15 @@ public class LoyaltyImportService {
     @Transactional
     public Upload create(Long tenantId, Long programId, LoyaltyImportBatch.ImportType type, Long propertyTenantId,
                          String fileName, Long fileSize, Long userId) {
-        programService.require(tenantId, programId);
         if (type == null) {
             throw new IllegalArgumentException("importType is required");
         }
-        if (type == LoyaltyImportBatch.ImportType.RESERVATIONS) {
+        if (type == LoyaltyImportBatch.ImportType.MEMBERS) {
+            programService.require(tenantId, programId);
+        } else if (programId != null) {
+            programService.require(tenantId, programId);
+        }
+        if (type == LoyaltyImportBatch.ImportType.STAYS) {
             if (propertyTenantId == null) {
                 throw new IllegalArgumentException("propertyTenantId (hotel) is required for a reservation import");
             }
@@ -90,7 +94,7 @@ public class LoyaltyImportService {
                 .tenantId(tenantId)
                 .programId(programId)
                 .importType(type)
-                .propertyTenantId(type == LoyaltyImportBatch.ImportType.RESERVATIONS ? propertyTenantId : null)
+                .propertyTenantId(type == LoyaltyImportBatch.ImportType.STAYS ? propertyTenantId : null)
                 .s3Key("pending")
                 .fileName(StringUtils.hasText(fileName) ? fileName.trim() : "import.csv")
                 .fileSize(fileSize)

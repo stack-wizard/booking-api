@@ -2,11 +2,11 @@ package com.stackwizard.booking_api.service.loyalty;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.model.CrmContact;
-import com.stackwizard.booking_api.model.LoyaltyConsent;
+import com.stackwizard.booking_api.model.CrmContactConsent;
 import com.stackwizard.booking_api.model.LoyaltyMember;
 import com.stackwizard.booking_api.model.LoyaltyTier;
 import com.stackwizard.booking_api.repository.CrmContactRepository;
-import com.stackwizard.booking_api.repository.LoyaltyConsentRepository;
+import com.stackwizard.booking_api.repository.CrmContactConsentRepository;
 import com.stackwizard.booking_api.repository.LoyaltyTierRepository;
 import com.stackwizard.booking_api.service.integration.IntegrationEventPublisher;
 import org.springframework.stereotype.Component;
@@ -32,12 +32,12 @@ public class LoyaltyEvents {
 
     private final IntegrationEventPublisher publisher;
     private final CrmContactRepository contactRepo;
-    private final LoyaltyConsentRepository consentRepo;
+    private final CrmContactConsentRepository consentRepo;
     private final LoyaltyTierRepository tierRepo;
 
     public LoyaltyEvents(IntegrationEventPublisher publisher,
                          CrmContactRepository contactRepo,
-                         LoyaltyConsentRepository consentRepo,
+                         CrmContactConsentRepository consentRepo,
                          LoyaltyTierRepository tierRepo) {
         this.publisher = publisher;
         this.contactRepo = contactRepo;
@@ -67,8 +67,10 @@ public class LoyaltyEvents {
             node.put("email", contact.getEmail());
             node.put("phone", contact.getPhone());
         }
-        if (member.getAttrs() != null && member.getAttrs().hasNonNull("language")) {
-            node.put("language", member.getAttrs().get("language").asText());
+        if (contact != null) {
+            node.put("contactId", contact.getId());
+            node.put("language", contact.getLanguage());
+            node.put("country", contact.getCountry());
         }
         LoyaltyTier tier = member.getAssignedTierId() == null ? null : tierRepo.findById(member.getAssignedTierId()).orElse(null);
         if (tier != null) {
@@ -80,7 +82,7 @@ public class LoyaltyEvents {
         node.put("nightsCurrentYear", member.getNightsCurrentYear());
         node.put("walletAdded", member.getWalletAddedAt() != null);
         ObjectNode consents = node.putObject("consents");
-        for (LoyaltyConsent c : consentRepo.findByMemberIdOrderByChannelAsc(member.getId())) {
+        for (CrmContactConsent c : consentRepo.findByContactIdOrderByChannelAsc(member.getContactId())) {
             consents.put(c.getChannel().name().toLowerCase(), Boolean.TRUE.equals(c.getGranted()));
         }
         return node;

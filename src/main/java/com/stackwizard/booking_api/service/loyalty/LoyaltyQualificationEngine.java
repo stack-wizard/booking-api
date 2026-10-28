@@ -6,17 +6,17 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.stackwizard.booking_api.model.CrmContact;
 import com.stackwizard.booking_api.model.LoyaltyLedgerEntry;
 import com.stackwizard.booking_api.model.LoyaltyMember;
+import com.stackwizard.booking_api.model.LoyaltyProgram;
 import com.stackwizard.booking_api.model.LoyaltyQualificationStep;
-import com.stackwizard.booking_api.model.LoyaltyReservation;
 import com.stackwizard.booking_api.model.LoyaltyReservationEvaluation;
 import com.stackwizard.booking_api.model.LoyaltyRuleSet;
-import com.stackwizard.booking_api.repository.CrmContactRepository;
+import com.stackwizard.booking_api.model.PmsReservation;
 import com.stackwizard.booking_api.repository.LoyaltyChannelMapRepository;
 import com.stackwizard.booking_api.repository.LoyaltyLedgerRepository;
 import com.stackwizard.booking_api.repository.LoyaltyMemberRepository;
 import com.stackwizard.booking_api.repository.LoyaltyQualificationStepRepository;
 import com.stackwizard.booking_api.repository.LoyaltyReservationEvaluationRepository;
-import com.stackwizard.booking_api.repository.LoyaltyReservationRepository;
+import com.stackwizard.booking_api.repository.PmsReservationRepository;
 import com.stackwizard.booking_api.service.loyalty.qualification.QualificationContext;
 import com.stackwizard.booking_api.service.loyalty.qualification.QualificationRule;
 import org.springframework.stereotype.Service;
@@ -36,21 +36,22 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * Turns a reservation snapshot into ledger nights. Idempotent: evaluating the same state twice changes nothing;
- * a changed state (dates, status, member) reverses what no longer holds and posts what newly qualifies.
+ * Turns a PMS reservation into ledger nights. Idempotent: evaluating the same state twice changes nothing; a changed
+ * state (dates, status, person) reverses what no longer holds and posts what newly qualifies. The reservation itself
+ * belongs to the platform; this engine only decides what it means for the loyalty programme.
  */
 @Service
 public class LoyaltyQualificationEngine {
     public static final String NO_MATCH = "NO_MATCH";
+    public static final String NOT_MEMBER = "NOT_MEMBER";
 
     private final Map<LoyaltyQualificationStep.RuleCode, QualificationRule> rules = new EnumMap<>(LoyaltyQualificationStep.RuleCode.class);
-    private final LoyaltyReservationRepository reservationRepo;
+    private final PmsReservationRepository reservationRepo;
     private final LoyaltyReservationEvaluationRepository evaluationRepo;
     private final LoyaltyQualificationStepRepository stepRepo;
     private final LoyaltyChannelMapRepository channelMapRepo;
     private final LoyaltyLedgerRepository ledgerRepo;
     private final LoyaltyMemberRepository memberRepo;
-    private final CrmContactRepository contactRepo;
     private final LoyaltyMatchingService matchingService;
     private final LoyaltyProgramService programService;
     private final LoyaltyLedgerService ledgerService;
@@ -60,13 +61,12 @@ public class LoyaltyQualificationEngine {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public LoyaltyQualificationEngine(List<QualificationRule> ruleBeans,
-                                      LoyaltyReservationRepository reservationRepo,
+                                      PmsReservationRepository reservationRepo,
                                       LoyaltyReservationEvaluationRepository evaluationRepo,
                                       LoyaltyQualificationStepRepository stepRepo,
                                       LoyaltyChannelMapRepository channelMapRepo,
                                       LoyaltyLedgerRepository ledgerRepo,
                                       LoyaltyMemberRepository memberRepo,
-                                      CrmContactRepository contactRepo,
                                       LoyaltyMatchingService matchingService,
                                       LoyaltyProgramService programService,
                                       LoyaltyLedgerService ledgerService,
@@ -82,7 +82,6 @@ public class LoyaltyQualificationEngine {
         this.channelMapRepo = channelMapRepo;
         this.ledgerRepo = ledgerRepo;
         this.memberRepo = memberRepo;
-        this.contactRepo = contactRepo;
         this.matchingService = matchingService;
         this.programService = programService;
         this.ledgerService = ledgerService;
@@ -93,52 +92,73 @@ public class LoyaltyQualificationEngine {
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void evaluate(LoyaltyReservationEvaluation evaluation) {
-        LoyaltyReservation r = reservationRepo.findById(evaluation.getReservationId()).orElse(null);
+        PmsReservation r = reservationRepo.findById(evaluation.getReservationId()).orElse(null);
         if (r == null) {
             finish(evaluation, LoyaltyReservationEvaluation.Result.SKIPPED, null, 0, null, details("reservation deleted"));
             return;
         }
-        // (re)match: a later import may bring the card number or a member may have registered since
-        LoyaltyMatchingService.Match match = matchingService.match(r).orElse(null);
-        r.setMemberId(match == null ? null : match.member().getId());
-        r.setMatchMethod(match == null ? null : match.method());
-        r.setUpdatedAt(OffsetDateTime.now(clock));
-        reservationRepo.save(r);
+        // (re)match the person: a later import may bring the profile id / card, or the guest may have registered since
+        CrmContact contact = matchingService.matchContact(r).map(m -> {
+            if (!Objects.equals(r.getContactId(), m.contact().getId()) || r.getMatchMethod() != m.method()) {
+                r.setContactId(m.contact().getId());
+                r.setMatchMethod(m.method());
+                r.setUpdatedAt(OffsetDateTime.now(clock));
+                reservationRepo.save(r);
+            }
+            return m.contact();
+        }).orElse(null);
+
+        LoyaltyProgram program = null;
+        LoyaltyMember member = null;
+        if (contact != null) {
+            for (LoyaltyProgram p : programService.list(r.getTenantId())) {
+                if (!Boolean.TRUE.equals(p.getActive())) {
+                    continue;
+                }
+                LoyaltyMember m = matchingService.memberFor(p.getId(), contact.getId()).orElse(null);
+                if (m != null) {
+                    program = p;
+                    member = memberRepo.lockById(m.getId()).orElseThrow();
+                    break;
+                }
+            }
+        }
 
         List<LoyaltyLedgerEntry> posted = ledgerRepo.findByReservationIdAndSourceAndActiveTrue(r.getId(), LoyaltyLedgerEntry.Source.STAY);
         // nights credited to a member who no longer matches go back first
         for (Long otherMemberId : posted.stream().map(LoyaltyLedgerEntry::getMemberId).distinct().toList()) {
-            if (!Objects.equals(otherMemberId, r.getMemberId())) {
+            if (member == null || !Objects.equals(otherMemberId, member.getId())) {
                 LoyaltyMember other = memberRepo.lockById(otherMemberId).orElseThrow();
-                int qty = ledgerService.reverseReservation(other, r.getId(), "reservation re-matched to another member");
+                int qty = ledgerService.reverseReservation(other, r.getId(), "reservation re-matched to another person");
                 tierEngine.recompute(other, LoyaltyTierEngine.Context.engine());
                 reversedEvent(other, r, qty, "REMATCHED");
             }
         }
-        if (match == null) {
-            ObjectNode d = details("no member matches holder");
-            finish(evaluation, LoyaltyReservationEvaluation.Result.REJECTED, null, 0, NO_MATCH, d);
+        if (member == null) {
+            String code = contact == null ? NO_MATCH : NOT_MEMBER;
+            finish(evaluation, LoyaltyReservationEvaluation.Result.REJECTED, null, 0, code,
+                    details(contact == null ? "no person matches the holder" : "holder is not a member of any programme"));
             return;
         }
-        LoyaltyMember member = memberRepo.lockById(match.member().getId()).orElseThrow();
         evaluation.setMemberId(member.getId());
         posted = ledgerRepo.findByReservationIdAndSourceAndActiveTrue(r.getId(), LoyaltyLedgerEntry.Source.STAY);
 
-        LoyaltyRuleSet ruleSet = programService.ruleSetOn(r.getProgramId(), r.getArrival());
-        Outcome outcome = runPipeline(r, member, ruleSet);
+        LoyaltyRuleSet ruleSet = programService.ruleSetOn(program.getId(), r.getArrival());
+        Outcome outcome = runPipeline(r, contact, member, program, ruleSet);
 
         Set<LocalDate> target = outcome.rejectCode == null ? new TreeSet<>(outcome.nights) : Set.of();
         Set<LocalDate> current = new HashSet<>();
         posted.forEach(e -> current.add(e.getNightDate()));
 
         if (outcome.rejectCode != null && current.isEmpty()) {
+            Long memberId = member.getId();
             boolean alreadyTold = evaluationRepo.findFirstByReservationIdAndResultNotOrderByIdDesc(r.getId(), LoyaltyReservationEvaluation.Result.PENDING)
                     .filter(prev -> prev.getResult() == LoyaltyReservationEvaluation.Result.REJECTED)
-                    .filter(prev -> Objects.equals(prev.getRejectCode(), outcome.rejectCode) && Objects.equals(prev.getMemberId(), member.getId()))
+                    .filter(prev -> Objects.equals(prev.getRejectCode(), outcome.rejectCode) && Objects.equals(prev.getMemberId(), memberId))
                     .isPresent();
             finish(evaluation, LoyaltyReservationEvaluation.Result.REJECTED, ruleSet, 0, outcome.rejectCode, outcome.details);
             // only a finished stay is worth telling the member about (claim window), and only once per reason
-            if (r.getStatus() == LoyaltyReservation.Status.CHECKED_OUT && !alreadyTold) {
+            if (r.getStatus() == PmsReservation.Status.CHECKED_OUT && !alreadyTold) {
                 rejectedEvent(member, r, outcome, LoyaltyParams.of(ruleSet).claimWindowDays());
             }
             return;
@@ -173,8 +193,9 @@ public class LoyaltyQualificationEngine {
                     .build());
             added++;
         }
-        if (added > 0 && (member.getLastStayCheckout() == null || r.getDeparture().isAfter(member.getLastStayCheckout()))) {
-            member.setLastStayCheckout(r.getDeparture());
+        LocalDate checkout = checkoutDate(r);
+        if (added > 0 && (member.getLastStayCheckout() == null || checkout.isAfter(member.getLastStayCheckout()))) {
+            member.setLastStayCheckout(checkout);
         }
         tierEngine.recompute(member, LoyaltyTierEngine.Context.engine());
 
@@ -194,11 +215,10 @@ public class LoyaltyQualificationEngine {
     private record Outcome(String rejectCode, List<LocalDate> nights, ObjectNode details) {
     }
 
-    private Outcome runPipeline(LoyaltyReservation r, LoyaltyMember member, LoyaltyRuleSet ruleSet) {
+    private Outcome runPipeline(PmsReservation r, CrmContact contact, LoyaltyMember member, LoyaltyProgram program, LoyaltyRuleSet ruleSet) {
         LoyaltyParams params = LoyaltyParams.of(ruleSet);
-        String lastName = contactRepo.findById(member.getContactId()).map(CrmContact::getLastName).orElse(null);
-        QualificationContext ctx = new QualificationContext(r, member, lastName, ruleSet, params,
-                channelMapRepo.findByProgramIdOrderByIdAsc(r.getProgramId()), stayNights(r));
+        QualificationContext ctx = new QualificationContext(r, contact, member, program, ruleSet, params,
+                channelMapRepo.findByProgramIdOrderByIdAsc(program.getId()), stayNights(r));
         ObjectNode details = objectMapper.createObjectNode();
         details.put("ruleSetVersion", ruleSet.getVersion());
         ArrayNode steps = details.putArray("steps");
@@ -227,13 +247,24 @@ public class LoyaltyQualificationEngine {
         return new Outcome(null, new ArrayList<>(ctx.nights()), details);
     }
 
-    /** One night per date of the stay; units on the same reservation never add nights (FR-04.5). */
-    static List<LocalDate> stayNights(LoyaltyReservation r) {
+    /** Nights actually slept: arrival up to the real check-out (early departure shortens, units never multiply, FR-04.5). */
+    static List<LocalDate> stayNights(PmsReservation r) {
         List<LocalDate> nights = new ArrayList<>();
-        for (LocalDate d = r.getArrival(); d.isBefore(r.getDeparture()); d = d.plusDays(1)) {
+        LocalDate end = checkoutDate(r);
+        for (LocalDate d = r.getArrival(); d.isBefore(end); d = d.plusDays(1)) {
             nights.add(d);
         }
         return nights;
+    }
+
+    static LocalDate checkoutDate(PmsReservation r) {
+        if (r.getActualCheckOut() != null) {
+            LocalDate actual = r.getActualCheckOut().atZoneSameInstant(java.time.ZoneId.of("Europe/Zagreb")).toLocalDate();
+            if (actual.isBefore(r.getDeparture()) && !actual.isBefore(r.getArrival())) {
+                return actual;
+            }
+        }
+        return r.getDeparture();
     }
 
     private void finish(LoyaltyReservationEvaluation ev, LoyaltyReservationEvaluation.Result result, LoyaltyRuleSet ruleSet,
@@ -251,17 +282,18 @@ public class LoyaltyQualificationEngine {
         return objectMapper.createObjectNode().put("note", note);
     }
 
-    private ObjectNode stayData(LoyaltyReservation r) {
+    private ObjectNode stayData(PmsReservation r) {
         ObjectNode data = events.data();
         data.put("reservationId", r.getId());
         data.put("propertyTenantId", r.getPropertyTenantId());
         data.put("confirmationNo", r.getConfirmationNo());
+        data.put("pmsReservationId", r.getPmsReservationId());
         data.put("arrival", r.getArrival().toString());
         data.put("departure", r.getDeparture().toString());
         return data;
     }
 
-    private void rejectedEvent(LoyaltyMember member, LoyaltyReservation r, Outcome outcome, int claimWindowDays) {
+    private void rejectedEvent(LoyaltyMember member, PmsReservation r, Outcome outcome, int claimWindowDays) {
         ObjectNode data = stayData(r);
         data.put("rejectCode", outcome.rejectCode);
         data.put("claimWindowDays", claimWindowDays);
@@ -269,7 +301,7 @@ public class LoyaltyQualificationEngine {
         events.publish(LoyaltyEvents.STAY_REJECTED, member, data);
     }
 
-    private void reversedEvent(LoyaltyMember member, LoyaltyReservation r, int nights, String reason) {
+    private void reversedEvent(LoyaltyMember member, PmsReservation r, int nights, String reason) {
         if (nights <= 0) {
             return;
         }

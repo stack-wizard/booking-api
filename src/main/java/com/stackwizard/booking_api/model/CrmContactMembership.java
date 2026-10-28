@@ -12,15 +12,16 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Entity
-@Table(name = "loyalty_member_identifier")
+@Table(name = "crm_contact_membership")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class LoyaltyMemberIdentifier {
+public class CrmContactMembership {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -28,23 +29,35 @@ public class LoyaltyMemberIdentifier {
     @Column(name = "tenant_id", nullable = false)
     private Long tenantId;
 
-    @Column(name = "member_id", nullable = false)
-    private Long memberId;
+    @Column(name = "contact_id", nullable = false)
+    private Long contactId;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "type", nullable = false)
-    private Type type;
+    @Column(name = "program_code", nullable = false)
+    private String programCode;
 
-    @Column(name = "value_norm", nullable = false)
-    private String valueNorm;
+    @Column(name = "card_no", nullable = false)
+    private String cardNo;
+
+    @Column(name = "level")
+    private String level;
 
     @Column(name = "is_primary", nullable = false)
     private Boolean isPrimary;
 
+    @Column(name = "expires_at")
+    private LocalDate expiresAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false)
+    private Source source;
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 
-    public enum Type {
-        EMAIL, PHONE, CARD, OPERA_PROFILE
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    public enum Source {
+        OPERA, LOYALTY, IMPORT, MANUAL
     }
 }

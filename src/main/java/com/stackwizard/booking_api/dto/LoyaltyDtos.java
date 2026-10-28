@@ -30,7 +30,10 @@ public final class LoyaltyDtos {
     public record EmailRequest(String email) {
     }
 
-    public record MatchRequest(Long memberId) {
+    public record MatchRequest(Long contactId) {
+    }
+
+    public record MergeRequest(Long fromContactId, String reason) {
     }
 
     public record ImportCreateRequest(Long programId, LoyaltyImportBatch.ImportType importType, Long propertyTenantId,

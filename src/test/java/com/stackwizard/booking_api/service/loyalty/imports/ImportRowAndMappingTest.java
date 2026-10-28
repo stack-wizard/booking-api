@@ -2,7 +2,7 @@ package com.stackwizard.booking_api.service.loyalty.imports;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.stackwizard.booking_api.model.LoyaltyReservation;
+import com.stackwizard.booking_api.model.PmsReservation;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
@@ -60,12 +60,12 @@ class ImportRowAndMappingTest {
 
     @Test
     void operaStatusesMap() {
-        var map = ReservationImportApplier.DEFAULT_STATUS;
-        assertThat(ReservationImportApplier.mapStatus("Checked Out", map)).isEqualTo(LoyaltyReservation.Status.CHECKED_OUT);
-        assertThat(ReservationImportApplier.mapStatus("NO SHOW", map)).isEqualTo(LoyaltyReservation.Status.NO_SHOW);
-        assertThat(ReservationImportApplier.mapStatus("due in", map)).isEqualTo(LoyaltyReservation.Status.RESERVED);
-        assertThat(ReservationImportApplier.mapStatus("IN-HOUSE", map)).isEqualTo(LoyaltyReservation.Status.IN_HOUSE);
-        assertThat(ReservationImportApplier.mapStatus("CANCELED", map)).isEqualTo(LoyaltyReservation.Status.CANCELLED);
-        assertThat(ReservationImportApplier.mapStatus("WHATEVER", map)).isNull();
+        var map = StayImportApplier.DEFAULT_STATUS;
+        assertThat(StayImportApplier.mapStatus("Checked Out", map)).isEqualTo(PmsReservation.Status.CHECKED_OUT);
+        assertThat(StayImportApplier.mapStatus("NO SHOW", map)).isEqualTo(PmsReservation.Status.NO_SHOW);
+        assertThat(StayImportApplier.mapStatus("due in", map)).isEqualTo(PmsReservation.Status.RESERVED);
+        assertThat(StayImportApplier.mapStatus("IN-HOUSE", map)).isEqualTo(PmsReservation.Status.IN_HOUSE);
+        assertThat(StayImportApplier.mapStatus("CANCELED", map)).isEqualTo(PmsReservation.Status.CANCELLED);
+        assertThat(StayImportApplier.mapStatus("WHATEVER", map)).isNull();
     }
 }

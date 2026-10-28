@@ -146,7 +146,7 @@ class LoyaltyFlowScratchDbIT {
                 + c + "4,CHECKED OUT,10.08.2026,12.08.2026,WEB,Ana,Horvat,ana." + run + "@example.com,\n"      // no wallet
                 + c + "5,RESERVED,01.12.2026,05.12.2026,WEB,Marko,Čukon,,"+ n1 + "\n"              // future
                 + c + "6,CHECKED OUT,03.09.2026,06.09.2026,WEB,Marko,Čukon,,"+ n1 + "\n";          // overlaps 03.09.
-        LoyaltyImportBatch rb = applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.RESERVATIONS, hotel, reservations, om.createObjectNode()));
+        LoyaltyImportBatch rb = applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.STAYS, hotel, reservations, om.createObjectNode()));
         assertThat(rb.getRowsApplied()).isEqualTo(6);
         drainEvaluations();
 
@@ -162,18 +162,37 @@ class LoyaltyFlowScratchDbIT {
         assertThat(marko.getNightsTotal()).isEqualTo(78);
         assertThat(marko.getLastStayCheckout()).isEqualTo(LocalDate.of(2026, 9, 6));
         assertThat(marko.getTierValidUntil()).isEqualTo(LocalDate.of(2028, 9, 6));
-        assertThat(eventTypes()).contains("loyalty.stay.posted", "loyalty.stay.rejected");
+        assertThat(eventTypes()).contains("loyalty.stay.posted", "loyalty.stay.rejected", "pms.reservation.created");
+        // CRM projection counts every checked-out stay, OTA included (#1, #2, #6: 3 + 2 + 3 nights); loyalty does not
+        Long markoContact = marko.getContactId();
+        assertThat(jdbc.queryForObject("select stays_total from crm_contact where id = ?", Integer.class, markoContact)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("select nights_total from crm_contact where id = ?", Integer.class, markoContact)).isEqualTo(8);
+        assertThat(jdbc.queryForObject("select next_arrival from crm_contact where id = ?", LocalDate.class, markoContact)).isEqualTo(LocalDate.of(2026, 12, 1));
+        assertThat(jdbc.queryForObject("select kind from crm_contact where id = ?", String.class, markoContact)).isEqualTo("GUEST");
+
+        // --- PMS profiles: NAME_ID lands on the existing person (by e-mail), cards and consents follow ------------
+        String profiles = "NAME_ID;FIRST_NAME;LAST_NAME;EMAIL;NATIONALITY;TOTAL_ARRIVALS;TOTAL_NIGHTS;ROOM_REVENUE_YTD;LAST_STAY;MEMBER_CARD_TYPE_1;MEMBER_CARD_NO_1;MEMBER_LEVEL_1;NEWSLETTER\n"
+                + "P" + run + "1;Ana;Horvat;ana." + run + "@example.com;HR;4;9;850,00;2025-01-15;RADISSON;RR" + run + ";GOLD;Y\n"
+                + "P" + run + "2;Novi;Gost;novi." + run + "@example.com;DE;1;2;300,00;2024-05-05;;;;N\n";
+        LoyaltyImportBatch pb = applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.PROFILES, null, profiles, om.createObjectNode().put("asOf", "2026-01-01")));
+        assertThat(pb.getRowsApplied()).isEqualTo(2);
+        Long anaContact = ana.getContactId();
+        assertThat(jdbc.queryForObject("select opera_profile_id from crm_contact where id = ?", String.class, anaContact)).isEqualTo("P" + run + "1");
+        assertThat(count("select count(*) from crm_contact_membership where contact_id = ? and program_code = 'RADISSON'", anaContact)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select granted from crm_contact_consent where contact_id = ? and channel = 'EMAIL'", Boolean.class, anaContact)).isTrue();
+        assertThat(jdbc.queryForObject("select pms_opening_nights from crm_contact where id = ?", Integer.class, anaContact)).isEqualTo(9);
+        assertThat(count("select count(*) from crm_contact where tenant_id = ? and opera_profile_id = 'P" + run + "2' and kind = 'GUEST' and source = 'OPERA'", org)).isEqualTo(1);
         assertThat(count("select count(*) from event_delivery d join integration_event e on e.id = d.event_id where e.tenant_id = ? and d.status = 'PENDING'", org))
                 .as("deliveries queued for the subscription").isGreaterThan(0);
 
         // re-import of an unchanged export queues nothing
         long evals = count("select count(*) from loyalty_reservation_evaluation where tenant_id = ?", org);
-        applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.RESERVATIONS, hotel, reservations, om.createObjectNode()));
+        applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.STAYS, hotel, reservations, om.createObjectNode()));
         assertThat(count("select count(*) from loyalty_reservation_evaluation where tenant_id = ?", org)).isEqualTo(evals);
 
         // storno after posting reverses only that reservation's nights; #6 keeps 04-05.09
         String cancelled = reservations.replace(c + "1,CHECKED OUT", c + "1,CANCELLED");
-        applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.RESERVATIONS, hotel, cancelled, om.createObjectNode()));
+        applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.STAYS, hotel, cancelled, om.createObjectNode()));
         drainEvaluations();
         assertThat(result(c + "1")).isEqualTo("REVERSED");
         assertThat(count("select count(*) from loyalty_ledger where member_id = ? and source = 'STAY' and active", marko.getId())).isEqualTo(2);
@@ -181,7 +200,7 @@ class LoyaltyFlowScratchDbIT {
         assertThat(eventTypes()).contains("loyalty.stay.reversed");
 
         // a re-evaluation of #6 now picks up 03.09 (freed by the storno)
-        Long r6 = jdbc.queryForObject("select id from loyalty_reservation where confirmation_no = ?", Long.class, c + "6");
+        Long r6 = jdbc.queryForObject("select id from pms_reservation where confirmation_no = ?", Long.class, c + "6");
         tx.executeWithoutResult(s -> jdbc.update("insert into loyalty_reservation_evaluation (tenant_id, reservation_id, result) values (?, ?, 'PENDING')", org, r6));
         drainEvaluations();
         assertThat(count("select count(*) from loyalty_ledger where member_id = ? and source = 'STAY' and active", marko.getId())).isEqualTo(3);
@@ -190,7 +209,7 @@ class LoyaltyFlowScratchDbIT {
         memberService.markWallet(org, ana.getId(), null, null);
         memberService.markWallet(org, ana.getId(), null, null);
         assertThat(count("select count(*) from loyalty_ledger where member_id = ? and source = 'WALLET'", ana.getId())).isEqualTo(1);
-        Long r4 = jdbc.queryForObject("select id from loyalty_reservation where confirmation_no = ?", Long.class, c + "4");
+        Long r4 = jdbc.queryForObject("select id from pms_reservation where confirmation_no = ?", Long.class, c + "4");
         tx.executeWithoutResult(s -> jdbc.update("insert into loyalty_reservation_evaluation (tenant_id, reservation_id, result) values (?, ?, 'PENDING')", org, r4));
         drainEvaluations();
         assertThat(reload(ana).getNightsTotal()).isEqualTo(12 + 2 + 2);
@@ -287,13 +306,13 @@ class LoyaltyFlowScratchDbIT {
 
     private String reject(String conf) {
         return jdbc.queryForObject("""
-                select e.reject_code from loyalty_reservation_evaluation e join loyalty_reservation r on r.id = e.reservation_id
+                select e.reject_code from loyalty_reservation_evaluation e join pms_reservation r on r.id = e.reservation_id
                 where r.confirmation_no = ? and e.result <> 'PENDING' order by e.id desc limit 1""", String.class, conf);
     }
 
     private String result(String conf) {
         return jdbc.queryForObject("""
-                select e.result from loyalty_reservation_evaluation e join loyalty_reservation r on r.id = e.reservation_id
+                select e.result from loyalty_reservation_evaluation e join pms_reservation r on r.id = e.reservation_id
                 where r.confirmation_no = ? and e.result not in ('PENDING','SKIPPED') order by e.id desc limit 1""", String.class, conf);
     }
 

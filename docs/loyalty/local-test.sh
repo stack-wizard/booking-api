@@ -1,7 +1,7 @@
 #!/bin/sh
 # Lokalni test loyalty faze 1 protiv booking-api na :8082 (scratch baza).
 # TOKEN = access token prijavljenog korisnika (BOOKING_ADMIN), TENANT = platform tenant UUID lanca (X-Tenant-Id).
-# Koraci: setup (program + pravila + kanali) | members | reservations <propertyTenantId> | eval-status
+# Koraci: setup (program + pravila + kanali) | members | stays <propertyTenantId> | profiles
 set -e
 API=${API:-http://localhost:8082}
 DIR=$(cd "$(dirname "$0")" && pwd)
@@ -11,7 +11,7 @@ j() { curl -sf -H "$H_AUTH" -H "$H_TEN" -H 'Content-Type: application/json' "$@"
 pid() { j "$API/api/loyalty/programs" | python3 -c 'import sys,json; p=[x for x in json.load(sys.stdin) if x["code"]=="ARENA_REWARDS"]; print(p[0]["id"] if p else "")'; }
 
 import_file() { # type file [propertyTenantId]
-  P=$(pid); PROP=${3:-null}
+  P=$(pid); PROP=${3:-null}; [ "$1" = "MEMBERS" ] || P=null
   R=$(j -X POST "$API/api/loyalty/imports" -d "{\"programId\":$P,\"importType\":\"$1\",\"propertyTenantId\":$PROP,\"fileName\":\"$(basename "$2")\"}")
   ID=$(echo "$R" | python3 -c 'import sys,json; print(json.load(sys.stdin)["batch"]["id"])')
   URL=$(echo "$R" | python3 -c 'import sys,json; print(json.load(sys.stdin)["uploadUrl"])')
@@ -47,6 +47,7 @@ case "$1" in
     j -X PUT "$API/api/loyalty/programs/$P/channel-map" -d '[{"codeType":"SOURCE","code":"WEB","qualifying":true},{"codeType":"SOURCE","code":"CC","qualifying":true},{"codeType":"SOURCE","code":"FD","qualifying":true},{"codeType":"SOURCE","code":"BOOKING","qualifying":false}]' >/dev/null
     echo "program $P, rule set $RS aktivan" ;;
   members) import_file MEMBERS "$DIR/samples/members.csv" ;;
-  reservations) import_file RESERVATIONS "$DIR/samples/reservations-dh.csv" "$2" ;;
-  *) echo "usage: $0 setup|members|reservations <propertyTenantId>"; exit 1 ;;
+  stays) import_file STAYS "$DIR/samples/stays-dh.csv" "$2" ;;
+  profiles) import_file PROFILES "$DIR/samples/profiles.csv" ;;
+  *) echo "usage: $0 setup|members|stays <propertyTenantId>|profiles"; exit 1 ;;
 esac

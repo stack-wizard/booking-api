@@ -48,6 +48,6 @@ public class LoyaltyChannelMap {
     private OffsetDateTime createdAt;
 
     public enum CodeType {
-        SOURCE, MARKET, CHANNEL
+        SOURCE, MARKET, ORIGIN, CHANNEL
     }
 }

@@ -4,9 +4,9 @@ import com.stackwizard.booking_api.dto.LoyaltyDtos;
 import com.stackwizard.booking_api.model.LoyaltyChannelMap;
 import com.stackwizard.booking_api.model.LoyaltyLedgerEntry;
 import com.stackwizard.booking_api.model.LoyaltyMember;
-import com.stackwizard.booking_api.model.LoyaltyMemberIdentifier;
+import com.stackwizard.booking_api.model.CrmContactIdentifier;
 import com.stackwizard.booking_api.model.LoyaltyProgram;
-import com.stackwizard.booking_api.model.LoyaltyReservation;
+import com.stackwizard.booking_api.model.PmsReservation;
 import com.stackwizard.booking_api.model.LoyaltyRuleSet;
 import com.stackwizard.booking_api.model.LoyaltyTierHistory;
 import com.stackwizard.booking_api.security.LoyaltyAccess;
@@ -15,7 +15,7 @@ import com.stackwizard.booking_api.security.TenantResolver;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyLedgerService;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyMemberService;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyProgramService;
-import com.stackwizard.booking_api.service.loyalty.LoyaltyReservationService;
+import com.stackwizard.booking_api.service.pms.PmsReservationService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -38,13 +38,13 @@ public class LoyaltyAdminController {
     private final LoyaltyProgramService programService;
     private final LoyaltyMemberService memberService;
     private final LoyaltyLedgerService ledgerService;
-    private final LoyaltyReservationService reservationService;
+    private final PmsReservationService reservationService;
     private final LoyaltyAccess access;
 
     public LoyaltyAdminController(LoyaltyProgramService programService,
                                   LoyaltyMemberService memberService,
                                   LoyaltyLedgerService ledgerService,
-                                  LoyaltyReservationService reservationService,
+                                  PmsReservationService reservationService,
                                   LoyaltyAccess access) {
         this.programService = programService;
         this.memberService = memberService;
@@ -120,7 +120,7 @@ public class LoyaltyAdminController {
     // --- members --------------------------------------------------------------------------------------------
 
     @GetMapping("/programs/{programId}/members")
-    public Page<LoyaltyMember> members(@PathVariable Long programId,
+    public Page<LoyaltyMemberService.MemberRow> members(@PathVariable Long programId,
                                        @RequestParam(required = false) String q,
                                        @RequestParam(required = false) String email,
                                        @RequestParam(required = false) String number,
@@ -153,7 +153,7 @@ public class LoyaltyAdminController {
     }
 
     @PostMapping("/members/{memberId}/emails")
-    public LoyaltyMemberIdentifier addEmail(@PathVariable Long memberId, @RequestBody LoyaltyDtos.EmailRequest body) {
+    public CrmContactIdentifier addEmail(@PathVariable Long memberId, @RequestBody LoyaltyDtos.EmailRequest body) {
         access.require(LoyaltyPermission.ADJUST);
         return memberService.addSecondaryEmail(TenantResolver.requireOrgTenantId(), memberId, body.email());
     }
@@ -196,9 +196,10 @@ public class LoyaltyAdminController {
     }
 
     @GetMapping("/members/{memberId}/reservations")
-    public List<LoyaltyReservation> memberReservations(@PathVariable Long memberId) {
+    public List<PmsReservation> memberReservations(@PathVariable Long memberId) {
         access.require(LoyaltyPermission.READ);
-        return reservationService.forMember(TenantResolver.requireOrgTenantId(), memberId);
+        Long tenantId = TenantResolver.requireOrgTenantId();
+        return reservationService.forContact(tenantId, memberService.require(tenantId, memberId).getContactId());
     }
 
     @PostMapping("/members/{memberId}/adjustments")
@@ -211,36 +212,5 @@ public class LoyaltyAdminController {
     public LoyaltyLedgerEntry reverse(@PathVariable Long entryId, @RequestBody LoyaltyDtos.ReasonRequest body) {
         access.require(LoyaltyPermission.ADJUST);
         return ledgerService.reverse(TenantResolver.requireOrgTenantId(), entryId, body == null ? null : body.reason(), access.currentUserId());
-    }
-
-    // --- reservations / match queue -------------------------------------------------------------------------
-
-    @GetMapping("/reservations")
-    public Page<LoyaltyReservation> reservations(@RequestParam(required = false) LoyaltyReservation.Status status,
-                                                 @RequestParam(required = false) Long propertyTenantId,
-                                                 @RequestParam(defaultValue = "false") boolean unmatched,
-                                                 @RequestParam(defaultValue = "0") int page,
-                                                 @RequestParam(defaultValue = "50") int size) {
-        access.require(LoyaltyPermission.READ);
-        return reservationService.search(TenantResolver.requireOrgTenantId(), status, propertyTenantId, unmatched,
-                PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 200)));
-    }
-
-    @GetMapping("/reservations/{reservationId}")
-    public LoyaltyReservationService.ReservationView reservation(@PathVariable Long reservationId) {
-        access.require(LoyaltyPermission.READ);
-        return reservationService.view(TenantResolver.requireOrgTenantId(), reservationId);
-    }
-
-    @PostMapping("/reservations/{reservationId}/match")
-    public LoyaltyReservationService.ReservationView match(@PathVariable Long reservationId, @RequestBody LoyaltyDtos.MatchRequest body) {
-        access.require(LoyaltyPermission.ADJUST);
-        return reservationService.matchManually(TenantResolver.requireOrgTenantId(), reservationId, body.memberId());
-    }
-
-    @PostMapping("/reservations/{reservationId}/reevaluate")
-    public LoyaltyReservationService.ReservationView reevaluate(@PathVariable Long reservationId) {
-        access.require(LoyaltyPermission.ADJUST);
-        return reservationService.reevaluate(TenantResolver.requireOrgTenantId(), reservationId);
     }
 }

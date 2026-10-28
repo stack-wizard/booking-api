@@ -1,4 +1,5 @@
--- A member is a crm_contact (the person) enrolled in a program. Tier and counters are a cache of the ledger.
+-- A member is a crm_contact (the person) enrolled in a program. Identity keys, memberships and consents live on the
+-- contact (V137); tier and counters here are a cache of the ledger.
 
 create table loyalty_member (
   id                      bigserial primary key,
@@ -37,32 +38,6 @@ create index idx_loyalty_member_assigned_tier on loyalty_member (assigned_tier_i
 create index idx_loyalty_member_computed_tier on loyalty_member (computed_tier_id);
 create index idx_loyalty_member_referrer on loyalty_member (referrer_member_id);
 create index idx_loyalty_member_valid_until on loyalty_member (tier_valid_until) where tier_valid_until is not null;
-
--- Keys used to match PMS reservations to a member (FR-01.8: secondary e-mails).
-create table loyalty_member_identifier (
-  id         bigserial primary key,
-  tenant_id  bigint not null,
-  member_id  bigint not null references loyalty_member(id) on delete cascade,
-  type       text not null check (type in ('EMAIL','PHONE','CARD','OPERA_PROFILE')),
-  value_norm text not null,
-  is_primary boolean not null default false,
-  created_at timestamptz not null default now()
-);
-create unique index uq_loyalty_member_identifier on loyalty_member_identifier (tenant_id, type, value_norm);
-create index idx_loyalty_member_identifier_member on loyalty_member_identifier (member_id);
-
-create table loyalty_consent (
-  id         bigserial primary key,
-  tenant_id  bigint not null,
-  member_id  bigint not null references loyalty_member(id) on delete cascade,
-  channel    text not null check (channel in ('EMAIL','SMS','PUSH')),
-  granted    boolean not null,
-  changed_at timestamptz not null default now(),
-  source     text null,
-  created_at timestamptz not null default now()
-);
-create unique index uq_loyalty_consent on loyalty_consent (member_id, channel);
-create index idx_loyalty_consent_tenant on loyalty_consent (tenant_id);
 
 create table loyalty_tier_history (
   id               bigserial primary key,

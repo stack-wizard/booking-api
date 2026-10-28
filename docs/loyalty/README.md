@@ -7,11 +7,14 @@ Booking-api je izvor istine za loyalty: članovi, knjiga noćenja, tier, pravila
 
 - `loyalty_program` → `loyalty_rule_set` (verzije s `effective_from/to`, `params` jsonb, `tier_policy`)
   → `loyalty_tier`, `loyalty_qualification_step`; `loyalty_channel_map` (source/market/channel → kvalificiran).
-- `loyalty_member` (veza na `crm_contact`), `loyalty_member_identifier` (kartica, e-mailovi, telefon),
-  `loyalty_consent`, `loyalty_tier_history`.
+- `loyalty_member` (veza na `crm_contact`), `loyalty_tier_history`.
 - `loyalty_ledger` – samo dodavanje (trigger); ispravak = protuzapis; jedno STAY noćenje po članu po datumu.
-- `loyalty_reservation` – snimka PMS rezervacije (CSV danas, OPERA konektor kasnije), `loyalty_reservation_evaluation`
-  – svaka odluka enginea (s verzijom pravila i koracima) + red čekanja (`PENDING`).
+- **`pms_reservation`** (+ `pms_reservation_guest`) – snimka PMS rezervacije/boravka, vlasnik je platforma (CSV danas, OPERA
+  konektor kasnije), ključ hotel + `RESV_NAME_ID`; čitaju je loyalty, CRM i revenue. `loyalty_reservation_evaluation` – svaka
+  odluka enginea (s verzijom pravila i koracima) + red čekanja (`PENDING`).
+- **Osoba = `crm_contact`** (B2B kontakt ili GUEST): `crm_contact_identifier` (e-mail, telefon, kartica, PMS profil),
+  `crm_contact_membership` (sve kartice, i tuđih programa), `crm_contact_consent`, `crm_contact_merge_log`; CRM projekcije
+  (`stays_total`, `nights_total`, `revenue_total`, prvi/zadnji boravak) i `crm_account_production` po tvrtki × godina × hotel.
 - `loyalty_import_batch` / `loyalty_import_row` – CSV importi.
 - `integration_event` / `event_subscription` / `event_delivery` – outbox (vidi [events.md](events.md)).
 
@@ -29,12 +32,17 @@ Booking-api je izvor istine za loyalty: članovi, knjiga noćenja, tier, pravila
 | `unknown_code_policy` | QUALIFYING | nemapirani source/market/channel kod: `QUALIFYING` / `NON_QUALIFYING` |
 | `downgrade_step` | 1 | ANNUAL_CYCLE: najviše toliko razina pada godišnje |
 
-Koraci kvalifikacije (redoslijed, uključenost, `reject_code`, `params`): `MEMBER_MATCH`, `CHANNEL`, `HOLDER`
-(`require_last_name_match`), `ACTIVATION`, `WALLET`, `STAY_COMPLETED`, `EXCLUSIVITY_FLAG`, `UNIQUE_PER_DATE`.
+Koraci kvalifikacije (redoslijed, uključenost, `reject_code`, `params`): `MEMBER_MATCH` (osoba uparena i član), `CHANNEL`
+(source/market/origin/channel), `HOLDER` (`require_last_name_match`), `ACTIVATION`, `WALLET`, `STAY_COMPLETED`
+(odjavljen, bez day-use/pseudo; `allow_complimentary`), `EXCLUSIVITY_FLAG` (membership tip na rezervaciji ≠ naš program;
+`own_program_codes`), `UNIQUE_PER_DATE`.
+
+Uparivanje rezervacije s osobom (FR-04.1): PMS profil (`GUEST_NAME_ID` → `crm_contact.opera_profile_id`) → broj kartice →
+e-mail (primarni, pa sekundarni) → telefon; ručno iz match queuea. Noćenja se računaju do stvarnog check-outa.
 
 ## Importi (CSV UTF-8, `,` `;` ili tab)
 
-1. `POST /api/loyalty/imports` `{programId, importType: MEMBERS|RESERVATIONS, propertyTenantId (za rezervacije), fileName}`
+1. `POST /api/loyalty/imports` `{programId (samo MEMBERS), importType: MEMBERS|STAYS|PROFILES, propertyTenantId (za STAYS), fileName}`
    → `uploadUrl` (presigned S3 PUT, 30 min). Klijent šalje datoteku izravno na S3.
 2. `POST /api/loyalty/imports/{id}/start` `{columnMapping?, options?}` → worker (bilo koja instanca) učita i validira.
 3. `GET /api/loyalty/imports/{id}` (napredak) · `GET …/errors.csv` (odbijeni redovi).
@@ -49,9 +57,15 @@ Kolone se prepoznaju po imenu i aliasima (`GET /api/loyalty/imports/fields?type=
 noćenja ove godine, zadnji check-out, aktivacija, wallet, kontakt, privole, interesi, preporučitelj.
 Ponovni import po broju kartice ažurira; početno stanje zamjenjuje protuzapisom.
 
-**Rezervacije (OPERA)**: obavezno `confirmation_no, status, arrival, departure`; dodatno `sub_id`
-(sharer), source/market/channel, holder, `membership_no`, Radisson flag, iznos. Upsert po hotel + broj potvrde;
-promjena relevantnih polja → ponovna evaluacija. Rezervacija koje nema u novom exportu se ne dira.
+**Boravci (OPERA, `EXP_GENERAL_RESV_VIEW` nazivi)**: obavezno `status, arrival, departure` i `RESV_NAME_ID` (ili
+`confirmation_no` + leg); dodatno stvarni check-in/out, datum rezervacije, source/market/origin/channel, soba, rate,
+`GUEST_NAME_ID`, holder, `LOYALTY_MEMBER_TYPE/NO/LEVEL`, company/agent/group NAME_ID, prihod (room/F&B/other/tax), valuta,
+comp/house/pseudo/walk-in. Upsert po hotel + RESV_NAME_ID; promjena → `pms.reservation.*` događaj, ponovna evaluacija, CRM
+statistika. Rezervacija koje nema u novom exportu se ne dira.
+
+**Profili (OPERA PROFEXPORT)**: obavezno `NAME_ID, last_name`; kontakt, država, nacionalnost, datum rođenja, jezik, VIP,
+statistika (TOTAL_ARRIVALS, TOTAL_NIGHTS, ROOM_REVENUE_YTD/LAST_YEAR, FIRST/LAST_STAY) kao početno stanje (`asOf`), kartice
+`MEMBER_CARD_TYPE_n / NO_n / LEVEL_n / EXPIRATION_n`, privole. Osoba se nalazi po NAME_ID, pa po e-mailu; inače nova (GUEST/OPERA).
 
 ## Uloge (Platform `mikos_roles`)
 
