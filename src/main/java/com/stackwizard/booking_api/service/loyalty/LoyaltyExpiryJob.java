@@ -77,18 +77,19 @@ public class LoyaltyExpiryJob {
             return;
         }
         try {
-            run(LocalDate.now(clock));
+            run(LocalDate.now(clock), null);
         } finally {
             jdbc.queryForObject("select pg_advisory_unlock(?)", Boolean.class, LOCK_KEY);
         }
     }
 
-    public void run(LocalDate today) {
+    /** {@code programId} null = every programme (the nightly run); a single programme for tests and manual re-runs. */
+    public void run(LocalDate today, Long programId) {
         int expired = 0;
         List<Long> ids;
         int progress;
         do {
-            ids = memberRepo.findIdsWithExpiredTier(today, PageRequest.of(0, 500));
+            ids = memberRepo.findIdsWithExpiredTier(today, programId, PageRequest.of(0, 500));
             progress = 0;
             for (Long id : ids) {
                 try {
@@ -103,14 +104,14 @@ public class LoyaltyExpiryJob {
         } while (ids.size() == 500 && progress > 0);
         int rolled = 0;
         do {
-            ids = memberRepo.findIdsWithStaleCounters(today.getYear(), PageRequest.of(0, 500));
+            ids = memberRepo.findIdsWithStaleCounters(today.getYear(), programId, PageRequest.of(0, 500));
             for (Long id : ids) {
                 tx.executeWithoutResult(s -> memberRepo.lockById(id).ifPresent(m ->
                         tierEngine.recompute(m, new LoyaltyTierEngine.Context(LoyaltyTierHistory.Reason.RECOMPUTE, null, "year rollover", false))));
                 rolled++;
             }
         } while (ids.size() == 500);
-        int notified = notifyExpiring(today);
+        int notified = notifyExpiring(today, programId);
         log.info("Loyalty daily: {} statuses expired, {} counters rolled, {} expiry notices", expired, rolled, notified);
     }
 
@@ -146,11 +147,11 @@ public class LoyaltyExpiryJob {
         return true;
     }
 
-    int notifyExpiring(LocalDate today) {
+    int notifyExpiring(LocalDate today, Long programId) {
         int count = 0;
         for (Integer days : EXPIRING_NOTICE_DAYS) {
             LocalDate on = today.plusDays(days);
-            for (LoyaltyMember m : memberRepo.findExpiringOn(List.of(on))) {
+            for (LoyaltyMember m : memberRepo.findExpiringOn(List.of(on), programId)) {
                 Integer sent = tx.execute(s -> {
                     ObjectNode data = events.data();
                     data.put("daysLeft", days);

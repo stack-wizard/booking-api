@@ -57,22 +57,25 @@ public interface LoyaltyMemberRepository extends JpaRepository<LoyaltyMember, Lo
             select m.id from LoyaltyMember m
             where m.status = com.stackwizard.booking_api.model.LoyaltyMember.Status.ACTIVE
               and m.tierValidUntil is not null and m.tierValidUntil < :today
+              and (:programId is null or m.programId = :programId)
             """)
-    List<Long> findIdsWithExpiredTier(LocalDate today, Pageable pageable);
+    List<Long> findIdsWithExpiredTier(LocalDate today, Long programId, Pageable pageable);
 
     @Query("""
             select m.id from LoyaltyMember m
             where m.status = com.stackwizard.booking_api.model.LoyaltyMember.Status.ACTIVE
               and (m.countersYear is null or m.countersYear < :year)
+              and (:programId is null or m.programId = :programId)
             """)
-    List<Long> findIdsWithStaleCounters(int year, Pageable pageable);
+    List<Long> findIdsWithStaleCounters(int year, Long programId, Pageable pageable);
 
     @Query("""
             select m from LoyaltyMember m
             where m.status = com.stackwizard.booking_api.model.LoyaltyMember.Status.ACTIVE
               and m.tierValidUntil in :dates
+              and (:programId is null or m.programId = :programId)
             """)
-    List<LoyaltyMember> findExpiringOn(List<LocalDate> dates);
+    List<LoyaltyMember> findExpiringOn(List<LocalDate> dates, Long programId);
 
     @Query("select max(m.memberNumber) from LoyaltyMember m where m.programId = :programId")
     Optional<String> maxMemberNumber(Long programId);

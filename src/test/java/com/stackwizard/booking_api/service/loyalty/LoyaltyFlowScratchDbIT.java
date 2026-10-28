@@ -231,7 +231,7 @@ class LoyaltyFlowScratchDbIT {
         assertThatThrownBy(() -> jdbc.update("delete from loyalty_ledger where id = ?", entries.get(0).getId())).hasMessageContaining("append-only");
 
         // status expiry: far in the future everything lapses back to the entry tier
-        expiryJob.run(LocalDate.of(2031, 1, 1));
+        expiryJob.run(LocalDate.of(2031, 1, 1), program.getId());
         assertThat(tierCode(reload(marko))).isEqualTo("LIGHT");
         assertThat(eventTypes()).contains("loyalty.tier.downgraded");
     }
