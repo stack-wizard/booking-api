@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -130,6 +131,11 @@ class LoyaltyFlowScratchDbIT {
         assertThat(count("select count(*) from integration_event where tenant_id = ?", org)).as("migration is silent").isEqualTo(eventsBefore);
         // the running number moved past the imported cards
         assertThat(programService.require(org, program.getId()).getMemberNumberNext()).isGreaterThan(Long.parseLong(n2));
+
+        // member search by name, e-mail (identity key) and card number
+        assertThat(memberService.search(org, program.getId(), "Čukon", null, null, null, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(1);
+        assertThat(memberService.search(org, program.getId(), null, "ana." + run + "@example.com", null, null, PageRequest.of(0, 10)).getContent().get(0).memberNumber()).isEqualTo(n2);
+        assertThat(memberService.search(org, program.getId(), null, null, n1, null, PageRequest.of(0, 10)).getTotalElements()).isEqualTo(1);
 
         // re-import of the same file changes nothing
         LoyaltyImportBatch again = applyBatch(importAndValidate(program, LoyaltyImportBatch.ImportType.MEMBERS, null, members, om.createObjectNode()));

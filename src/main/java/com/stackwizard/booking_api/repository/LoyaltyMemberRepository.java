@@ -32,8 +32,8 @@ public interface LoyaltyMemberRepository extends JpaRepository<LoyaltyMember, Lo
               and (:tierId is null or m.assigned_tier_id = :tierId)
               and (:number is null or m.member_number = :number)
               and (:email is null or lower(c.email) = lower(:email)
-                   or exists (select 1 from loyalty_member_identifier i
-                              where i.member_id = m.id and i.type = 'EMAIL' and i.value_norm = lower(:email)))
+                   or exists (select 1 from crm_contact_identifier i
+                              where i.contact_id = m.contact_id and i.type = 'EMAIL' and i.value_norm = lower(:email)))
               and (:q is null or lower(c.first_name || ' ' || c.last_name) like '%' || lower(:q) || '%'
                    or m.member_number = :q)
             order by m.id desc
@@ -45,8 +45,8 @@ public interface LoyaltyMemberRepository extends JpaRepository<LoyaltyMember, Lo
               and (:tierId is null or m.assigned_tier_id = :tierId)
               and (:number is null or m.member_number = :number)
               and (:email is null or lower(c.email) = lower(:email)
-                   or exists (select 1 from loyalty_member_identifier i
-                              where i.member_id = m.id and i.type = 'EMAIL' and i.value_norm = lower(:email)))
+                   or exists (select 1 from crm_contact_identifier i
+                              where i.contact_id = m.contact_id and i.type = 'EMAIL' and i.value_norm = lower(:email)))
               and (:q is null or lower(c.first_name || ' ' || c.last_name) like '%' || lower(:q) || '%'
                    or m.member_number = :q)
             """,
