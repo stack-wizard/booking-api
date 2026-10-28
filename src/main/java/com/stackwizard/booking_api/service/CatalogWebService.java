@@ -16,12 +16,14 @@ public class CatalogWebService {
     private final CatalogViewService viewService;
     private final CatalogQuoteService quoteService;
     private final CatalogItemsInquiryService inquiryService;
+    private final CatalogEventTypeService eventTypeService;
 
     public CatalogWebService(CatalogViewService viewService, CatalogQuoteService quoteService,
-                             CatalogItemsInquiryService inquiryService) {
+                             CatalogItemsInquiryService inquiryService, CatalogEventTypeService eventTypeService) {
         this.viewService = viewService;
         this.quoteService = quoteService;
         this.inquiryService = inquiryService;
+        this.eventTypeService = eventTypeService;
     }
 
     @Transactional(readOnly = true)
@@ -36,7 +38,8 @@ public class CatalogWebService {
     public CatalogDtos.CatalogDetail catalog(String code) {
         ApiClientAccess.requireApiClient();
         SalesCatalog c = viewService.requireActiveByCode(code);
-        return new CatalogDtos.CatalogDetail(c.getCode(), c.getName(), c.getSaleMode(), c.getCurrency());
+        return new CatalogDtos.CatalogDetail(c.getCode(), c.getName(), c.getSaleMode(), c.getCurrency(),
+                eventTypeService.options(c));
     }
 
     @Transactional(readOnly = true)

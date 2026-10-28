@@ -35,7 +35,12 @@ public final class CatalogDtos {
     public record CatalogSummary(String code, String name, SalesCatalog.SaleMode saleMode) {
     }
 
-    public record CatalogDetail(String code, String name, SalesCatalog.SaleMode saleMode, String currency) {
+    /** {@code eventTypes}: what the website lets the guest pick; empty means the catalog asks for none. */
+    public record CatalogDetail(String code, String name, SalesCatalog.SaleMode saleMode, String currency,
+                                List<EventTypeView> eventTypes) {
+    }
+
+    public record EventTypeView(String code, String label) {
     }
 
     public record SeasonView(String code, String name, LocalDate dateFrom, LocalDate dateTo, Season.Status status) {
@@ -128,7 +133,8 @@ public final class CatalogDtos {
     // ------------------------------------------------------------------ admin
 
     public record CatalogInput(String code, String name, SalesCatalog.SaleMode saleMode, Long seasonCalendarId,
-                               ReservationRequest.Type requestType, Long propertyTenantId, Boolean active, String currency) {
+                               ReservationRequest.Type requestType, Long propertyTenantId, Boolean active, String currency,
+                               List<String> eventTypes) {
     }
 
     /** Admin row of a catalog item with the underlying resource / product, image and today's price. */

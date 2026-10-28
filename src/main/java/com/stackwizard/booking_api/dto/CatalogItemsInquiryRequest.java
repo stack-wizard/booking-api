@@ -63,8 +63,9 @@ public class CatalogItemsInquiryRequest {
     @Pattern(regexp = "^[A-Za-z]{2}$", message = "must be an ISO 3166-1 alpha-2 code")
     private String country;
 
-    @NotNull
-    private CatalogInquiryRequest.EventType eventType;
+    /** Code of one of the catalog's event types ({@code GET /api/catalogs/{code}}); required when it offers any. */
+    @Size(max = 40)
+    private String eventType;
 
     @NotNull
     private LocalDate dateFrom;

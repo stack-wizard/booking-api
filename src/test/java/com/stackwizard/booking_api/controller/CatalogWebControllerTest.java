@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.controller;
 import com.stackwizard.booking_api.dto.CatalogDtos;
 import com.stackwizard.booking_api.model.CrmLead;
 import com.stackwizard.booking_api.model.SalesCatalog;
+import com.stackwizard.booking_api.service.CatalogEventTypeService;
 import com.stackwizard.booking_api.service.CatalogItemsInquiryService;
 import com.stackwizard.booking_api.service.CatalogQuoteService;
 import com.stackwizard.booking_api.service.CatalogViewService;
@@ -56,6 +57,7 @@ class CatalogWebControllerTest {
     @Mock CatalogViewService viewService;
     @Mock CatalogQuoteService quoteService;
     @Mock CatalogItemsInquiryService inquiryService;
+    @Mock CatalogEventTypeService eventTypeService;
 
     MockMvc mvc;
     SalesCatalog mice = SalesCatalog.builder().id(1L).code("MICE").name("Meetings").saleMode(SalesCatalog.SaleMode.INQUIRY)
@@ -65,7 +67,7 @@ class CatalogWebControllerTest {
     void setUp() {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
-        mvc = MockMvcBuilders.standaloneSetup(new CatalogWebController(new CatalogWebService(viewService, quoteService, inquiryService)))
+        mvc = MockMvcBuilders.standaloneSetup(new CatalogWebController(new CatalogWebService(viewService, quoteService, inquiryService, eventTypeService)))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .setValidator(validator)
                 .build();

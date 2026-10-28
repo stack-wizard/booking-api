@@ -20,6 +20,7 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
@@ -32,6 +33,7 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Migration check on a scratch copy of a real database (never the dev DB itself). Run with
@@ -56,6 +58,10 @@ class CatalogMigrationScratchDbIT {
     @Autowired CatalogWebService webService;
     @Autowired PackageCatalogService packageCatalogService;
     @Autowired TransactionTemplate tx;
+    @Autowired SalesCatalogService catalogService;
+    @Autowired com.stackwizard.booking_api.repository.SalesCatalogRepository catalogRepo;
+    /** Admin writes need an app user; the scratch run checks the data path, not the roles. */
+    @MockitoBean PricingAccess pricingAccess;
 
     @AfterEach
     void clear() {
@@ -202,5 +208,50 @@ class CatalogMigrationScratchDbIT {
                 .containsExactlyElementsOf(new ArrayList<>(mice.stream().map(CatalogDtos.ItemView::name).filter(Objects::nonNull).toList()));
         BigDecimal ppp = legacyPackages.get(0).pricePerPerson();
         System.out.println("[scratch] /api/catalog/packages " + legacyPackages.get(0).name() + " " + ppp);
+    }
+
+    /** Admin picks event types (JPA element collection), the web shows active ones, the inquiry accepts only those. */
+    @Test
+    void catalogEventTypesEndToEnd() {
+        TenantContext.setTenantId(1L);
+        Long miceId = jdbc.queryForObject("select id from sales_catalog where tenant_id = 1 and code = 'MICE'", Long.class);
+        com.stackwizard.booking_api.model.SalesCatalog mice = catalogRepo.findById(miceId).orElseThrow();
+        CatalogDtos.CatalogInput input = new CatalogDtos.CatalogInput(null, mice.getName(), mice.getSaleMode(), mice.getSeasonCalendarId(),
+                mice.getRequestType(), null, true, mice.getCurrency(), List.of("party", "CONFERENCE", "PARTY", "WEDDING"));
+        catalogService.update(miceId, input);
+        System.out.println("[scratch] event type rows " + jdbc.queryForList("select * from sales_catalog_event_type where catalog_id = ? order by display_order", miceId));
+        assertThat(jdbc.queryForList("select code from sales_catalog_event_type where catalog_id = ? order by display_order", String.class, miceId))
+                .containsExactly("PARTY", "CONFERENCE", "WEDDING");
+        assertThatThrownBy(() -> catalogService.update(miceId, new CatalogDtos.CatalogInput(null, mice.getName(), mice.getSaleMode(),
+                mice.getSeasonCalendarId(), mice.getRequestType(), null, true, mice.getCurrency(), List.of("NOPE"))))
+                .hasMessageContaining("eventTypes: NOPE is not an active event type");
+        // reorder rewrites the ordered rows
+        catalogService.update(miceId, new CatalogDtos.CatalogInput(null, mice.getName(), mice.getSaleMode(), mice.getSeasonCalendarId(),
+                mice.getRequestType(), null, true, mice.getCurrency(), List.of("WEDDING", "CONFERENCE", "PARTY")));
+        assertThat(jdbc.queryForList("select code from sales_catalog_event_type where catalog_id = ? order by display_order", String.class, miceId))
+                .containsExactly("WEDDING", "CONFERENCE", "PARTY");
+        jdbc.update("update crm_lookup set active = false where tenant_id = 1 and kind = 'EVENT_TYPE' and code = 'WEDDING'");
+
+        Jwt jwt = new Jwt("t", Instant.now(), Instant.now().plusSeconds(60), Map.of("alg", "none"), Map.of("token_use", "m2m"));
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(jwt, List.of(new SimpleGrantedAuthority("ROLE_API"))));
+        CatalogDtos.CatalogDetail detail = webService.catalog("MICE");
+        System.out.println("[scratch] /api/catalogs/MICE " + detail);
+        assertThat(detail.eventTypes()).extracting(CatalogDtos.EventTypeView::code).containsExactly("CONFERENCE", "PARTY");
+
+        Long itemId = webService.items("MICE", null, null, null, null).get(0).itemId();
+        LocalDate day = LocalDate.now().plusMonths(2);
+        java.util.function.Function<String, com.stackwizard.booking_api.dto.CatalogItemsInquiryRequest> inquiry = type ->
+                com.stackwizard.booking_api.dto.CatalogItemsInquiryRequest.builder()
+                        .companyName("Scratch d.o.o.").firstName("Ana").lastName("Test").email("ana@example.test")
+                        .eventType(type).dateFrom(day).dateTo(day).attendees(20)
+                        .items(List.of(com.stackwizard.booking_api.dto.CatalogItemsInquiryRequest.Item.builder().itemId(itemId).build()))
+                        .cmsInquiryId("scratch-" + type + "-" + System.nanoTime()).build();
+        assertThatThrownBy(() -> webService.inquiry("MICE", inquiry.apply("WEDDING")))
+                .hasMessageContaining("eventType WEDDING is not offered by catalog MICE");
+        CatalogItemsInquiryService.Result result = webService.inquiry("MICE", inquiry.apply("party"));
+        System.out.println("[scratch] lead " + result.lead().getId() + " attrs.eventType=" + result.lead().getAttrs().get("eventType")
+                + "\n" + result.lead().getDescription());
+        assertThat(result.lead().getAttrs().get("eventType").asText()).isEqualTo("PARTY");
+        assertThat(result.lead().getDescription()).contains("Event type: Party\n");
     }
 }

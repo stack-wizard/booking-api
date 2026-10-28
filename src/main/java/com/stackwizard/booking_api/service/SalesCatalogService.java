@@ -197,6 +197,9 @@ public class SalesCatalogService {
         if (input.active() != null) {
             catalog.setActive(input.active());
         }
+        if (input.eventTypes() != null) {
+            catalog.setEventTypes(eventTypeCodes(catalog, input.eventTypes()));
+        }
         if (input.seasonCalendarId() != null) {
             SeasonCalendar calendar = calendarRepo.findByIdAndTenantId(input.seasonCalendarId(), catalog.getTenantId())
                     .orElseThrow(() -> new IllegalArgumentException("seasonCalendarId: season calendar "
@@ -209,6 +212,32 @@ public class SalesCatalogService {
         } else {
             catalog.setSeasonCalendarId(null);
         }
+    }
+
+    /**
+     * Canonical EVENT_TYPE codes in the given order, without duplicates. New codes must be active in the chain's
+     * code list; codes the catalog already has are kept even when deactivated since (the website just skips them).
+     */
+    private List<String> eventTypeCodes(SalesCatalog catalog, List<String> values) {
+        Set<String> previous = new HashSet<>();
+        catalog.getEventTypes().forEach(code -> previous.add(code.toUpperCase(Locale.ROOT)));
+        LinkedHashSet<String> codes = new LinkedHashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            String trimmed = value.trim();
+            String kept = previous.contains(trimmed.toUpperCase(Locale.ROOT)) ? trimmed.toUpperCase(Locale.ROOT) : null;
+            String code;
+            try {
+                code = lookupService.requireCode(catalog.getTenantId(), CrmLookup.Kind.EVENT_TYPE, trimmed, kept);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("eventTypes: " + trimmed
+                        + " is not an active event type (Settings → Code lists → Event type)");
+            }
+            codes.add(code.toUpperCase(Locale.ROOT));
+        }
+        return new ArrayList<>(codes);
     }
 
     // ------------------------------------------------------------------ items

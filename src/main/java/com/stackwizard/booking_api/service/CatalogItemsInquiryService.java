@@ -37,14 +37,17 @@ public class CatalogItemsInquiryService {
     private final CrmLeadRepository leadRepo;
     private final CatalogQuoteService quoteService;
     private final CatalogViewService viewService;
+    private final CatalogEventTypeService eventTypeService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public CatalogItemsInquiryService(CrmLeadService leadService, CrmLeadRepository leadRepo,
-                                      CatalogQuoteService quoteService, CatalogViewService viewService) {
+                                      CatalogQuoteService quoteService, CatalogViewService viewService,
+                                      CatalogEventTypeService eventTypeService) {
         this.leadService = leadService;
         this.leadRepo = leadRepo;
         this.quoteService = quoteService;
         this.viewService = viewService;
+        this.eventTypeService = eventTypeService;
     }
 
     @Transactional
@@ -63,6 +66,7 @@ public class CatalogItemsInquiryService {
                 return new Result(existing.get(), false, null);
             }
         }
+        CatalogDtos.EventTypeView eventType = eventTypeService.requireForInquiry(catalog, request.getEventType()).orElse(null);
         List<CatalogDtos.QuoteItem> quoteItems = request.getItems().stream()
                 .map(i -> new CatalogDtos.QuoteItem(i.getItemId(), i.getQuantity()))
                 .toList();
@@ -81,18 +85,21 @@ public class CatalogItemsInquiryService {
                 .source(CatalogInquiryService.SOURCE)
                 .externalRef(externalRef)
                 .status(CrmLead.Status.NEW)
-                .description(describe(catalog, request, quote))
-                .attrs(attrs(catalog, request, quote, items))
+                .description(describe(catalog, request, eventType, quote))
+                .attrs(attrs(catalog, request, eventType, quote, items))
                 .build();
         return new Result(leadService.createFromChannel(lead), true, quote);
     }
 
-    ObjectNode attrs(SalesCatalog catalog, CatalogItemsInquiryRequest r, CatalogDtos.QuoteResponse quote, Map<Long, CatalogItem> items) {
+    ObjectNode attrs(SalesCatalog catalog, CatalogItemsInquiryRequest r, CatalogDtos.EventTypeView eventType,
+                     CatalogDtos.QuoteResponse quote, Map<Long, CatalogItem> items) {
         ObjectNode attrs = objectMapper.createObjectNode();
         attrs.put("channel", CatalogInquiryService.CHANNEL);
         attrs.put("inquiryType", catalog.getCode());
         attrs.put("catalog", catalog.getCode());
-        attrs.put("eventType", r.getEventType().name());
+        if (eventType != null) {
+            attrs.put("eventType", eventType.code());
+        }
         attrs.put("startDate", r.getDateFrom().toString());
         attrs.put("endDate", r.getDateTo().toString());
         attrs.put("pax", r.getAttendees());
@@ -109,7 +116,10 @@ public class CatalogItemsInquiryService {
         n.put("email", r.getEmail());
         putIfText(n, "phone", r.getPhone());
         putIfText(n, "country", r.getCountry() == null ? null : r.getCountry().toUpperCase(Locale.ROOT));
-        n.put("eventType", r.getEventType().name());
+        if (eventType != null) {
+            n.put("eventType", eventType.code());
+            n.put("eventTypeLabel", eventType.label());
+        }
         n.put("dateFrom", r.getDateFrom().toString());
         n.put("dateTo", r.getDateTo().toString());
         n.put("attendees", r.getAttendees());
@@ -181,10 +191,17 @@ public class CatalogItemsInquiryService {
         return q;
     }
 
-    String describe(SalesCatalog catalog, CatalogItemsInquiryRequest r, CatalogDtos.QuoteResponse quote) {
+    String describe(SalesCatalog catalog, CatalogItemsInquiryRequest r, CatalogDtos.EventTypeView eventType,
+                    CatalogDtos.QuoteResponse quote) {
         StringBuilder sb = new StringBuilder();
         sb.append("Website inquiry (").append(catalog.getName()).append(")\n");
-        sb.append("Event type: ").append(r.getEventType().name()).append('\n');
+        if (eventType != null) {
+            sb.append("Event type: ").append(eventType.label());
+            if (!eventType.label().equalsIgnoreCase(eventType.code())) {
+                sb.append(" (").append(eventType.code()).append(')');
+            }
+            sb.append('\n');
+        }
         long days = ChronoUnit.DAYS.between(r.getDateFrom(), r.getDateTo()) + 1;
         sb.append("Dates: ").append(r.getDateFrom()).append(" - ").append(r.getDateTo())
                 .append(" (").append(days).append(days == 1 ? " day" : " days");

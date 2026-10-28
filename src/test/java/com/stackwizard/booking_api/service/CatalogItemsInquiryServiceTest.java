@@ -2,13 +2,14 @@ package com.stackwizard.booking_api.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.stackwizard.booking_api.dto.CatalogDtos;
-import com.stackwizard.booking_api.dto.CatalogInquiryRequest;
 import com.stackwizard.booking_api.dto.CatalogItemsInquiryRequest;
 import com.stackwizard.booking_api.model.CatalogItem;
 import com.stackwizard.booking_api.model.CrmLead;
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.PriceProfileDate;
 import com.stackwizard.booking_api.model.SalesCatalog;
 import com.stackwizard.booking_api.repository.CrmLeadRepository;
+import com.stackwizard.booking_api.repository.CrmLookupRepository;
 import com.stackwizard.booking_api.security.TenantContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,15 +42,20 @@ class CatalogItemsInquiryServiceTest {
     @Mock CrmLeadRepository leadRepo;
     @Mock CatalogQuoteService quoteService;
     @Mock CatalogViewService viewService;
+    @Mock CrmLookupRepository lookupRepo;
 
     CatalogItemsInquiryService service;
     SalesCatalog mice = SalesCatalog.builder().id(1L).tenantId(2L).code("MICE").name("Meetings")
-            .saleMode(SalesCatalog.SaleMode.INQUIRY).currency("EUR").build();
+            .saleMode(SalesCatalog.SaleMode.INQUIRY).currency("EUR")
+            .eventTypes(new java.util.ArrayList<>(List.of("CONFERENCE", "PARTY", "WEDDING"))).build();
 
     @BeforeEach
     void setUp() {
         TenantContext.setScope(2L, null);
-        service = new CatalogItemsInquiryService(leadService, leadRepo, quoteService, viewService);
+        service = new CatalogItemsInquiryService(leadService, leadRepo, quoteService, viewService,
+                new CatalogEventTypeService(lookupRepo));
+        when(lookupRepo.findByTenantIdAndKindOrderByDisplayOrderAscIdAsc(2L, CrmLookup.Kind.EVENT_TYPE)).thenReturn(List.of(
+                lookup("CONFERENCE", "Conference", true), lookup("PARTY", "Party", true), lookup("WEDDING", "Wedding", false)));
         CatalogViewService.Offer offer = mock(CatalogViewService.Offer.class);
         when(offer.items()).thenReturn(List.of(CatalogItem.builder().id(41L).itemKind(CatalogItem.Kind.RESOURCE)
                 .resourceId(1386L).itemGroup("HALL").build()));
@@ -71,10 +77,14 @@ class CatalogItemsInquiryServiceTest {
         TenantContext.clear();
     }
 
+    static CrmLookup lookup(String code, String label, boolean active) {
+        return CrmLookup.builder().tenantId(2L).kind(CrmLookup.Kind.EVENT_TYPE).code(code).label(label).active(active).build();
+    }
+
     static CatalogItemsInquiryRequest request(String cmsId) {
         return CatalogItemsInquiryRequest.builder()
                 .companyName("Acme d.o.o.").firstName("Ana").lastName("Horvat").email("ana@acme.hr").country("hr")
-                .eventType(CatalogInquiryRequest.EventType.CONFERENCE)
+                .eventType("conference")
                 .dateFrom(LocalDate.of(2027, 5, 13)).dateTo(LocalDate.of(2027, 5, 13)).attendees(60)
                 .items(List.of(CatalogItemsInquiryRequest.Item.builder().itemId(41L).setupStyle("THEATER").build()))
                 .notes("Need a stage").cmsInquiryId(cmsId).build();
@@ -97,11 +107,14 @@ class CatalogItemsInquiryServiceTest {
                 .contains("Website inquiry (Meetings)")
                 .contains("- Galija, 2027-05-13: 1 DAY @ 1800 EUR = 1800 EUR")
                 .contains("Estimated total: 1800 EUR")
-                .contains("Setup: THEATER");
+                .contains("Setup: THEATER")
+                .contains("Event type: Conference\n");
         JsonNode attrs = lead.getAttrs();
         assertThat(attrs.get("inquiryType").asText()).isEqualTo("MICE");
         assertThat(attrs.get("estimatedValue").decimalValue()).isEqualByComparingTo("1800");
         assertThat(attrs.get("setupStyle").asText()).isEqualTo("THEATER");
+        assertThat(attrs.get("eventType").asText()).isEqualTo("CONFERENCE");
+        assertThat(attrs.get("inquiry").get("eventTypeLabel").asText()).isEqualTo("Conference");
         JsonNode inquiry = attrs.get("inquiry");
         assertThat(inquiry.get("items").get(0).get("resourceId").asLong()).isEqualTo(1386L);
         assertThat(inquiry.get("items").get(0).get("group").asText()).isEqualTo("HALL");
@@ -128,5 +141,32 @@ class CatalogItemsInquiryServiceTest {
         SalesCatalog beach = SalesCatalog.builder().code("BEACH").saleMode(SalesCatalog.SaleMode.INSTANT).build();
         assertThatThrownBy(() -> service.submit(beach, request(null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("INSTANT");
+    }
+
+    @Test
+    void eventTypeMustBeOneTheCatalogOffers() {
+        when(leadRepo.findByTenantIdAndSourceAndExternalRef(any(), any(), any())).thenReturn(Optional.empty());
+        CatalogItemsInquiryRequest missing = request("cms-2");
+        missing.setEventType(null);
+        assertThatThrownBy(() -> service.submit(mice, missing))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("eventType is required; one of CONFERENCE, PARTY");
+        CatalogItemsInquiryRequest inactive = request("cms-3");
+        inactive.setEventType("WEDDING");
+        assertThatThrownBy(() -> service.submit(mice, inactive))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("eventType WEDDING is not offered by catalog MICE");
+        verify(leadService, never()).createFromChannel(any());
+    }
+
+    @Test
+    void catalogWithoutEventTypesIgnoresTheField() {
+        mice.setEventTypes(new java.util.ArrayList<>());
+        when(leadRepo.findByTenantIdAndSourceAndExternalRef(any(), any(), any())).thenReturn(Optional.empty());
+
+        service.submit(mice, request("cms-4"));
+
+        ArgumentCaptor<CrmLead> saved = ArgumentCaptor.forClass(CrmLead.class);
+        verify(leadService).createFromChannel(saved.capture());
+        assertThat(saved.getValue().getAttrs().has("eventType")).isFalse();
+        assertThat(saved.getValue().getDescription()).doesNotContain("Event type");
     }
 }

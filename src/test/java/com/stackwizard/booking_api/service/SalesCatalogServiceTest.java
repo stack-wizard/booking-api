@@ -2,6 +2,7 @@ package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.dto.CatalogDtos;
 import com.stackwizard.booking_api.model.CatalogItem;
+import com.stackwizard.booking_api.model.CrmLookup;
 import com.stackwizard.booking_api.model.Product;
 import com.stackwizard.booking_api.model.ReservationRequest;
 import com.stackwizard.booking_api.model.Resource;
@@ -129,16 +130,43 @@ class SalesCatalogServiceTest {
     void createRejectsDuplicateCodeAndUpdateKeepsCode() {
         when(catalogRepo.findByTenantIdAndCodeIgnoreCase(2L, "MICE")).thenReturn(List.of(mice));
         assertThatThrownBy(() -> service.create(new CatalogDtos.CatalogInput("mice", "Again", SalesCatalog.SaleMode.INQUIRY,
-                null, null, null, null, null)))
+                null, null, null, null, null, null)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("MICE already exists");
         assertThatThrownBy(() -> service.update(1L, new CatalogDtos.CatalogInput("WEDDING", "x", SalesCatalog.SaleMode.INQUIRY,
-                null, null, null, null, null)))
+                null, null, null, null, null, null)))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("code cannot be changed");
         SalesCatalog created = service.create(new CatalogDtos.CatalogInput("weddings", "Weddings", SalesCatalog.SaleMode.INQUIRY,
-                null, null, null, null, null));
+                null, null, null, null, null, null));
         assertThat(created.getCode()).isEqualTo("WEDDINGS");
         assertThat(created.getRequestType()).isEqualTo(ReservationRequest.Type.EXTERNAL);
         assertThat(created.getCurrency()).isEqualTo("EUR");
+    }
+
+    @Test
+    void eventTypesAreCanonicalActiveCodesInGivenOrder() {
+        when(lookupService.requireCode(eq(2L), eq(CrmLookup.Kind.EVENT_TYPE), any(), any())).thenAnswer(inv -> {
+            String value = ((String) inv.getArgument(2)).trim().toUpperCase();
+            if (value.equals(inv.getArgument(3))) {
+                return value;
+            }
+            if (!List.of("CONFERENCE", "PARTY").contains(value)) {
+                throw new IllegalArgumentException("Unknown event type: " + value);
+            }
+            return value;
+        });
+        mice.setEventTypes(new java.util.ArrayList<>(List.of("WEDDING")));
+
+        SalesCatalog updated = service.update(1L, new CatalogDtos.CatalogInput(null, "MICE", SalesCatalog.SaleMode.INQUIRY,
+                null, null, null, null, null, List.of("party", " CONFERENCE", "PARTY", "", "WEDDING")));
+
+        // WEDDING is no longer active but stays because the catalog already had it.
+        assertThat(updated.getEventTypes()).containsExactly("PARTY", "CONFERENCE", "WEDDING");
+        assertThatThrownBy(() -> service.update(1L, new CatalogDtos.CatalogInput(null, "MICE", SalesCatalog.SaleMode.INQUIRY,
+                null, null, null, null, null, List.of("GALA"))))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("eventTypes: GALA is not an active event type");
+        // null leaves the list alone (older clients).
+        assertThat(service.update(1L, new CatalogDtos.CatalogInput(null, "MICE", SalesCatalog.SaleMode.INQUIRY,
+                null, null, null, null, null, null)).getEventTypes()).containsExactly("PARTY", "CONFERENCE", "WEDDING");
     }
 
     @Test
