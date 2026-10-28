@@ -1,0 +1,14 @@
+{ "tiers": [
+    { "code": "LIGHT", "name": "Light", "rank": 0, "threshold": 0 },
+    { "code": "SILVER", "name": "Silver", "rank": 1, "threshold": 10 },
+    { "code": "GOLD", "name": "Gold", "rank": 2, "threshold": 31 },
+    { "code": "PLATINUM", "name": "Platinum", "rank": 3, "threshold": 61 } ],
+  "steps": [
+    { "stepOrder": 1, "ruleCode": "MEMBER_MATCH", "rejectCode": "NO_MATCH" },
+    { "stepOrder": 2, "ruleCode": "CHANNEL", "rejectCode": "OTA_CHANNEL" },
+    { "stepOrder": 3, "ruleCode": "HOLDER", "rejectCode": "NOT_HOLDER" },
+    { "stepOrder": 4, "ruleCode": "ACTIVATION", "rejectCode": "PRE_ACTIVATION" },
+    { "stepOrder": 5, "ruleCode": "WALLET", "rejectCode": "NO_WALLET" },
+    { "stepOrder": 6, "ruleCode": "STAY_COMPLETED", "rejectCode": "NOT_STAYED" },
+    { "stepOrder": 7, "ruleCode": "EXCLUSIVITY_FLAG", "rejectCode": "RADISSON" },
+    { "stepOrder": 8, "ruleCode": "UNIQUE_PER_DATE", "rejectCode": "DUPLICATE" } ] }

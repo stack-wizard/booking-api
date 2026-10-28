@@ -6,7 +6,7 @@ import java.util.Set;
 /**
  * Which tenant owns a table's rows. Every row has a single {@code tenant_id}; this is the level of that id.
  * <ul>
- *   <li>{@link #ORG} — hotel chain (Platform parent): shared catalog, CRM, bookings, sales documents</li>
+ *   <li>{@link #ORG} — hotel chain (Platform parent): shared catalog, CRM, bookings, sales documents, loyalty, outbox</li>
  *   <li>{@link #PROPERTY} — hotel (Platform child): capacity and operations</li>
  *   <li>{@link #USER} — people belong to the chain and work in several hotels</li>
  *   <li>{@link #SYSTEM} — tenant registry itself</li>
@@ -32,7 +32,11 @@ public enum TenantLevel {
             "crm_custom_field_definition", "crm_lead", "crm_lookup", "crm_opportunity", "crm_outcome_reason",
             "crm_pipeline", "crm_pipeline_stage", "crm_reassignment", "crm_segment", "crm_stage_requirement",
             "crm_stage_transition", "crm_team", "crm_team_member", "crm_team_property",
-            "season_calendar", "season", "season_operating", "sales_catalog", "catalog_item");
+            "season_calendar", "season", "season_operating", "sales_catalog", "catalog_item",
+            "loyalty_program", "loyalty_rule_set", "loyalty_tier", "loyalty_qualification_step", "loyalty_channel_map",
+            "loyalty_member", "loyalty_member_identifier", "loyalty_consent", "loyalty_tier_history", "loyalty_reservation",
+            "loyalty_reservation_evaluation", "loyalty_ledger", "loyalty_import_batch", "loyalty_import_row",
+            "integration_event", "event_subscription", "event_delivery");
 
     public static final Set<String> PROPERTY_TABLES = Set.of(
             "allocation", "api_token", "booking_calendar", "cancellation_policy", "cancellation_request",

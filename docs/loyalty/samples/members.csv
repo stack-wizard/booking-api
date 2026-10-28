@@ -1,0 +1,7 @@
+Digital Card Number;First Name;Last Name;E-mail;Level;Realized room nights;Nights this year;Status valid until;Last check-out;Wallet;Newsletter;Country;Language;Activation date
+200004133;Marko;Cukon;marko.cukon@example.com;Platinum;73;5;2027-06-30;2025-06-30;da;da;HR;hr;2024-01-01
+200004134;Ana;Horvat;ana.horvat@example.com;Silver;12;0;2027-01-15;2025-01-15;ne;ne;HR;hr;2024-01-01
+200004135;Hans;Müller;hans.mueller@example.com;Gold;35;8;2027-09-10;2025-09-10;da;da;AT;de;2024-01-01
+200004136;Iva;Kovač;iva.kovac@example.com;Light;3;3;2028-08-20;2026-08-20;da;ne;HR;hr;2024-01-01
+200004137;Bad;Email;nije-email;Light;1;;;;;;;;
+200004133;Duplikat;Broja;dup@example.com;Light;1;;;;;;;;2024-01-01

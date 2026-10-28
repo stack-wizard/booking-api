@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service;
 
 import com.stackwizard.booking_api.model.TenantIntegrationConfig;
+import com.stackwizard.booking_api.service.integration.EmailDeliveryPolicy;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -18,12 +19,19 @@ public class TenantEmailConfigResolver {
             "Please arrive at the reception desk upon arrival and present this confirmation.";
 
     private final TenantIntegrationConfigService tenantIntegrationConfigService;
+    private final EmailDeliveryPolicy emailDeliveryPolicy;
 
-    public TenantEmailConfigResolver(TenantIntegrationConfigService tenantIntegrationConfigService) {
+    public TenantEmailConfigResolver(TenantIntegrationConfigService tenantIntegrationConfigService,
+                                     EmailDeliveryPolicy emailDeliveryPolicy) {
         this.tenantIntegrationConfigService = tenantIntegrationConfigService;
+        this.emailDeliveryPolicy = emailDeliveryPolicy;
     }
 
+    /** Empty when e-mail is off for the tenant, including when a client's own service sends guest e-mails. */
     public Optional<EmailResolvedConfig> findActive(Long tenantId) {
+        if (emailDeliveryPolicy.isExternal(tenantId)) {
+            return Optional.empty();
+        }
         Optional<TenantIntegrationConfig> config = tenantIntegrationConfigService
                 .findByTenantIdAndTypeAndProvider(tenantId, INTEGRATION_TYPE_BOOKING, PROVIDER);
         if (config.isEmpty() || !Boolean.TRUE.equals(config.get().getActive())) {

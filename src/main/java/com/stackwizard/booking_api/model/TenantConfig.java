@@ -33,6 +33,11 @@ public class TenantConfig {
     @Column(name = "manual_review_ttl_minutes", nullable = false)
     private Integer manualReviewTtlMinutes;
 
+    /** {@code INTERNAL} or {@code EXTERNAL_EVENTS}; see {@link com.stackwizard.booking_api.service.integration.EmailDeliveryPolicy}. */
+    @Builder.Default
+    @Column(name = "email_delivery", nullable = false)
+    private String emailDelivery = "INTERNAL";
+
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private OffsetDateTime createdAt;
 }
