@@ -158,7 +158,7 @@ public class LoyaltyImportService {
     /** Size of the uploaded file, empty when nothing has been uploaded yet. */
     public java.util.Optional<Long> fileSize(LoyaltyImportBatch batch) {
         if (storageMode == Storage.DB) {
-            return fileRepo.contentLength(batch.getId()).map(Integer::longValue);
+            return fileRepo.contentLength(batch.getId());
         }
         return storage.size(batch.getS3Key());
     }

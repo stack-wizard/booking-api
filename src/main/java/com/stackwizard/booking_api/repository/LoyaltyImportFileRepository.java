@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.Optional;
 
 public interface LoyaltyImportFileRepository extends JpaRepository<LoyaltyImportFile, Long> {
-    @Query("select length(f.content) from LoyaltyImportFile f where f.batchId = :batchId")
-    Optional<Integer> contentLength(Long batchId);
+    /** Native: HQL has no length() for binary columns. */
+    @Query(value = "select octet_length(content) from loyalty_import_file where batch_id = :batchId", nativeQuery = true)
+    Optional<Long> contentLength(Long batchId);
 }
