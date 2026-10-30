@@ -1,6 +1,7 @@
 package com.stackwizard.booking_api.service.loyalty.imports;
 
 import com.stackwizard.booking_api.config.MediaS3Properties;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -15,7 +16,11 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.Optional;
 
-/** Private S3 area for import files ({@code <app-alias>/loyalty-imports/...}, never under the public prefix). */
+/**
+ * S3 area for import files: {@code <loyalty.import.s3-key-prefix>/<tenant>/<batch>.csv}. The default
+ * ({@code <app-alias>/loyalty-imports}) is a private prefix; an environment whose IAM policy only allows the media
+ * prefix can point it there (see application-dev.yaml) until the policy is widened.
+ */
 @Component
 public class ImportStorage {
     static final Duration UPLOAD_URL_TTL = Duration.ofMinutes(30);
@@ -23,15 +28,19 @@ public class ImportStorage {
     private final S3Client s3Client;
     private final S3Presigner presigner;
     private final MediaS3Properties props;
+    private final String prefix;
 
-    public ImportStorage(S3Client s3Client, S3Presigner presigner, MediaS3Properties props) {
+    public ImportStorage(S3Client s3Client, S3Presigner presigner, MediaS3Properties props,
+                         @Value("${loyalty.import.s3-key-prefix:}") String keyPrefix) {
         this.s3Client = s3Client;
         this.presigner = presigner;
         this.props = props;
+        String configured = keyPrefix == null ? "" : keyPrefix.replaceAll("^/+|/+$", "");
+        this.prefix = configured.isEmpty() ? props.getAppAlias() + "/loyalty-imports" : configured;
     }
 
     public String keyFor(Long tenantId, Long batchId) {
-        return props.getAppAlias() + "/loyalty-imports/" + tenantId + "/" + batchId + ".csv";
+        return prefix + "/" + tenantId + "/" + batchId + ".csv";
     }
 
     public String presignPut(String key) {
