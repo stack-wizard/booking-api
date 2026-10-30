@@ -43,7 +43,9 @@ e-mail (primarni, pa sekundarni) → telefon; ručno iz match queuea. Noćenja s
 ## Importi (CSV UTF-8, `,` `;` ili tab)
 
 1. `POST /api/loyalty/imports` `{programId (samo MEMBERS), importType: MEMBERS|STAYS|PROFILES, propertyTenantId (za STAYS), fileName}`
-   → `uploadUrl` (presigned S3 PUT, 30 min). Klijent šalje datoteku izravno na S3.
+   → `uploadUrl` (presigned S3 PUT, 30 min; velike datoteke idu izravno na S3) i `uploadPath`
+   (`POST …/{id}/file`, multipart kroz API; male datoteke ili kad klijent ne vidi S3). Gdje S3 nije dostupan,
+   `loyalty.import.storage=DB` drži datoteku u bazi (`loyalty_import_file`) do kraja obrade; tada je `uploadUrl` null.
 2. `POST /api/loyalty/imports/{id}/start` `{columnMapping?, options?}` → worker (bilo koja instanca) učita i validira.
 3. `GET /api/loyalty/imports/{id}` (napredak) · `GET …/errors.csv` (odbijeni redovi).
 4. `POST …/apply` → primjena red po red (svaki u svojoj transakciji), checkpoint `last_applied_row`.

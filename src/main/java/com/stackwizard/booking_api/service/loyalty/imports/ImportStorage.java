@@ -3,6 +3,7 @@ package com.stackwizard.booking_api.service.loyalty.imports;
 import com.stackwizard.booking_api.config.MediaS3Properties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
@@ -54,6 +55,16 @@ public class ImportStorage {
                         .putObjectRequest(put)
                         .build())
                 .url().toString();
+    }
+
+    /** Server-side upload for a client that cannot (or should not) PUT to the presigned URL itself. */
+    public void put(String key, byte[] content, String contentType) {
+        s3Client.putObject(PutObjectRequest.builder()
+                        .bucket(props.getBucket())
+                        .key(key)
+                        .contentType(contentType == null ? "text/csv" : contentType)
+                        .build(),
+                RequestBody.fromBytes(content));
     }
 
     public Optional<Long> size(String key) {

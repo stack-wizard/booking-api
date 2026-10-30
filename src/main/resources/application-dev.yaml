@@ -16,8 +16,7 @@ spring:
 
 loyalty:
   import:
-    # TEMPORARY: the dev IAM user (booking-cms-dev-user) may only write the media area of booking-cms-media
-    # (public/booking-api/tenants/<tenant>/...), so import files land there as <tenant>/<batch>.csv. Move back to
-    # the private default (booking-api/loyalty-imports) once the policy allows it. Fine for sample data only;
-    # never import a client's real export under a public prefix.
-    s3-key-prefix: ${LOYALTY_IMPORT_S3_KEY_PREFIX:public/booking-api/tenants}
+    # TEMPORARY: the dev API's IAM user (booking-cms-dev-user) cannot write to booking-cms-media at all (media
+    # uploads fail too), so import files are kept in the database and uploaded through the API (multipart, max
+    # spring.servlet.multipart.max-file-size). Switch back to S3 once the policy is fixed.
+    storage: ${LOYALTY_IMPORT_STORAGE:DB}

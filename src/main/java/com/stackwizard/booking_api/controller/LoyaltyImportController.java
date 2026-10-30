@@ -16,12 +16,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * CSV imports: POST creates the batch and returns a presigned S3 PUT URL; the client uploads the file there,
+ * CSV imports: POST creates the batch and returns a presigned S3 PUT URL (large files go straight to S3) and an
+ * API upload path (multipart, for small files or when the client cannot reach S3); the client uploads the file,
  * then calls /start. Progress is polled on GET; a VALIDATED batch is applied with /apply.
  */
 @RestController
@@ -52,6 +54,12 @@ public class LoyaltyImportController {
         access.require(LoyaltyPermission.IMPORT);
         return importService.create(TenantResolver.requireOrgTenantId(), body.programId(), body.importType(),
                 body.propertyTenantId(), body.fileName(), body.fileSize(), access.currentUserId());
+    }
+
+    @PostMapping(value = "/{batchId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public LoyaltyImportBatch uploadFile(@PathVariable Long batchId, @RequestParam("file") MultipartFile file) throws java.io.IOException {
+        access.require(LoyaltyPermission.IMPORT);
+        return importService.uploadFile(TenantResolver.requireOrgTenantId(), batchId, file.getBytes(), file.getContentType());
     }
 
     @GetMapping("/{batchId}")

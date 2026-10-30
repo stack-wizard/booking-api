@@ -14,8 +14,12 @@ import_file() { # type file [propertyTenantId]
   P=$(pid); PROP=${3:-null}; [ "$1" = "MEMBERS" ] || P=null
   R=$(j -X POST "$API/api/loyalty/imports" -d "{\"programId\":$P,\"importType\":\"$1\",\"propertyTenantId\":$PROP,\"fileName\":\"$(basename "$2")\"}")
   ID=$(echo "$R" | python3 -c 'import sys,json; print(json.load(sys.stdin)["batch"]["id"])')
-  URL=$(echo "$R" | python3 -c 'import sys,json; print(json.load(sys.stdin)["uploadUrl"])')
-  curl -sf -X PUT -H 'Content-Type: text/csv' --data-binary @"$2" "$URL" >/dev/null
+  URL=$(echo "$R" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("uploadUrl") or "")')
+  if [ -n "$URL" ]; then
+    curl -sf -X PUT -H 'Content-Type: text/csv' --data-binary @"$2" "$URL" >/dev/null
+  else # S3 nije dostupan: datoteka ide kroz API (multipart)
+    curl -sf -H "$H_AUTH" -H "$H_TEN" -F "file=@$2;type=text/csv" "$API/api/loyalty/imports/$ID/file" >/dev/null
+  fi
   OPTS='{"options":{"asOf":"2026-10-01"}}'
   j -X POST "$API/api/loyalty/imports/$ID/start" -d "$OPTS" >/dev/null
   wait_status "$ID" VALIDATED

@@ -3,15 +3,21 @@ package com.stackwizard.booking_api.service.loyalty.imports;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stackwizard.booking_api.model.LoyaltyImportBatch;
+import com.stackwizard.booking_api.model.LoyaltyImportFile;
 import com.stackwizard.booking_api.model.LoyaltyImportRow;
 import com.stackwizard.booking_api.repository.LoyaltyImportBatchRepository;
+import com.stackwizard.booking_api.repository.LoyaltyImportFileRepository;
 import com.stackwizard.booking_api.repository.LoyaltyImportRowRepository;
 import com.stackwizard.booking_api.repository.PlatformTenantMappingRepository;
 import com.stackwizard.booking_api.service.loyalty.LoyaltyProgramService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.StringWriter;
 import java.time.OffsetDateTime;
 import java.util.EnumMap;
@@ -34,6 +40,8 @@ public class LoyaltyImportService {
     private final PlatformTenantMappingRepository mappingRepo;
     private final LoyaltyProgramService programService;
     private final ImportStorage storage;
+    private final LoyaltyImportFileRepository fileRepo;
+    private final Storage storageMode;
     private final Map<LoyaltyImportBatch.ImportType, ImportApplier> appliers = new EnumMap<>(LoyaltyImportBatch.ImportType.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -42,16 +50,27 @@ public class LoyaltyImportService {
                                 PlatformTenantMappingRepository mappingRepo,
                                 LoyaltyProgramService programService,
                                 ImportStorage storage,
-                                List<ImportApplier> applierBeans) {
+                                List<ImportApplier> applierBeans,
+                                LoyaltyImportFileRepository fileRepo,
+                                @Value("${loyalty.import.storage:S3}") Storage storageMode) {
         this.batchRepo = batchRepo;
         this.rowRepo = rowRepo;
         this.mappingRepo = mappingRepo;
         this.programService = programService;
         this.storage = storage;
         applierBeans.forEach(a -> appliers.put(a.type(), a));
+        this.fileRepo = fileRepo;
+        this.storageMode = storageMode;
     }
 
-    public record Upload(LoyaltyImportBatch batch, String uploadUrl, String method, long expiresInSeconds) {
+    /** Where the uploaded CSV waits for the worker: S3 (default; presigned PUT or server-side put) or the database. */
+    public enum Storage { S3, DB }
+
+    /**
+     * How the client gets the file in: {@code uploadUrl} is a presigned S3 PUT (null when the file must go through
+     * the API), {@code uploadPath} is the API endpoint that accepts a multipart upload (always available).
+     */
+    public record Upload(LoyaltyImportBatch batch, String uploadUrl, String method, long expiresInSeconds, String uploadPath) {
     }
 
     public record FieldInfo(String field, List<String> aliases) {
@@ -105,9 +124,61 @@ public class LoyaltyImportService {
                 .createdBy(userId)
                 .updatedAt(OffsetDateTime.now())
                 .build());
+        String uploadPath = "/api/loyalty/imports/" + batch.getId() + "/file";
+        if (storageMode == Storage.DB) {
+            batch.setS3Key("db://" + tenantId + "/" + batch.getId());
+            batchRepo.save(batch);
+            return new Upload(batch, null, "POST", 0, uploadPath);
+        }
         batch.setS3Key(storage.keyFor(tenantId, batch.getId()));
         batchRepo.save(batch);
-        return new Upload(batch, storage.presignPut(batch.getS3Key()), "PUT", ImportStorage.UPLOAD_URL_TTL.toSeconds());
+        return new Upload(batch, storage.presignPut(batch.getS3Key()), "PUT", ImportStorage.UPLOAD_URL_TTL.toSeconds(), uploadPath);
+    }
+
+    /** Multipart upload through the API: to S3 server-side, or into the database when that is the configured storage. */
+    @Transactional
+    public LoyaltyImportBatch uploadFile(Long tenantId, Long batchId, byte[] content, String contentType) {
+        LoyaltyImportBatch batch = require(tenantId, batchId);
+        if (batch.getStatus() != LoyaltyImportBatch.Status.UPLOADED && batch.getStatus() != LoyaltyImportBatch.Status.FAILED) {
+            throw new IllegalStateException("Import is " + batch.getStatus() + "; the file can only be uploaded before it starts");
+        }
+        if (content == null || content.length == 0) {
+            throw new IllegalArgumentException("File is empty");
+        }
+        if (storageMode == Storage.DB) {
+            fileRepo.save(LoyaltyImportFile.builder().batchId(batchId).content(content).uploadedAt(OffsetDateTime.now()).build());
+        } else {
+            storage.put(batch.getS3Key(), content, contentType);
+        }
+        batch.setFileSize((long) content.length);
+        batch.setUpdatedAt(OffsetDateTime.now());
+        return batchRepo.save(batch);
+    }
+
+    /** Size of the uploaded file, empty when nothing has been uploaded yet. */
+    public java.util.Optional<Long> fileSize(LoyaltyImportBatch batch) {
+        if (storageMode == Storage.DB) {
+            return fileRepo.contentLength(batch.getId()).map(Integer::longValue);
+        }
+        return storage.size(batch.getS3Key());
+    }
+
+    /** The uploaded file as a stream, wherever it is kept. */
+    public InputStream open(LoyaltyImportBatch batch) throws IOException {
+        if (storageMode == Storage.DB) {
+            byte[] content = fileRepo.findById(batch.getId()).map(LoyaltyImportFile::getContent)
+                    .orElseThrow(() -> new IllegalStateException("File not uploaded yet"));
+            return new ByteArrayInputStream(content);
+        }
+        return storage.open(batch.getS3Key());
+    }
+
+    /** Drop the database copy of the file once the batch is finished; S3 objects follow the bucket lifecycle. */
+    @Transactional
+    public void discardFile(Long batchId) {
+        if (fileRepo.existsById(batchId)) {
+            fileRepo.deleteById(batchId);
+        }
     }
 
     /**
@@ -122,7 +193,7 @@ public class LoyaltyImportService {
                 && batch.getStatus() != LoyaltyImportBatch.Status.FAILED) {
             throw new IllegalStateException("Import is " + batch.getStatus() + "; it can only be (re)started after upload, validation or failure");
         }
-        Long size = storage.size(batch.getS3Key())
+        Long size = fileSize(batch)
                 .orElseThrow(() -> new IllegalStateException("File not uploaded yet"));
         batch.setFileSize(size);
         if (columnMapping != null && columnMapping.isObject()) {
@@ -166,6 +237,7 @@ public class LoyaltyImportService {
         batch.setLeaseOwner(null);
         batch.setLeaseUntil(null);
         batch.setUpdatedAt(OffsetDateTime.now());
+        discardFile(batchId);
         return batchRepo.save(batch);
     }
 

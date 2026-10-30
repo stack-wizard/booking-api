@@ -44,7 +44,6 @@ public class LoyaltyImportWorker {
     private final LoyaltyImportBatchRepository batchRepo;
     private final LoyaltyImportRowRepository rowRepo;
     private final LoyaltyImportService importService;
-    private final ImportStorage storage;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate tx;
     private final boolean enabled;
@@ -54,14 +53,12 @@ public class LoyaltyImportWorker {
     public LoyaltyImportWorker(LoyaltyImportBatchRepository batchRepo,
                                LoyaltyImportRowRepository rowRepo,
                                LoyaltyImportService importService,
-                               ImportStorage storage,
                                JdbcTemplate jdbc,
                                TransactionTemplate tx,
                                @Value("${loyalty.import.enabled:true}") boolean enabled) {
         this.batchRepo = batchRepo;
         this.rowRepo = rowRepo;
         this.importService = importService;
-        this.storage = storage;
         this.jdbc = jdbc;
         this.tx = tx;
         this.enabled = enabled;
@@ -118,7 +115,7 @@ public class LoyaltyImportWorker {
                 ? decodeDelimiter(options.get("delimiter").asText()) : null;
         int rowNo = 0;
         Map<String, String> mapping;
-        try (InputStream in = storage.open(batch.getS3Key()); CsvStreamReader csv = new CsvStreamReader(in, delimiter)) {
+        try (InputStream in = importService.open(batch); CsvStreamReader csv = new CsvStreamReader(in, delimiter)) {
             List<String> header = csv.next();
             if (header == null) {
                 throw new IllegalStateException("File is empty");
@@ -254,6 +251,7 @@ public class LoyaltyImportWorker {
             b.setLeaseOwner(null);
             b.setLeaseUntil(null);
         });
+        importService.discardFile(batch.getId());
     }
 
     // --- helpers --------------------------------------------------------------------------------------------
